@@ -27,6 +27,9 @@ void init() {
   if (s_prefs.exag < 1 || s_prefs.exag > 5) s_prefs.exag = 3;
   s_prefs.yaw_deg = p.getUShort("yaw", 20) % 360;
   s_prefs.brightness = p.getUChar("bright", config::kDisplayBrightness);
+  s_prefs.pitch_deg = p.getUChar("pitch", 22);
+  if (s_prefs.pitch_deg < 10 || s_prefs.pitch_deg > 62) s_prefs.pitch_deg = 22;
+  s_prefs.high_contrast = p.getBool("hicon", true);
   if (s_prefs.brightness < 20) s_prefs.brightness = 20;
   p.end();
 }
@@ -46,6 +49,8 @@ void save(const Prefs& np) {
   p.putUChar("exag", np.exag);
   p.putUShort("yaw", np.yaw_deg % 360);
   p.putUChar("bright", np.brightness);
+  p.putUChar("pitch", np.pitch_deg);
+  p.putBool("hicon", np.high_contrast);
   p.end();
 }
 

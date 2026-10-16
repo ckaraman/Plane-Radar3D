@@ -82,6 +82,7 @@ Harita katmanı (sahil ve ana yollar) da gönderilebilir. Yalnız sayfa haritay�
 | Hareket | Sonuç |
 |---|---|
 | Sol alttaki **‹ ›** düğmeleri | Kamerayı 30° döndürür (yumuşak geçişle). Açı kaydedilir. |
+| **˄ ˅** düğmeleri | Kamerayı eğer: yukarı daha tepeden, aşağı daha yatay bakış. Kaydedilir. |
 | Bir uçağa dokunma | Seçer. Sağ alttaki kartta bilgileri görünür. |
 | Boş bir yere dokunma | Seçimi kaldırır. Kart en yakın uçağı göstermeye döner. |
 | Üst şeride dokunma | Menzili değiştirir: 15 → 25 → 35 → 50 km |
@@ -104,6 +105,7 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 
 - **Radar 3D:** Perspektif zemin ızgarası, menzil halkaları, harita (deniz, kıyı çizgisi, ana yollar) ve uçaklar. Uçakların altında zemine inen çizgi ve gölge, arkalarında son bir dakikalık iz var. Renkler: turuncu 10K ft altı, krem 10–25K ft, camgöbeği 25K ft üstü. İrtifa diğer radardaki gibi `1.2K ft` biçiminde.
 - **Uçak kartı:** Seçilen (ya da en yakın) uçağın nereden nereye gittiği (adsbdb.com, çağrı koduna göre; bazı uçuşlarda bulunamayabilir), irtifa, hız, mesafe, rota ve tırmanma/alçalma.
+- **3B arazi:** Haritayla birlikte arazi yükseklikleri (Open-Meteo) indirilir; zemin ızgarası tepelere göre kabarır, yollar ve kıyılar araziye oturur, yüksek yerler daha parlak çizilir.
 - **Harita:** Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
 - **Saat:** Menzilde 15 sn boyunca uçak yoksa açılır. Altında iç ortam (SHT30) ve dış ortam sıcaklığı gösterilir.
 - **Hava durumu:** 2 dakikada bir 15 sn görünür (Open-Meteo).

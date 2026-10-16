@@ -18,6 +18,7 @@
 #include "services/radar_location.h"
 #include "services/usb_feed.h"
 #include "services/serial_ota.h"
+#include "services/terrain.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_range.h"
 
@@ -69,7 +70,7 @@ void sendOk(bool rebooting, const char* ip = nullptr) {
 void sendHello() {
   JsonDocument doc;
   doc["fw"] = config::kFirmwareVersion;
-  doc["board"] = "esp32c3";
+  doc["board"] = "esp32-3d";
 
   uint8_t mac[6] = {};
   WiFi.macAddress(mac);
@@ -99,6 +100,8 @@ void sendHello() {
   doc["weather"] = services::weather::enabled();
   doc["map"] = static_cast<uint32_t>(services::map::size());
   doc["mapv"] = services::map::kBlobVersion;
+  doc["elevv"] = services::terrain::kProtocolVersion;
+  doc["elev"] = services::terrain::available();
   sendReply("HELLO", doc);
 }
 
@@ -426,6 +429,14 @@ void handleLine(char* line) {
     handleMapClear();
   } else if (strcmp(command, "RESET") == 0) {
     handleReset();
+  } else if (strcmp(command, "ELEVROW") == 0) {
+    services::terrain::handleRow(args);
+  } else if (strcmp(command, "ELEVBEGIN") == 0) {
+    services::terrain::handleBegin(args);
+  } else if (strcmp(command, "ELEVEND") == 0) {
+    services::terrain::handleEnd();
+  } else if (strcmp(command, "ELEVCLEAR") == 0) {
+    services::terrain::handleClear();
   } else if (strcmp(command, "OTA") == 0) {
     services::serial_ota::chunk(args);
   } else if (strcmp(command, "OTABEGIN") == 0) {

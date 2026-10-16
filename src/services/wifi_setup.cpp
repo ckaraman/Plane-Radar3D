@@ -17,6 +17,7 @@
 #include "services/serial_setup.h"
 #include "services/usb_feed.h"
 #include "services/serial_ota.h"
+#include "services/terrain.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
 
@@ -118,6 +119,7 @@ void resetWifiCredentials() {
   services::clock::clear();
   services::weather::clear();
   services::map::clear();
+  services::terrain::clear();
   ui::radar::unitsReset();
   Serial.println("WiFi credentials, location, and units cleared");
 }

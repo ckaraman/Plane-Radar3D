@@ -20,7 +20,7 @@ namespace ui {
 namespace {
 
 constexpr int kCols = 2;
-constexpr int kRows = 4;
+constexpr int kRows = 5;
 constexpr int kTitleH = 44;
 constexpr int kPad = 8;
 constexpr int kBtnW = (config::kDisplayWidth - kPad * 3) / 2;
@@ -37,6 +37,7 @@ enum Item {
   kExag,
   kRange,
   kBrightness,
+  kContrast,
   kItemCount
 };
 
@@ -76,6 +77,10 @@ void itemText(int item, char* title, char* value, size_t n) {
                                   ui::radar::useMiles());
       break;
     }
+    case kContrast:
+      snprintf(title, n, "Renkler");
+      snprintf(value, n, p.high_contrast ? "Yuksek kontrast" : "Normal");
+      break;
     case kBrightness:
       snprintf(title, n, "Parlaklik");
       snprintf(value, n, "%%%d", static_cast<int>(lroundf(p.brightness * 100.0f / 255.0f)));
@@ -98,13 +103,15 @@ void drawButton(int item, bool pressed) {
   tft.drawRoundRect(x, y, kBtnW, kBtnH, 8, c(35, 72, 92));
   char title[32], value[24];
   itemText(item, title, value, sizeof(title));
+  // One row per button: name on the left, current value on the right.
   displayFontSetBitmap(tft, &fonts::FreeSans9pt7b);
-  tft.setTextDatum(textdatum_t::top_left);
-  tft.setTextColor(c(125, 139, 150), bg);
-  tft.drawString(title, x + 12, y + 8);
-  displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
-  tft.setTextColor(c(91, 200, 245), bg);
-  tft.drawString(value, x + 12, y + kBtnH - 30);
+  tft.setTextDatum(textdatum_t::middle_left);
+  tft.setTextColor(c(175, 188, 198), bg);
+  tft.drawString(title, x + 12, y + kBtnH / 2);
+  displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+  tft.setTextDatum(textdatum_t::middle_right);
+  tft.setTextColor(c(110, 215, 255), bg);
+  tft.drawString(value, x + kBtnW - 12, y + kBtnH / 2);
 }
 
 void drawAll() {
@@ -218,6 +225,9 @@ void settingsMenuRun() {
         break;
       case kRange:
         ui::radar::rangeNext();
+        break;
+      case kContrast:
+        p.high_contrast = !p.high_contrast;
         break;
       case kBrightness:
         p.brightness = p.brightness >= 250 ? 60 : static_cast<uint8_t>(std::min(255, p.brightness + 65));

@@ -172,7 +172,7 @@
         <label><input type="checkbox" id="opt-rings" checked> Radar halkalarını ve artı çizgilerini göster (kapatırsanız yalnızca harita, uçaklar ve yön harfleri görünür)</label>
       </div>
 
-      <label for="opt-map">Radarın arkasına harita (deniz, kıyı çizgisi, otoyol ve devlet yolları)</label>
+      <label for="opt-map">Radarın zeminine harita (deniz, kıyı çizgisi, ana yollar) ve 3B arazi yükseklikleri</label>
       <select id="opt-map">
         <option value="17">Geniş: yaklaşık 26 km çevre (25 km menzil için)</option>
         <option value="15" selected>Normal: yaklaşık 23 km çevre (15 km menzil için, önerilen)</option>
@@ -1090,6 +1090,56 @@
     }
   }
 
+  // 3D terrain: an N x N grid of ground heights (Open-Meteo elevation API, 100 points
+  // per request) over the same square as the map, sent row by row (firmware terrain.h).
+  async function syncElevation(lat, lon, msg) {
+    const dev = state.device || {};
+    if (!dev.elevv) return '';
+    const label = parseInt($('#opt-map').value, 10) || 0;
+    const half = mapRadiusFor(label);
+    if (!(half > 0)) {
+      if (dev.elev) { try { await request('PR:ELEVCLEAR', ['OK', 'ERR'], 5000); dev.elev = false; } catch (_) { /* optional */ } }
+      return '';
+    }
+    const N = 25;
+    try {
+      setMsg(msg, 'info', 'Arazi yükseklikleri indiriliyor…');
+      const cosl = Math.cos(lat * Math.PI / 180);
+      const lats = [], lons = [];
+      for (let r = 0; r < N; r++) {
+        for (let c = 0; c < N; c++) {
+          const y = -half + (2 * half * r) / (N - 1), x = -half + (2 * half * c) / (N - 1);
+          lats.push((lat + y / 111).toFixed(5));
+          lons.push((lon + x / (111 * cosl)).toFixed(5));
+        }
+      }
+      const h = [];
+      for (let i = 0; i < lats.length; i += 100) {
+        const url = 'https://api.open-meteo.com/v1/elevation?latitude=' + lats.slice(i, i + 100).join(',') +
+          '&longitude=' + lons.slice(i, i + 100).join(',');
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('sunucu ' + r.status);
+        const j = await r.json();
+        for (const v of j.elevation || []) h.push(Math.round(Number.isFinite(v) ? v : 0));
+        setMsg(msg, 'info', 'Arazi yükseklikleri indiriliyor… %' + Math.round((h.length / lats.length) * 100));
+      }
+      if (h.length !== N * N) throw new Error('eksik veri');
+      const ack = async (cmd) => {
+        const r = await request(cmd, ['ELEVACK', 'ERR'], 5000);
+        if (r.tag === 'ERR') throw new Error(r.data.msg || 'elev');
+        return r;
+      };
+      await ack('PR:ELEVBEGIN ' + JSON.stringify({ n: N, half: Math.round(half * 100) / 100, lat, lon }));
+      for (let r = 0; r < N; r++) await ack('PR:ELEVROW ' + r + ' ' + h.slice(r * N, (r + 1) * N).join(','));
+      const done = await request('PR:ELEVEND', ['OK', 'ERR'], 5000);
+      if (done.tag === 'ERR') throw new Error(done.data.msg || 'elev');
+      dev.elev = true;
+      return ' Arazi yükseklikleri de yüklendi (en yüksek nokta ' + Math.max(...h) + ' m).';
+    } catch (e) {
+      return ' Arazi yükseklikleri eklenemedi (' + (e && e.message ? e.message : e) + ').';
+    }
+  }
+
   async function save(ev) {
     ev.preventDefault();
     const msg = $('#msg-save'), btn = $('#btn-save');
@@ -1116,6 +1166,7 @@
     btn.disabled = true;
     let mapNote = '';
     try { mapNote = await syncMap(lat, lon, msg); } catch (_) { mapNote = ' Harita eklenemedi.'; }
+    try { mapNote += await syncElevation(lat, lon, msg); } catch (_) { /* optional */ }
     setMsg(msg, 'info', payload.ssid ? 'Kaydediliyor ve WiFi’ye bağlanılıyor… (en fazla 20 saniye)' : 'Kaydediliyor…');
     try {
       if (payload.ssid) state.expectingDrop = true;

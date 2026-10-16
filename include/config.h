@@ -9,7 +9,7 @@ namespace config {
 
 /** Shown on the web setup page; the build copies it into the update manifest.
  *  Bump it for every release you publish. Keep this declaration on a single line. */
-constexpr char kFirmwareVersion[] = "3d-0.4.0";
+constexpr char kFirmwareVersion[] = "3d-0.5.0";
 
 // --- USB setup page address shown on the setup screen ---
 // CI writes include/setup_url.h with the GitHub Pages address of the repository
@@ -64,7 +64,7 @@ constexpr uint32_t kDisplaySpiWriteHz = 40000000;
 constexpr uint32_t kDisplaySpiReadHz = 16000000;
 constexpr uint32_t kTouchSpiHz = 2500000;
 /** Default backlight (0-255). */
-constexpr uint8_t kDisplayBrightness = 220;
+constexpr uint8_t kDisplayBrightness = 255;  // full backlight
 
 // --- SHT30 temperature / humidity (I2C) ---
 constexpr int kI2cPinSda = 25;

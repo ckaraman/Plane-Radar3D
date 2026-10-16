@@ -15,6 +15,7 @@
 #include "services/map_store.h"
 #include "services/radar_location.h"
 #include "services/route_service.h"
+#include "services/terrain.h"
 #include "services/sht30.h"
 #include "services/usb_feed.h"
 #include "ui/radar_range.h"
@@ -51,6 +52,12 @@ enum Pal : uint8_t {
 struct Rgb {
   uint8_t r, g, b;
 };
+constexpr Rgb kPaletteHighContrast[16] = {
+    {0, 0, 0},       {6, 12, 20},     {38, 92, 118},   {60, 130, 165},
+    {90, 180, 225},  {110, 215, 255}, {255, 248, 225}, {255, 170, 60},
+    {255, 255, 255}, {175, 188, 198}, {12, 26, 38},    {60, 110, 135},
+    {80, 240, 150},  {90, 175, 235},  {215, 140, 55},  {18, 58, 92},
+};
 constexpr Rgb kPalette[16] = {
     {5, 8, 13},      {8, 16, 25},     {18, 48, 63},    {31, 81, 104},
     {42, 112, 144},  {91, 200, 245},  {237, 230, 211}, {255, 159, 67},
@@ -59,7 +66,7 @@ constexpr Rgb kPalette[16] = {
 };
 
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
-constexpr float kPitchDeg = 22.0f;
+constexpr float kTerrainBoost = 3.0f;  // hills drawn taller than aircraft altitudes scale
 constexpr float kFocal = 318.0f;
 constexpr float kCenterX = 240.0f;
 constexpr float kCenterY = 178.0f;
@@ -71,6 +78,10 @@ constexpr int kBtnSize = 44;
 constexpr int kBtnY = kH - kBtnSize - 8;
 constexpr int kBtnLeftX = 8;
 constexpr int kBtnRightX = kBtnLeftX + kBtnSize + 8;
+constexpr int kBtnGap = kBtnSize + 8;
+constexpr int kBtnCount = 4;  // rotate left, rotate right, tilt up, tilt down
+constexpr int kHintX = kBtnLeftX + kBtnCount * kBtnGap;
+constexpr int kPitchStepDeg = 8;
 constexpr int kCardW = 200;
 constexpr int kCardH = 118;
 constexpr int kCardX = kW - kCardW - 8;
@@ -86,8 +97,10 @@ float s_yaw_target = 20.0f;
 char s_selected[9] = "";  // callsign of the tapped aircraft ("" = nearest)
 
 struct Cam {
-  float cyaw, syaw, cp, sp, D, H, R, zscale;
+  float cyaw, syaw, cp, sp, D, H, R, zscale, tscale, pitch_deg;
 };
+bool s_palette_hc = false;
+bool s_palette_set = false;
 
 struct Hit {
   int x, y;
@@ -114,7 +127,8 @@ LabelPos s_label_pos[services::adsb::kMaxAircraft];
 Cam makeCam() {
   Cam c;
   const float yaw = s_yaw_cur * kDegToRad;
-  const float pitch = kPitchDeg * kDegToRad;
+  c.pitch_deg = services::display_prefs::get().pitch_deg;
+  const float pitch = c.pitch_deg * kDegToRad;
   c.cyaw = cosf(yaw);
   c.syaw = sinf(yaw);
   c.cp = cosf(pitch);
@@ -125,6 +139,8 @@ Cam makeCam() {
   // Altitude is exaggerated so it reads at a 50 km range; scale it down with
   // smaller ranges so the view keeps its proportions.
   c.zscale = 0.0003048f * static_cast<float>(services::display_prefs::get().exag) * (c.R / 50.0f);
+  // Terrain heights (metres) on the same vertical scale, boosted so hills read.
+  c.tscale = c.zscale / 0.3048f * kTerrainBoost;
   return c;
 }
 
@@ -153,6 +169,12 @@ bool project(const Cam& c, float x, float y, float z, float* sx, float* sy,
 }
 
 int ri(float v) { return static_cast<int>(lroundf(v)); }
+
+/** Ground height in drawing units (km, scaled) at a world point; 0 without terrain data. */
+float groundZ(const Cam& c, float x, float y) {
+  if (!services::terrain::available()) return 0.0f;
+  return services::terrain::heightM(x, y) * c.tscale;
+}
 
 // ---------------------------------------------------------------- helpers
 
@@ -269,7 +291,7 @@ bool overlapsUi(int x, int y, int w, int h) {
   const Box fixed[] = {
       {0, 0, kW, kTopBarH + 2},
       {0, kTopBarH, 92, 40},                                   // legend
-      {0, kBtnY - 2, kBtnRightX + kBtnSize + 140, kH - kBtnY + 2},  // buttons + hint
+      {0, kBtnY - 2, kHintX, kH - kBtnY + 2},                   // buttons
       {kCardX - 2, kCardY - 2, kCardW + 4, kCardH + 4},        // card
   };
   for (const Box& b : fixed) {
@@ -294,7 +316,7 @@ bool claimLabel(const Box& b) {
 // ---------------------------------------------------------------- layers
 
 void drawGround(const Cam& c) {
-  const float horizon = kCenterY - kFocal * tanf(kPitchDeg * kDegToRad);
+  const float horizon = kCenterY - kFocal * tanf(c.pitch_deg * kDegToRad);
   const int hy = std::max(kTopBarH, ri(horizon));
   s_spr.fillScreen(kBg);
   s_spr.fillRect(0, hy, kW, kH - hy, kGround);
@@ -302,21 +324,56 @@ void drawGround(const Cam& c) {
 }
 
 void drawGrid(const Cam& c) {
-  // Grid clipped to the outer ring.
-  const float step = c.R / 5.0f;
-  for (int i = -4; i <= 4; ++i) {
-    const float k = step * static_cast<float>(i);
-    const float h = sqrtf(c.R * c.R - k * k);
-    float ax, ay, bx, by;
-    if (project(c, k, -h, 0, &ax, &ay) && project(c, k, h, 0, &bx, &by)) {
-      s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kGrid);
+  if (!services::terrain::available()) {
+    // Flat ground: straight grid lines clipped to the outer ring.
+    const float step = c.R / 5.0f;
+    for (int i = -4; i <= 4; ++i) {
+      const float k = step * static_cast<float>(i);
+      const float h = sqrtf(c.R * c.R - k * k);
+      float ax, ay, bx, by;
+      if (project(c, k, -h, 0, &ax, &ay) && project(c, k, h, 0, &bx, &by)) {
+        s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kGrid);
+      }
+      if (project(c, -h, k, 0, &ax, &ay) && project(c, h, k, 0, &bx, &by)) {
+        s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kGrid);
+      }
     }
-    if (project(c, -h, k, 0, &ax, &ay) && project(c, h, k, 0, &bx, &by)) {
-      s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kGrid);
+    return;
+  }
+  // Terrain mesh: denser grid lines following the ground height; segments on
+  // higher ground are drawn brighter so ridges stand out.
+  constexpr int kLines = 8;   // each side of the centre
+  constexpr int kSteps = 24;  // samples along a line
+  const float step = c.R / static_cast<float>(kLines);
+  for (int dir = 0; dir < 2; ++dir) {
+    for (int i = -kLines + 1; i <= kLines - 1; ++i) {
+      const float k = step * static_cast<float>(i);
+      const float h = sqrtf(c.R * c.R - k * k);
+      float px = 0, py = 0, ph = 0;
+      bool have = false;
+      for (int sIdx = 0; sIdx <= kSteps; ++sIdx) {
+        const float t = -h + 2.0f * h * static_cast<float>(sIdx) / kSteps;
+        const float x = dir == 0 ? k : t;
+        const float y = dir == 0 ? t : k;
+        const float hm = services::terrain::heightM(x, y);
+        float sx, sy;
+        if (!project(c, x, y, hm * c.tscale, &sx, &sy)) {
+          have = false;
+          continue;
+        }
+        if (have) {
+          const float avg = 0.5f * (hm + ph);
+          const uint8_t col = avg > 250.0f ? kRing : (avg > 80.0f ? kRingDim : kGrid);
+          s_spr.drawLine(ri(px), ri(py), ri(sx), ri(sy), col);
+        }
+        px = sx;
+        py = sy;
+        ph = hm;
+        have = true;
+      }
     }
   }
 }
-
 
 // ---------------------------------------------------------------- sea fill
 //
@@ -337,9 +394,9 @@ int16_t s_disc_l[kH];
 int16_t s_disc_r[kH];
 struct SeaKey {
   uint32_t gen;
-  float yaw, R;
+  float yaw, R, pitch;
   double lat, lon;
-} s_sea_key = {0xFFFFFFFFu, -1, -1, 0, 0};
+} s_sea_key = {0xFFFFFFFFu, -1, -1, -1, 0, 0};
 
 void buildDiscSpans(const Cam& c) {
   constexpr int kSeg = 144;
@@ -439,9 +496,10 @@ void buildSea(const Cam& c) {
 }
 
 void drawSea(const Cam& c) {
-  const SeaKey key{services::map::generation(), s_yaw_cur, c.R, services::location::lat(),
-                   services::location::lon()};
+  const SeaKey key{services::map::generation(), s_yaw_cur, c.R, c.pitch_deg,
+                   services::location::lat(), services::location::lon()};
   if (key.gen != s_sea_key.gen || key.yaw != s_sea_key.yaw || key.R != s_sea_key.R ||
+      key.pitch != s_sea_key.pitch ||
       key.lat != s_sea_key.lat || key.lon != s_sea_key.lon) {
     s_sea_key = key;
     buildDiscSpans(c);
@@ -523,7 +581,7 @@ void drawMap(const Cam& c) {
       const float x = ox + xi * 0.01f;
       const float y = oy + yi * 0.01f;
       float sx, sy;
-      if (x * x + y * y > r2 || !project(c, x, y, 0, &sx, &sy)) {
+      if (x * x + y * y > r2 || !project(c, x, y, groundZ(c, x, y), &sx, &sy)) {
         have_prev = false;
         continue;
       }
@@ -543,7 +601,8 @@ void ringPath(const Cam& c, float r, uint8_t color, bool dashed) {
   for (int i = 0; i <= kSeg; ++i) {
     const float t = static_cast<float>(i) / kSeg * 6.2831853f;
     float sx, sy;
-    if (!project(c, r * cosf(t), r * sinf(t), 0, &sx, &sy)) continue;
+    const float rx = r * cosf(t), ry = r * sinf(t);
+    if (!project(c, rx, ry, groundZ(c, rx, ry), &sx, &sy)) continue;
     if (i > 0 && (!dashed || (i % 2) == 0)) {
       s_spr.drawLine(ri(px), ri(py), ri(sx), ri(sy), color);
     }
@@ -617,7 +676,7 @@ void drawRings(const Cam& c) {
   }
 
   float hx, hy;
-  if (project(c, 0, 0, 0, &hx, &hy)) {
+  if (project(c, 0, 0, groundZ(c, 0, 0), &hx, &hy)) {
     s_spr.drawCircle(ri(hx), ri(hy), 4, kCyan);
     s_spr.fillCircle(ri(hx), ri(hy), 1, kCyan);
   }
@@ -681,7 +740,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     const uint8_t col = altitudeColor(a.alt_ft);
     float sx, sy, gx, gy, d;
     project(c, it.x_km, it.y_km, it.z, &sx, &sy, &d);
-    project(c, it.x_km, it.y_km, 0, &gx, &gy);
+    project(c, it.x_km, it.y_km, groundZ(c, it.x_km, it.y_km), &gx, &gy);
 
     // Trail: where it was over the last minute (straight track).
     const float tr = a.track_deg * kDegToRad;
@@ -820,29 +879,35 @@ void drawLegend() {
   }
 }
 
-void drawButton(int x, bool left) {
+enum class Arrow { Left, Right, Up, Down };
+
+void drawButton(int x, Arrow dir) {
   s_spr.fillRoundRect(x, kBtnY, kBtnSize, kBtnSize, 8, kPanel);
   s_spr.drawRoundRect(x, kBtnY, kBtnSize, kBtnSize, 8, kPanelEdge);
   const int cx = x + kBtnSize / 2, cy = kBtnY + kBtnSize / 2;
-  const int dx = left ? 5 : -5;
-  thickLine(cx + dx, cy - 9, cx - dx, cy, kCyan);
-  thickLine(cx - dx, cy, cx + dx, cy + 9, kCyan);
+  switch (dir) {
+    case Arrow::Left:
+      thickLine(cx + 5, cy - 9, cx - 5, cy, kCyan);
+      thickLine(cx - 5, cy, cx + 5, cy + 9, kCyan);
+      break;
+    case Arrow::Right:
+      thickLine(cx - 5, cy - 9, cx + 5, cy, kCyan);
+      thickLine(cx + 5, cy, cx - 5, cy + 9, kCyan);
+      break;
+    case Arrow::Up:
+      thickLine(cx - 9, cy + 5, cx, cy - 5, kCyan);
+      thickLine(cx, cy - 5, cx + 9, cy + 5, kCyan);
+      break;
+    case Arrow::Down:
+      thickLine(cx - 9, cy - 5, cx, cy + 5, kCyan);
+      thickLine(cx, cy + 5, cx + 9, cy - 5, kCyan);
+      break;
+  }
 }
 
 void drawControls() {
-  drawButton(kBtnLeftX, true);
-  drawButton(kBtnRightX, false);
-  setFont(&fonts::Font2);
-  s_spr.setTextDatum(textdatum_t::top_left);
-  s_spr.setTextColor(kTextDim);
-  char buf[24];
-  int yaw = static_cast<int>(lroundf(s_yaw_target)) % 360;
-  if (yaw < 0) yaw += 360;
-  snprintf(buf, sizeof(buf), "Kamera %03d", yaw);
-  const int tx = kBtnRightX + kBtnSize + 8;
-  s_spr.drawString(buf, tx, kBtnY + 4);
-  s_spr.drawCircle(tx + s_spr.textWidth(buf) + 4, kBtnY + 7, 2, kTextDim);
-  s_spr.drawString("Ucaga dokun: sec", tx, kBtnY + 24);
+  const Arrow arrows[kBtnCount] = {Arrow::Left, Arrow::Right, Arrow::Up, Arrow::Down};
+  for (int i = 0; i < kBtnCount; ++i) drawButton(kBtnLeftX + i * kBtnGap, arrows[i]);
 }
 
 void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
@@ -943,6 +1008,15 @@ void drawEmptyNote(unsigned long fetched_ms) {
                    kTopBarH + 26);
 }
 
+void applyPalette() {
+  const bool hc = services::display_prefs::get().high_contrast;
+  if (s_palette_set && hc == s_palette_hc) return;
+  const Rgb* pal = hc ? kPaletteHighContrast : kPalette;
+  for (int i = 0; i < 16; ++i) s_spr.setPaletteColor(i, pal[i].r, pal[i].g, pal[i].b);
+  s_palette_hc = hc;
+  s_palette_set = true;
+}
+
 void animateYaw() {
   float diff = fmodf(s_yaw_target - s_yaw_cur + 540.0f, 360.0f) - 180.0f;
   if (fabsf(diff) < 0.5f) {
@@ -962,9 +1036,7 @@ bool init() {
     return false;
   }
   s_spr.createPalette();
-  for (int i = 0; i < 16; ++i) {
-    s_spr.setPaletteColor(i, kPalette[i].r, kPalette[i].g, kPalette[i].b);
-  }
+  applyPalette();
   s_yaw_cur = s_yaw_target = static_cast<float>(services::display_prefs::get().yaw_deg);
   s_ready = true;
   return true;
@@ -972,6 +1044,7 @@ bool init() {
 
 void drawFrame() {
   if (!s_ready) return;
+  applyPalette();
   animateYaw();
   const Cam c = makeCam();
 
@@ -1020,17 +1093,22 @@ bool hostHitPos(const char* callsign, int* x, int* y) {
 #endif
 
 bool handleTap(int x, int y) {
-  if (y >= kBtnY && y < kBtnY + kBtnSize) {
-    const bool left = x >= kBtnLeftX && x < kBtnLeftX + kBtnSize;
-    const bool right = x >= kBtnRightX && x < kBtnRightX + kBtnSize;
-    if (left || right) {
-      s_yaw_target += left ? -kYawStepDeg : kYawStepDeg;
+  if (y >= kBtnY - 4 && y < kBtnY + kBtnSize + 4 && x >= kBtnLeftX - 4 && x < kHintX) {
+    const int idx = (x - kBtnLeftX + 4) / kBtnGap;  // generous: gaps count for the nearer button
+    auto p = services::display_prefs::get();
+    if (idx == 0 || idx == 1) {
+      s_yaw_target += idx == 0 ? -kYawStepDeg : kYawStepDeg;
       s_yaw_target = fmodf(s_yaw_target + 360.0f, 360.0f);
-      auto p = services::display_prefs::get();
       p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_target)) % 360;
-      services::display_prefs::save(p);
-      return true;
+    } else if (idx == 2) {
+      p.pitch_deg = static_cast<uint8_t>(std::min(62, p.pitch_deg + kPitchStepDeg));
+    } else if (idx == 3) {
+      p.pitch_deg = static_cast<uint8_t>(std::max(10, p.pitch_deg - kPitchStepDeg));
+    } else {
+      return false;
     }
+    services::display_prefs::save(p);
+    return true;
   }
   if (y < kTopBarH + 6) {
     ui::radar::rangeNext();

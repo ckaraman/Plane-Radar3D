@@ -19,6 +19,7 @@
 #include "services/route_service.h"
 #include "services/serial_ota.h"
 #include "services/sht30.h"
+#include "services/terrain.h"
 #include "services/usb_feed.h"
 #include "services/weather_service.h"
 #include "services/wifi_setup.h"
@@ -241,6 +242,7 @@ void setup() {
   }
   services::location::init();
   services::map::init();
+  services::terrain::init();
   services::clock::init();
   services::weather::init();
   ui::radar::rangeInit();
