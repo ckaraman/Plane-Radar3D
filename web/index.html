@@ -1101,8 +1101,75 @@
     }
   }
 
-  // 3D terrain: an N x N grid of ground heights (Open-Meteo elevation API, 100 points
-  // per request) over the same square as the map, sent row by row (firmware terrain.h).
+  // Ground heights from the AWS Open Data terrain tiles (Terrarium PNG, no rate limit):
+  // height = R*256 + G + B/256 - 32768 metres. Zoom 10 is ~115 m per pixel.
+  async function elevationFromTiles(pts, onProgress) {
+    const Z = 10, n = 2 ** Z;
+    const px = (lat, lon) => {
+      const s = Math.sin(lat * Math.PI / 180);
+      return [((lon + 180) / 360) * n * 256, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n * 256];
+    };
+    const need = new Map();
+    for (const [la, lo] of pts) {
+      const [x, y] = px(la, lo);
+      const key = Math.floor(x / 256) + '/' + Math.floor(y / 256);
+      need.set(key, null);
+    }
+    if (need.size > 16) throw new Error('alan çok geniş');
+    let done = 0;
+    await Promise.all([...need.keys()].map(async (key) => {
+      const [tx, ty] = key.split('/');
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/' + Z + '/' + tx + '/' + ty + '.png';
+      await img.decode();
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 256;
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, 0, 0);
+      need.set(key, g.getImageData(0, 0, 256, 256).data);
+      onProgress('Arazi yükseklikleri indiriliyor… %' + Math.round((++done / need.size) * 100));
+    }));
+    return pts.map(([la, lo]) => {
+      const [x, y] = px(la, lo);
+      const tx = Math.floor(x / 256), ty = Math.floor(y / 256);
+      const d = need.get(tx + '/' + ty);
+      const ix = Math.min(255, Math.floor(x - tx * 256)), iy = Math.min(255, Math.floor(y - ty * 256));
+      const i = (iy * 256 + ix) * 4;
+      return Math.round(d[i] * 256 + d[i + 1] + d[i + 2] / 256 - 32768);
+    });
+  }
+
+  // Fallback: Open-Meteo elevation API. Its free tier counts every coordinate, so ask
+  // slowly in small batches and wait when it answers 429 (too many requests).
+  async function elevationFromOpenMeteo(pts, onProgress) {
+    const out = [];
+    const BATCH = 50;
+    for (let i = 0; i < pts.length; i += BATCH) {
+      const part = pts.slice(i, i + BATCH);
+      const url = 'https://api.open-meteo.com/v1/elevation?latitude=' + part.map((p) => p[0].toFixed(5)).join(',') +
+        '&longitude=' + part.map((p) => p[1].toFixed(5)).join(',');
+      let j = null;
+      for (let attempt = 0; attempt < 6 && !j; attempt++) {
+        const r = await fetch(url);
+        if (r.status === 429) {
+          onProgress('Arazi sunucusu yoğun, bekleniyor… (%' + Math.round((out.length / pts.length) * 100) + ')');
+          await sleep(10000 * (attempt + 1));
+          continue;
+        }
+        if (!r.ok) throw new Error('sunucu ' + r.status);
+        j = await r.json();
+      }
+      if (!j) throw new Error('sunucu çok yoğun (429), birkaç dakika sonra tekrar deneyin');
+      for (const v of j.elevation || []) out.push(Math.round(Number.isFinite(v) ? v : 0));
+      onProgress('Arazi yükseklikleri indiriliyor… %' + Math.round((out.length / pts.length) * 100));
+      await sleep(1500);
+    }
+    return out;
+  }
+
+  // 3D terrain: an N x N grid of ground heights (terrain tiles, else Open-Meteo) over
+  // the same square as the map, sent row by row (firmware terrain.h).
   async function syncElevation(lat, lon, msg) {
     const dev = state.device || {};
     if (!dev.elevv) return '';
@@ -1116,23 +1183,19 @@
     try {
       setMsg(msg, 'info', 'Arazi yükseklikleri indiriliyor…');
       const cosl = Math.cos(lat * Math.PI / 180);
-      const lats = [], lons = [];
+      const pts = [];
       for (let r = 0; r < N; r++) {
         for (let c = 0; c < N; c++) {
           const y = -half + (2 * half * r) / (N - 1), x = -half + (2 * half * c) / (N - 1);
-          lats.push((lat + y / 111).toFixed(5));
-          lons.push((lon + x / (111 * cosl)).toFixed(5));
+          pts.push([lat + y / 111, lon + x / (111 * cosl)]);
         }
       }
-      const h = [];
-      for (let i = 0; i < lats.length; i += 100) {
-        const url = 'https://api.open-meteo.com/v1/elevation?latitude=' + lats.slice(i, i + 100).join(',') +
-          '&longitude=' + lons.slice(i, i + 100).join(',');
-        const r = await fetch(url);
-        if (!r.ok) throw new Error('sunucu ' + r.status);
-        const j = await r.json();
-        for (const v of j.elevation || []) h.push(Math.round(Number.isFinite(v) ? v : 0));
-        setMsg(msg, 'info', 'Arazi yükseklikleri indiriliyor… %' + Math.round((h.length / lats.length) * 100));
+      let h;
+      try {
+        h = await elevationFromTiles(pts, (t) => setMsg(msg, 'info', t));
+      } catch (tileErr) {
+        note('Arazi resimleri alınamadı (' + (tileErr && tileErr.message) + '), Open-Meteo deneniyor');
+        h = await elevationFromOpenMeteo(pts, (t) => setMsg(msg, 'info', t));
       }
       if (h.length !== N * N) throw new Error('eksik veri');
       const ack = async (cmd) => {
