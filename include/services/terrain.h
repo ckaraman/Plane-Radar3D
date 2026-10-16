@@ -25,6 +25,9 @@ bool available();
 /** Changes whenever the grid is replaced or removed. */
 uint32_t generation();
 
+/** Highest point of the loaded grid in metres (0 without data). */
+float maxHeightM();
+
 /** Height in metres at x km east / y km north of the radar centre (0 outside the grid). */
 float heightM(float x_km, float y_km);
 

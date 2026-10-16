@@ -23,8 +23,8 @@ void init() {
   s_prefs.invert = p.getBool("invert", false);
   s_prefs.bgr = p.getBool("bgr", false);
   s_prefs.labels = p.getBool("labels", true);
-  s_prefs.exag = p.getUChar("exag", 3);
-  if (s_prefs.exag < 1 || s_prefs.exag > 5) s_prefs.exag = 3;
+  s_prefs.exag = p.getUChar("exag", 2);
+  if (s_prefs.exag < 1 || s_prefs.exag > 5) s_prefs.exag = 2;
   s_prefs.yaw_deg = p.getUShort("yaw", 20) % 360;
   s_prefs.brightness = p.getUChar("bright", config::kDisplayBrightness);
   s_prefs.pitch_deg = p.getUChar("pitch", 22);

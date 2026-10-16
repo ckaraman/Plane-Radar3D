@@ -14,7 +14,7 @@ struct Prefs {
   bool invert = false;    // panel color inversion
   bool bgr = false;       // swap red and blue
   bool labels = true;     // callsign / altitude tags next to aircraft
-  uint8_t exag = 3;       // altitude exaggeration (1-5)
+  uint8_t exag = 2;       // altitude exaggeration (1-5)
   uint16_t yaw_deg = 20;  // camera heading around the center (0-359)
   uint8_t brightness = 255;
   uint8_t pitch_deg = 22;    // camera tilt (10 = flat, 62 = from above)

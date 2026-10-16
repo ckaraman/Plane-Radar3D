@@ -66,26 +66,30 @@ constexpr Rgb kPalette[16] = {
 };
 
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
-constexpr float kTerrainBoost = 3.0f;  // hills drawn taller than aircraft altitudes scale
-constexpr float kFocal = 318.0f;
-constexpr float kCenterX = 240.0f;
-constexpr float kCenterY = 178.0f;
+constexpr float kTerrainRelief = 0.15f;  // highest terrain point = 15 % of the radius
+// The disc is scaled to fill this box (any tilt); aircraft rise into the space above it.
+constexpr float kFitLeft = 6.0f;
+constexpr float kFitRight = 474.0f;
+constexpr float kFitBottom = 304.0f;
+constexpr float kFitTop = 84.0f;
 constexpr float kCamDistOverR = 2.1f;  // camera ground distance / outer radius
 
 // --- Layout ---
 constexpr int kTopBarH = 22;
-constexpr int kBtnSize = 44;
-constexpr int kBtnY = kH - kBtnSize - 8;
-constexpr int kBtnLeftX = 8;
-constexpr int kBtnRightX = kBtnLeftX + kBtnSize + 8;
-constexpr int kBtnGap = kBtnSize + 8;
-constexpr int kBtnCount = 4;  // rotate left, rotate right, tilt up, tilt down
-constexpr int kHintX = kBtnLeftX + kBtnCount * kBtnGap;
+// Cross-shaped pad, bottom left: tilt up above, tilt down below, rotate left/right
+// at the sides. Sized for a stylus.
+constexpr int kBtnSize = 32;
+constexpr int kPadStep = kBtnSize + 3;
+constexpr int kPadCX = 6 + kPadStep + kBtnSize / 2;   // centre of the cross
+constexpr int kPadCY = kH - 4 - kPadStep - kBtnSize / 2;
+constexpr int kPadLeft = kPadCX - kBtnSize / 2 - kPadStep;
+constexpr int kPadTop = kPadCY - kBtnSize / 2 - kPadStep;
+constexpr int kPadSize = 3 * kPadStep - 3;
 constexpr int kPitchStepDeg = 8;
-constexpr int kCardW = 200;
-constexpr int kCardH = 118;
-constexpr int kCardX = kW - kCardW - 8;
-constexpr int kCardY = kH - kCardH - 8;
+constexpr int kCardW = 196;
+constexpr int kCardH = 116;
+constexpr int kCardX = kW - kCardW - 4;
+constexpr int kCardY = 22 + 4;  // under the top bar, in the sky area
 constexpr int kTapRadiusPx = 38;
 constexpr float kYawStepDeg = 30.0f;
 
@@ -98,6 +102,7 @@ char s_selected[9] = "";  // callsign of the tapped aircraft ("" = nearest)
 
 struct Cam {
   float cyaw, syaw, cp, sp, D, H, R, zscale, tscale, pitch_deg;
+  float f, cx, cy;  // screen scale and centre, fitted so the disc fills the view
 };
 bool s_palette_hc = false;
 bool s_palette_set = false;
@@ -139,8 +144,26 @@ Cam makeCam() {
   // Altitude is exaggerated so it reads at a 50 km range; scale it down with
   // smaller ranges so the view keeps its proportions.
   c.zscale = 0.0003048f * static_cast<float>(services::display_prefs::get().exag) * (c.R / 50.0f);
-  // Terrain heights (metres) on the same vertical scale, boosted so hills read.
-  c.tscale = c.zscale / 0.3048f * kTerrainBoost;
+  // Terrain: scale so the highest point of the loaded grid rises to ~15 % of the
+  // radius, whatever the range or how flat the area is, so the relief stays visible.
+  const float max_h = std::max(60.0f, services::terrain::maxHeightM());
+  c.tscale = kTerrainRelief * c.R / max_h;
+
+  // Fit: project the outer ring with unit scale, then scale/centre it into the box.
+  float xmin = 1e9f, xmax = -1e9f, ymin = 1e9f, ymax = -1e9f;
+  for (int i = 0; i < 48; ++i) {
+    const float t = static_cast<float>(i) / 48.0f * 6.2831853f;
+    const float xr = c.R * cosf(t), yr = c.R * sinf(t);
+    const float py = yr + c.D, pz = -c.H;
+    const float d = py * c.cp - pz * c.sp;
+    const float v = py * c.sp + pz * c.cp;
+    const float ux = xr / d, uy = -v / d;
+    xmin = std::min(xmin, ux); xmax = std::max(xmax, ux);
+    ymin = std::min(ymin, uy); ymax = std::max(ymax, uy);
+  }
+  c.f = std::min((kFitRight - kFitLeft) / (xmax - xmin), (kFitBottom - kFitTop) / (ymax - ymin));
+  c.cx = 0.5f * (kFitLeft + kFitRight) - c.f * 0.5f * (xmin + xmax);
+  c.cy = kFitBottom - c.f * ymax;
   return c;
 }
 
@@ -154,8 +177,8 @@ bool projectCam(const Cam& c, float xr, float yr, float z, float* sx, float* sy,
     return false;  // behind / too close to the camera
   }
   const float v = py * c.sp + pz * c.cp;
-  *sx = kCenterX + kFocal * xr / d;
-  *sy = kCenterY - kFocal * v / d;
+  *sx = c.cx + c.f * xr / d;
+  *sy = c.cy - c.f * v / d;
   if (depth != nullptr) *depth = d;
   return true;
 }
@@ -290,8 +313,8 @@ bool overlapsUi(int x, int y, int w, int h) {
   const Box me{x, y, w, h};
   const Box fixed[] = {
       {0, 0, kW, kTopBarH + 2},
-      {0, kTopBarH, 92, 40},                                   // legend
-      {0, kBtnY - 2, kHintX, kH - kBtnY + 2},                   // buttons
+      {0, kTopBarH, 112, 58},                                  // legend
+      {kPadLeft - 2, kPadTop - 2, kPadSize + 4, kPadSize + 4},  // control pad
       {kCardX - 2, kCardY - 2, kCardW + 4, kCardH + 4},        // card
   };
   for (const Box& b : fixed) {
@@ -316,7 +339,7 @@ bool claimLabel(const Box& b) {
 // ---------------------------------------------------------------- layers
 
 void drawGround(const Cam& c) {
-  const float horizon = kCenterY - kFocal * tanf(c.pitch_deg * kDegToRad);
+  const float horizon = c.cy - c.f * tanf(c.pitch_deg * kDegToRad);
   const int hy = std::max(kTopBarH, ri(horizon));
   s_spr.fillScreen(kBg);
   s_spr.fillRect(0, hy, kW, kH - hy, kGround);
@@ -342,8 +365,8 @@ void drawGrid(const Cam& c) {
   }
   // Terrain mesh: denser grid lines following the ground height; segments on
   // higher ground are drawn brighter so ridges stand out.
-  constexpr int kLines = 8;   // each side of the centre
-  constexpr int kSteps = 24;  // samples along a line
+  constexpr int kLines = 10;  // each side of the centre
+  constexpr int kSteps = 30;  // samples along a line
   const float step = c.R / static_cast<float>(kLines);
   for (int dir = 0; dir < 2; ++dir) {
     for (int i = -kLines + 1; i <= kLines - 1; ++i) {
@@ -362,8 +385,9 @@ void drawGrid(const Cam& c) {
           continue;
         }
         if (have) {
-          const float avg = 0.5f * (hm + ph);
-          const uint8_t col = avg > 250.0f ? kRing : (avg > 80.0f ? kRingDim : kGrid);
+          // Height bands relative to the highest point: low ground dim, ridges bright.
+          const float rel = 0.5f * (hm + ph) / std::max(60.0f, services::terrain::maxHeightM());
+          const uint8_t col = rel > 0.6f ? kTextDim : (rel > 0.3f ? kRing : (rel > 0.1f ? kRingDim : kGrid));
           s_spr.drawLine(ri(px), ri(py), ri(sx), ri(sy), col);
         }
         px = sx;
@@ -669,7 +693,7 @@ void drawRings(const Cam& c) {
   for (int i = 0; i < 4; ++i) {
     float sx, sy;
     if (project(c, dirs[i][0] * c.R * 1.14f, dirs[i][1] * c.R * 1.14f, 0, &sx, &sy) &&
-        !overlapsUi(ri(sx) - 8, ri(sy) - 8, 16, 16)) {
+        sy < kH - 10 && !overlapsUi(ri(sx) - 8, ri(sy) - 8, 16, 16)) {
       s_spr.setTextColor(kRing);
       s_spr.drawString(names[i], ri(sx), ri(sy));
     }
@@ -865,49 +889,71 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
 }
 
 void drawLegend() {
-  setFont(&fonts::Font0);
+  setFont(&fonts::Font2);
   s_spr.setTextDatum(textdatum_t::middle_left);
   const struct {
     uint8_t col;
     const char* text;
   } rows[3] = {{kCyan, "25K ft +"}, {kCream, "10-25K ft"}, {kOrange, "10K ft alti"}};
   for (int i = 0; i < 3; ++i) {
-    const int y = kTopBarH + 12 + i * 12;
-    s_spr.fillCircle(12, y, 3, rows[i].col);
-    s_spr.setTextColor(kTextDim);
-    s_spr.drawString(rows[i].text, 20, y);
+    const int y = kTopBarH + 13 + i * 17;
+    s_spr.fillCircle(12, y, 5, rows[i].col);
+    s_spr.setTextColor(kText);
+    s_spr.drawString(rows[i].text, 23, y + 1);
   }
 }
 
 enum class Arrow { Left, Right, Up, Down };
 
-void drawButton(int x, Arrow dir) {
-  s_spr.fillRoundRect(x, kBtnY, kBtnSize, kBtnSize, 8, kPanel);
-  s_spr.drawRoundRect(x, kBtnY, kBtnSize, kBtnSize, 8, kPanelEdge);
-  const int cx = x + kBtnSize / 2, cy = kBtnY + kBtnSize / 2;
+struct PadButton {
+  int x, y;
+  Arrow dir;
+};
+PadButton padButton(int i) {
+  switch (i) {
+    case 0: return {kPadCX - kBtnSize / 2 - kPadStep, kPadCY - kBtnSize / 2, Arrow::Left};
+    case 1: return {kPadCX - kBtnSize / 2 + kPadStep, kPadCY - kBtnSize / 2, Arrow::Right};
+    case 2: return {kPadCX - kBtnSize / 2, kPadCY - kBtnSize / 2 - kPadStep, Arrow::Up};
+    default: return {kPadCX - kBtnSize / 2, kPadCY - kBtnSize / 2 + kPadStep, Arrow::Down};
+  }
+}
+
+void drawButton(int x, int y, Arrow dir) {
+  s_spr.fillRoundRect(x, y, kBtnSize, kBtnSize, 6, kPanel);
+  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, 6, kPanelEdge);
+  const int cx = x + kBtnSize / 2, cy = y + kBtnSize / 2;
+  constexpr int a = 6, b = 4;
   switch (dir) {
     case Arrow::Left:
-      thickLine(cx + 5, cy - 9, cx - 5, cy, kCyan);
-      thickLine(cx - 5, cy, cx + 5, cy + 9, kCyan);
+      thickLine(cx + b, cy - a, cx - b, cy, kCyan);
+      thickLine(cx - b, cy, cx + b, cy + a, kCyan);
       break;
     case Arrow::Right:
-      thickLine(cx - 5, cy - 9, cx + 5, cy, kCyan);
-      thickLine(cx + 5, cy, cx - 5, cy + 9, kCyan);
+      thickLine(cx - b, cy - a, cx + b, cy, kCyan);
+      thickLine(cx + b, cy, cx - b, cy + a, kCyan);
       break;
     case Arrow::Up:
-      thickLine(cx - 9, cy + 5, cx, cy - 5, kCyan);
-      thickLine(cx, cy - 5, cx + 9, cy + 5, kCyan);
+      thickLine(cx - a, cy + b, cx, cy - b, kCyan);
+      thickLine(cx, cy - b, cx + a, cy + b, kCyan);
       break;
     case Arrow::Down:
-      thickLine(cx - 9, cy - 5, cx, cy + 5, kCyan);
-      thickLine(cx, cy + 5, cx + 9, cy - 5, kCyan);
+      thickLine(cx - a, cy - b, cx, cy + b, kCyan);
+      thickLine(cx, cy + b, cx + a, cy - b, kCyan);
       break;
   }
 }
 
 void drawControls() {
-  const Arrow arrows[kBtnCount] = {Arrow::Left, Arrow::Right, Arrow::Up, Arrow::Down};
-  for (int i = 0; i < kBtnCount; ++i) drawButton(kBtnLeftX + i * kBtnGap, arrows[i]);
+  for (int i = 0; i < 4; ++i) {
+    const PadButton b = padButton(i);
+    drawButton(b.x, b.y, b.dir);
+  }
+  // Centre of the cross: a small compass needle pointing north for the current view.
+  const float yaw = s_yaw_cur * kDegToRad;
+  const int nx = kPadCX + static_cast<int>(lroundf(-sinf(yaw) * 9.0f));
+  const int ny = kPadCY - static_cast<int>(lroundf(cosf(yaw) * 9.0f));
+  s_spr.drawLine(kPadCX, kPadCY, nx, ny, kOrange);
+  s_spr.fillCircle(kPadCX, kPadCY, 2, kTextDim);
 }
 
 void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
@@ -1093,22 +1139,22 @@ bool hostHitPos(const char* callsign, int* x, int* y) {
 #endif
 
 bool handleTap(int x, int y) {
-  if (y >= kBtnY - 4 && y < kBtnY + kBtnSize + 4 && x >= kBtnLeftX - 4 && x < kHintX) {
-    const int idx = (x - kBtnLeftX + 4) / kBtnGap;  // generous: gaps count for the nearer button
-    auto p = services::display_prefs::get();
-    if (idx == 0 || idx == 1) {
-      s_yaw_target += idx == 0 ? -kYawStepDeg : kYawStepDeg;
-      s_yaw_target = fmodf(s_yaw_target + 360.0f, 360.0f);
-      p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_target)) % 360;
-    } else if (idx == 2) {
-      p.pitch_deg = static_cast<uint8_t>(std::min(62, p.pitch_deg + kPitchStepDeg));
-    } else if (idx == 3) {
-      p.pitch_deg = static_cast<uint8_t>(std::max(10, p.pitch_deg - kPitchStepDeg));
-    } else {
-      return false;
+  for (int i = 0; i < 4; ++i) {
+    const PadButton b = padButton(i);
+    if (x >= b.x - 2 && x < b.x + kBtnSize + 2 && y >= b.y - 2 && y < b.y + kBtnSize + 2) {
+      auto p = services::display_prefs::get();
+      if (i == 0 || i == 1) {
+        s_yaw_target += i == 0 ? -kYawStepDeg : kYawStepDeg;
+        s_yaw_target = fmodf(s_yaw_target + 360.0f, 360.0f);
+        p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_target)) % 360;
+      } else if (i == 2) {
+        p.pitch_deg = static_cast<uint8_t>(std::min(62, p.pitch_deg + kPitchStepDeg));
+      } else {
+        p.pitch_deg = static_cast<uint8_t>(std::max(10, p.pitch_deg - kPitchStepDeg));
+      }
+      services::display_prefs::save(p);
+      return true;
     }
-    services::display_prefs::save(p);
-    return true;
   }
   if (y < kTopBarH + 6) {
     ui::radar::rangeNext();
@@ -1128,7 +1174,7 @@ bool handleTap(int x, int y) {
     memcpy(s_selected, s_hits[best].callsign, sizeof(s_selected));
     return true;
   }
-  const bool on_card = x >= kCardX && y >= kCardY;
+  const bool on_card = x >= kCardX && y >= kCardY && y < kCardY + kCardH;
   if (!on_card && s_selected[0] != '\0') {
     s_selected[0] = '\0';  // tap on empty sky: back to "nearest"
     return true;

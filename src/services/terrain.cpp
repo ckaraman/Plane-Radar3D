@@ -5,6 +5,7 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +34,13 @@ bool s_have = false;
 Header s_hdr{};
 int16_t s_h[kMaxN * kMaxN];
 uint32_t s_gen = 1;
+float s_max_h = 0.0f;
+
+void updateMax() {
+  s_max_h = 0.0f;
+  if (!s_have) return;
+  for (int i = 0; i < s_hdr.n * s_hdr.n; ++i) s_max_h = std::max<float>(s_max_h, s_h[i]);
+}
 
 // Upload staging
 bool s_staging = false;
@@ -79,12 +87,14 @@ void init() {
       s_hdr = h;
       s_have = true;
       ++s_gen;
+      updateMax();
     }
   }
   p.end();
 }
 
 bool available() { return s_have; }
+float maxHeightM() { return s_have ? s_max_h : 0.0f; }
 uint32_t generation() { return s_gen; }
 
 float heightM(float x_km, float y_km) {
@@ -175,6 +185,7 @@ void handleEnd() {
   memcpy(s_h, s_stage, sizeof(int16_t) * n * n);
   s_have = true;
   ++s_gen;
+  updateMax();
   save();
   reply("OK", "{}");
   Serial.printf("terrain: %dx%d grid, %.1f km\n", n, n, s_hdr.half_km);
