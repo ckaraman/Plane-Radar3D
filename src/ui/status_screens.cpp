@@ -1,0 +1,293 @@
+#include "ui/status_screens.h"
+
+#include <lgfx/v1/lgfx_fonts.hpp>
+
+#include <cmath>
+#include <cstdio>
+#include <cstddef>
+#include <cstring>
+
+#include "config.h"
+#include "hardware/display.h"
+#include "hardware/display_font.h"
+
+namespace {
+
+constexpr int kLineGap = 6;
+const int kCenterX = config::kDisplayWidth / 2;
+const int kCenterY = config::kDisplayHeight / 2;
+
+constexpr int kSpinnerDotCount = 10;
+constexpr int kSpinnerRadius = 130;
+constexpr int kSpinnerDotRadius = 2;
+constexpr int kSpinnerEraseRadius = 4;
+constexpr float kSpinnerStepDeg = 6.0f;
+
+struct SpinnerDot {
+  int x = 0;
+  int y = 0;
+  bool drawn = false;
+};
+
+char s_connecting_ssid[33];
+char s_ssid_line[33];
+constexpr int kConnectingTextMaxWidthPx = 380;
+float s_spinner_angle_deg = -90.0f;
+SpinnerDot s_spinner_dots[kSpinnerDotCount];
+bool s_connecting_text_drawn = false;
+
+constexpr auto& kGfxTitle = fonts::FreeSans18pt7b;
+constexpr auto& kGfxBody = fonts::FreeSans12pt7b;
+constexpr auto& kGfxDetail = fonts::Font2;
+constexpr auto& kPortalGfxTitle = fonts::FreeSansBold18pt7b;
+constexpr auto& kPortalGfxBody = fonts::FreeSansBold12pt7b;
+constexpr auto& kPortalGfxEmphasis = fonts::FreeSansBold18pt7b;
+constexpr auto& kConnectingGfxDetail = fonts::FreeSans9pt7b;
+
+struct TextLine {
+  const char* text;
+  float vlw_size;
+  const lgfx::GFXfont* gfx_font;
+};
+
+int lineHeightGfx(const lgfx::GFXfont* font) {
+  displayFontSetBitmap(tft, font);
+  return tft.fontHeight();
+}
+
+/** Largest smooth-font size <= wanted at which the text fits max_w pixels. */
+float fitVlwSize(const char* text, float wanted, int max_w) {
+  float size = wanted;
+  while (size > 0.5f) {
+    displayFontSetSmoothSize(tft, size);
+    if (tft.textWidth(text) <= max_w) {
+      break;
+    }
+    size -= 0.05f;
+  }
+  return size;
+}
+
+int lineHeightVlw(float size) {
+  displayFontSetSmoothSize(tft, size);
+  return tft.fontHeight();
+}
+
+void applyLineStyle(const TextLine& line) {
+  if (displayFontIsSmooth()) {
+    displayFontSetSmoothSize(tft, line.vlw_size);
+  } else {
+    displayFontSetBitmap(tft, line.gfx_font);
+  }
+}
+
+void drawTextBlock(uint16_t bg, uint16_t fg, const TextLine* lines, size_t count) {
+  displayFontEnsureLoaded(tft);
+  tft.fillScreen(bg);
+  tft.setTextColor(fg, bg);
+  tft.setTextDatum(textdatum_t::middle_center);
+
+  int total_h = 0;
+  for (size_t i = 0; i < count; ++i) {
+    if (displayFontIsSmooth()) {
+      total_h += lineHeightVlw(lines[i].vlw_size);
+    } else {
+      total_h += lineHeightGfx(lines[i].gfx_font);
+    }
+    if (i + 1 < count) {
+      total_h += kLineGap;
+    }
+  }
+
+  int y = (config::kDisplayHeight - total_h) / 2;
+  for (size_t i = 0; i < count; ++i) {
+    applyLineStyle(lines[i]);
+    const int h =
+        displayFontIsSmooth() ? lineHeightVlw(lines[i].vlw_size)
+                              : lineHeightGfx(lines[i].gfx_font);
+    tft.drawString(lines[i].text, kCenterX, y + h / 2);
+    y += h + kLineGap;
+  }
+}
+
+constexpr float kConnectingDetailVlw = 1.4f;
+
+void applyConnectingDetailStyle() {
+  if (displayFontIsSmooth()) {
+    displayFontSetSmoothSize(tft, kConnectingDetailVlw);
+  } else {
+    displayFontSetBitmap(tft, &kConnectingGfxDetail);
+  }
+}
+
+/** SSID on one line; truncate with … if wider than kConnectingTextMaxWidthPx. */
+void fitSsidLine() {
+  strncpy(s_ssid_line, s_connecting_ssid, sizeof(s_ssid_line) - 1);
+  s_ssid_line[sizeof(s_ssid_line) - 1] = '\0';
+  applyConnectingDetailStyle();
+  if (tft.textWidth(s_ssid_line) <= kConnectingTextMaxWidthPx) {
+    return;
+  }
+  const size_t len = strlen(s_connecting_ssid);
+  for (size_t n = len; n > 0; --n) {
+    snprintf(s_ssid_line, sizeof(s_ssid_line), "%.*s…", static_cast<int>(n),
+             s_connecting_ssid);
+    if (tft.textWidth(s_ssid_line) <= kConnectingTextMaxWidthPx) {
+      return;
+    }
+  }
+  strncpy(s_ssid_line, "…", sizeof(s_ssid_line) - 1);
+  s_ssid_line[sizeof(s_ssid_line) - 1] = '\0';
+}
+
+void drawConnectingText() {
+  displayFontEnsureLoaded(tft);
+  tft.fillScreen(config::kColorBlack);
+
+  tft.setTextDatum(textdatum_t::middle_center);
+  tft.setTextColor(config::kTextOnBlack, config::kColorBlack);
+
+  applyConnectingDetailStyle();
+  const int detail_h = tft.fontHeight();
+  const int total_h = detail_h * 2 + kLineGap;
+  const int block_top = (config::kDisplayHeight - total_h) / 2;
+  constexpr int kPanelPadY = 8;
+  tft.fillRect(kCenterX - kConnectingTextMaxWidthPx / 2, block_top - kPanelPadY,
+               kConnectingTextMaxWidthPx, total_h + kPanelPadY * 2, config::kColorBlack);
+
+  int y = block_top;
+  tft.drawString("Connecting to", kCenterX, y + detail_h / 2);
+  y += detail_h + kLineGap;
+  tft.drawString(s_ssid_line, kCenterX, y + detail_h / 2);
+
+  s_connecting_text_drawn = true;
+}
+
+void eraseSpinnerDots() {
+  for (int i = 0; i < kSpinnerDotCount; ++i) {
+    if (!s_spinner_dots[i].drawn) {
+      continue;
+    }
+    tft.fillCircle(s_spinner_dots[i].x, s_spinner_dots[i].y, kSpinnerEraseRadius,
+                   config::kColorBlack);
+    s_spinner_dots[i].drawn = false;
+  }
+}
+
+void drawSpinnerDots() {
+  constexpr float kDegToRad = 0.01745329252f;
+  const float head_rad = s_spinner_angle_deg * kDegToRad;
+
+  for (int i = 0; i < kSpinnerDotCount; ++i) {
+    const float a = head_rad - static_cast<float>(i) * (6.283185307f / kSpinnerDotCount);
+    const int x = kCenterX + static_cast<int>(std::lround(std::cos(a) * kSpinnerRadius));
+    const int y = kCenterY + static_cast<int>(std::lround(std::sin(a) * kSpinnerRadius));
+
+    const int fade = 255 - i * 22;
+    const uint16_t color = tft.color565(0, fade, 0);
+    tft.fillSmoothCircle(x, y, kSpinnerDotRadius, color);
+
+    s_spinner_dots[i].x = x;
+    s_spinner_dots[i].y = y;
+    s_spinner_dots[i].drawn = true;
+  }
+}
+
+}  // namespace
+
+void statusScreenConnectingBegin(const char* ssid) {
+  const char* name = (ssid != nullptr && ssid[0] != '\0') ? ssid : "network";
+  strncpy(s_connecting_ssid, name, sizeof(s_connecting_ssid) - 1);
+  s_connecting_ssid[sizeof(s_connecting_ssid) - 1] = '\0';
+  fitSsidLine();
+  s_spinner_angle_deg = -90.0f;
+  for (auto& dot : s_spinner_dots) {
+    dot.drawn = false;
+  }
+  s_connecting_text_drawn = false;
+  drawConnectingText();
+  drawSpinnerDots();
+}
+
+void statusScreenConnectingTick() {
+  if (!s_connecting_text_drawn) {
+    drawConnectingText();
+  }
+  eraseSpinnerDots();
+  s_spinner_angle_deg += kSpinnerStepDeg;
+  if (s_spinner_angle_deg >= 270.0f) {
+    s_spinner_angle_deg -= 360.0f;
+  }
+  drawSpinnerDots();
+}
+
+void statusScreenPortal() {
+  if (config::kSetupPageUrl[0] != '\0') {
+    // USB setup page address, split into host and path so each line stays large.
+    static char host[48];
+    static char path[48];
+    const char* slash = strchr(config::kSetupPageUrl, '/');
+    if (slash != nullptr) {
+      const size_t n = static_cast<size_t>(slash - config::kSetupPageUrl);
+      snprintf(host, sizeof(host), "%.*s", static_cast<int>(n < sizeof(host) - 1 ? n : sizeof(host) - 1),
+               config::kSetupPageUrl);
+      snprintf(path, sizeof(path), "%s", slash);
+    } else {
+      snprintf(host, sizeof(host), "%s", config::kSetupPageUrl);
+      path[0] = '\0';
+    }
+    const float host_size = displayFontIsSmooth() ? fitVlwSize(host, 1.4f, 440) : 1.0f;
+    const float path_size = displayFontIsSmooth() ? fitVlwSize(path, 1.4f, 440) : 1.0f;
+    const TextLine with_path[] = {
+        {"Setup", 1.65f, &kPortalGfxTitle},
+        {"Open on a computer:", 1.27f, &kPortalGfxBody},
+        {host, host_size, &kConnectingGfxDetail},
+        {path, path_size, &kConnectingGfxDetail},
+        {"(Chrome/Edge, USB)", 1.20f, &kPortalGfxBody},
+    };
+    const TextLine no_path[] = {
+        {"Setup", 1.65f, &kPortalGfxTitle},
+        {"Open on a computer:", 1.27f, &kPortalGfxBody},
+        {host, host_size, &kConnectingGfxDetail},
+        {"(Chrome/Edge, USB)", 1.20f, &kPortalGfxBody},
+    };
+    if (path[0] != '\0') {
+      drawTextBlock(config::kColorYellow, config::kTextOnYellow, with_path,
+                    sizeof(with_path) / sizeof(with_path[0]));
+    } else {
+      drawTextBlock(config::kColorYellow, config::kTextOnYellow, no_path,
+                    sizeof(no_path) / sizeof(no_path[0]));
+    }
+    return;
+  }
+  const TextLine lines[] = {
+      {"Setup", 1.72f, &kPortalGfxTitle},
+      {"Plug USB into a", 1.50f, &kPortalGfxBody},
+      {"computer and open", 1.50f, &kPortalGfxBody},
+      {"the setup page", 1.50f, &kPortalGfxBody},
+      {"(Chrome / Edge)", 1.35f, &kPortalGfxBody},
+  };
+  drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
+                sizeof(lines) / sizeof(lines[0]));
+}
+
+void statusScreenConnectFailed() {
+  const TextLine lines[] = {
+      {"Could not connect", 1.72f, &kGfxTitle},
+      {"Retrying... or fix", 1.50f, &kGfxBody},
+      {"Wi-Fi on setup page", 1.50f, &kGfxBody},
+      {"Hold BOOT 3 sec", 1.50f, &kGfxBody},
+      {"to reset Wi-Fi", 1.50f, &kGfxBody},
+  };
+  drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
+                sizeof(lines) / sizeof(lines[0]));
+}
+
+void statusScreenWifiReset() {
+  const TextLine lines[] = {
+      {"Wi-Fi reset", 1.72f, &kPortalGfxTitle},
+      {"Restarting...", 1.58f, &kPortalGfxBody},
+  };
+  drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
+                sizeof(lines) / sizeof(lines[0]));
+}

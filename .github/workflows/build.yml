@@ -1,0 +1,130 @@
+# Builds the firmware on every push. On main it also publishes the setup / update
+# page (web/) together with the fresh firmware and the USB bridge to GitHub Pages.
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+            .pio/libdeps
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Write setup page address (shown on the device screen)
+        run: |
+          OWNER=$(echo "${GITHUB_REPOSITORY%%/*}" | tr 'A-Z' 'a-z')
+          REPO="${GITHUB_REPOSITORY#*/}"
+          printf '#pragma once\n#define SETUP_PAGE_URL "%s.github.io/%s"\n' "$OWNER" "$REPO" > include/setup_url.h
+          cat include/setup_url.h
+
+      - name: Build
+        run: pio run -e wroom32u
+
+      - name: Merge web-flash image
+        run: pio run -e wroom32u -t merge
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: plane-radar-3d-wroom32u
+          if-no-files-found: error
+          path: |
+            .pio/build/wroom32u/firmware-merged.bin
+            .pio/build/wroom32u/firmware.bin
+            .pio/build/wroom32u/bootloader.bin
+            .pio/build/wroom32u/partitions.bin
+
+      - name: Assemble web site
+        run: |
+          VERSION=$(sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' include/config.h | head -n 1)
+          test -n "$VERSION"
+          mkdir -p site
+          cp web/index.html web/tz.json web/tz-LICENSE.txt site/
+          cp .pio/build/wroom32u/firmware.bin site/firmware.bin
+          cp .pio/build/wroom32u/firmware-merged.bin site/firmware-merged.bin
+          cp .pio/build/wroom32u/bootloader.bin site/bootloader.bin
+          cp .pio/build/wroom32u/partitions.bin site/partitions.bin
+          (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
+          python3 - "$VERSION" <<'PY'
+          import json, sys
+          version = sys.argv[1]
+
+          def manifest(name, parts):
+              return {
+                  "name": name,
+                  "version": version,
+                  "new_install_prompt_erase": True,
+                  "builds": [{"chipFamily": "ESP32", "parts": parts}],
+              }
+
+          def write(path, data):
+              with open(path, "w", encoding="utf-8") as f:
+                  json.dump(data, f, indent=2)
+
+          # Update: bootloader + partition table + application; settings (NVS at 0x9000) stay.
+          # The classic ESP32 boots from 0x1000 (C3/S3 from 0x0).
+          write("site/manifest-update.json",
+                manifest("Plane Radar 3D update", [
+                    {"path": "bootloader.bin", "offset": 4096},
+                    {"path": "partitions.bin", "offset": 32768},
+                    {"path": "firmware.bin", "offset": 65536},
+                ]))
+          # Full install: one merged image at 0x0. Wipes settings.
+          write("site/manifest-full.json",
+                manifest("Plane Radar 3D full install", [{"path": "firmware-merged.bin", "offset": 0}]))
+          write("site/version.json", {"version": version})
+          PY
+          ls -l site
+
+      - name: Upload site for GitHub Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    # Needs: repository Settings -> Pages -> Source = "GitHub Actions".
+    if: github.event_name != 'pull_request'
+    needs: firmware
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
