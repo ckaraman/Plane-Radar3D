@@ -42,7 +42,7 @@ enum Pal : uint8_t {
   kText,
   kTextDim,
   kPanel,
-  kPanelEdge,
+  kRed,       // home marker
   kGreen,
   kCoast,
   kRoad,
@@ -55,13 +55,13 @@ struct Rgb {
 constexpr Rgb kPaletteHighContrast[16] = {
     {0, 0, 0},       {6, 12, 20},     {38, 92, 118},   {60, 130, 165},
     {90, 180, 225},  {110, 215, 255}, {255, 248, 225}, {255, 170, 60},
-    {255, 255, 255}, {175, 188, 198}, {12, 26, 38},    {60, 110, 135},
+    {255, 255, 255}, {175, 188, 198}, {12, 26, 38},    {255, 45, 45},
     {80, 240, 150},  {90, 175, 235},  {215, 140, 55},  {18, 58, 92},
 };
 constexpr Rgb kPalette[16] = {
     {5, 8, 13},      {8, 16, 25},     {18, 48, 63},    {31, 81, 104},
     {42, 112, 144},  {91, 200, 245},  {237, 230, 211}, {255, 159, 67},
-    {230, 237, 242}, {125, 139, 150}, {11, 22, 32},    {35, 72, 92},
+    {230, 237, 242}, {125, 139, 150}, {11, 22, 32},    {225, 40, 40},
     {61, 220, 132},  {46, 110, 158},  {120, 82, 36},   {13, 38, 62},
 };
 
@@ -76,24 +76,25 @@ constexpr float kCamDistOverR = 2.1f;  // camera ground distance / outer radius
 
 // --- Layout ---
 constexpr int kTopBarH = 22;
-// Cross-shaped pad, bottom left: tilt up above, tilt down below, rotate left/right
-// at the sides. Sized for a stylus.
-constexpr int kBtnSize = 32;
-constexpr int kPadStep = kBtnSize + 3;
-constexpr int kPadCX = 6 + kPadStep + kBtnSize / 2;   // centre of the cross
-constexpr int kPadCY = kH - 4 - kPadStep - kBtnSize / 2;
-constexpr int kPadLeft = kPadCX - kBtnSize / 2 - kPadStep;
-constexpr int kPadTop = kPadCY - kBtnSize / 2 - kPadStep;
-constexpr int kPadSize = 3 * kPadStep - 3;
+// Arrow keys like a keyboard, bottom left: up above down, left/down/right in a row.
+constexpr int kBtnSize = 30;
+constexpr int kPadStep = kBtnSize + 2;
+constexpr int kPadLeft = 6;
+constexpr int kPadTop = kH - 4 - 2 * kBtnSize - 2;
+constexpr int kPadW = 3 * kPadStep - 2;
+constexpr int kPadH = 2 * kPadStep - 2;
 constexpr int kPitchStepDeg = 8;
 constexpr int kCardW = 196;
-constexpr int kCardH = 116;
+constexpr int kCardHFull = 116;
+constexpr int kCardHCompact = 44;
 constexpr int kCardX = kW - kCardW - 4;
 constexpr int kCardY = 22 + 4;  // under the top bar, in the sky area
 constexpr int kTapRadiusPx = 38;
 constexpr float kYawStepDeg = 30.0f;
 
 LGFX_Sprite s_spr(&tft);
+bool s_card_expanded = false;  // tap the card to switch between 2 lines and full details
+int cardH() { return s_card_expanded ? kCardHFull : kCardHCompact; }
 bool s_ready = false;
 
 float s_yaw_cur = 20.0f;  // animated camera heading
@@ -314,8 +315,8 @@ bool overlapsUi(int x, int y, int w, int h) {
   const Box fixed[] = {
       {0, 0, kW, kTopBarH + 2},
       {0, kTopBarH, 112, 58},                                  // legend
-      {kPadLeft - 2, kPadTop - 2, kPadSize + 4, kPadSize + 4},  // control pad
-      {kCardX - 2, kCardY - 2, kCardW + 4, kCardH + 4},        // card
+      {kPadLeft - 2, kPadTop - 2, kPadW + 4, kPadH + 4},        // arrow keys
+      {kCardX - 2, kCardY - 2, kCardW + 4, cardH() + 4},       // card
   };
   for (const Box& b : fixed) {
     if (intersects(me, b)) return true;
@@ -701,8 +702,14 @@ void drawRings(const Cam& c) {
 
   float hx, hy;
   if (project(c, 0, 0, groundZ(c, 0, 0), &hx, &hy)) {
-    s_spr.drawCircle(ri(hx), ri(hy), 4, kCyan);
-    s_spr.fillCircle(ri(hx), ri(hy), 1, kCyan);
+    // Red house on the radar centre: roof triangle over a square body, dark outline.
+    const int x = ri(hx), y = ri(hy);
+    s_spr.fillTriangle(x - 8, y - 5, x + 8, y - 5, x, y - 13, kBg);
+    s_spr.fillRect(x - 6, y - 6, 13, 9, kBg);
+    s_spr.fillTriangle(x - 7, y - 6, x + 7, y - 6, x, y - 12, kRed);
+    s_spr.fillRect(x - 5, y - 6, 11, 8, kRed);
+    s_spr.fillRect(x - 1, y - 2, 3, 4, kBg);  // door
+    s_spr.drawFastHLine(x - 3, y + 3, 7, kRed);
   }
 }
 
@@ -845,7 +852,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
 
 void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   s_spr.fillRect(0, 0, kW, kTopBarH, kPanel);
-  s_spr.drawFastHLine(0, kTopBarH, kW, kPanelEdge);
+  s_spr.drawFastHLine(0, kTopBarH, kW, kRingDim);
   const bool fresh = fetched_ms != 0 && millis() - fetched_ms < 20000;
   s_spr.fillCircle(10, 11, 3, fresh ? kGreen : kOrange);
 
@@ -910,17 +917,18 @@ struct PadButton {
   Arrow dir;
 };
 PadButton padButton(int i) {
+  const int row2 = kPadTop + kPadStep;
   switch (i) {
-    case 0: return {kPadCX - kBtnSize / 2 - kPadStep, kPadCY - kBtnSize / 2, Arrow::Left};
-    case 1: return {kPadCX - kBtnSize / 2 + kPadStep, kPadCY - kBtnSize / 2, Arrow::Right};
-    case 2: return {kPadCX - kBtnSize / 2, kPadCY - kBtnSize / 2 - kPadStep, Arrow::Up};
-    default: return {kPadCX - kBtnSize / 2, kPadCY - kBtnSize / 2 + kPadStep, Arrow::Down};
+    case 0: return {kPadLeft, row2, Arrow::Left};
+    case 1: return {kPadLeft + 2 * kPadStep, row2, Arrow::Right};
+    case 2: return {kPadLeft + kPadStep, kPadTop, Arrow::Up};
+    default: return {kPadLeft + kPadStep, row2, Arrow::Down};
   }
 }
 
 void drawButton(int x, int y, Arrow dir) {
   s_spr.fillRoundRect(x, y, kBtnSize, kBtnSize, 6, kPanel);
-  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, 6, kPanelEdge);
+  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, 6, kRingDim);
   const int cx = x + kBtnSize / 2, cy = y + kBtnSize / 2;
   constexpr int a = 6, b = 4;
   switch (dir) {
@@ -948,20 +956,62 @@ void drawControls() {
     const PadButton b = padButton(i);
     drawButton(b.x, b.y, b.dir);
   }
-  // Centre of the cross: a small compass needle pointing north for the current view.
-  const float yaw = s_yaw_cur * kDegToRad;
-  const int nx = kPadCX + static_cast<int>(lroundf(-sinf(yaw) * 9.0f));
-  const int ny = kPadCY - static_cast<int>(lroundf(cosf(yaw) * 9.0f));
-  s_spr.drawLine(kPadCX, kPadCY, nx, ny, kOrange);
-  s_spr.fillCircle(kPadCX, kPadCY, 2, kTextDim);
+}
+
+/** Two-line card: callsign + route codes, then altitude / speed / distance / climb. */
+void drawCardCompact(int idx, const float* dist_km) {
+  const auto& a = s_planes[idx];
+  const uint8_t col = altitudeColor(a.alt_ft);
+  s_spr.fillRoundRect(kCardX, kCardY, kCardW, kCardHCompact, 6, kPanel);
+  s_spr.drawRoundRect(kCardX, kCardY, kCardW, kCardHCompact, 6, kRingDim);
+  const int x0 = kCardX + 8, x1 = kCardX + kCardW - 8;
+
+  setFont(&fonts::FreeSansBold9pt7b);
+  s_spr.setTextDatum(textdatum_t::top_left);
+  s_spr.setTextColor(col);
+  s_spr.drawString(a.callsign, x0, kCardY + 4);
+
+  setFont(&fonts::Font2);
+  s_spr.setTextDatum(textdatum_t::top_right);
+  services::route::Route rt;
+  const services::route::Status rs = services::route::get(a.callsign, &rt);
+  char buf[40];
+  if (rs == services::route::Status::Found) {
+    snprintf(buf, sizeof(buf), "%s > %s", rt.from_code[0] ? rt.from_code : "?", rt.to_code[0] ? rt.to_code : "?");
+    s_spr.setTextColor(kText);
+  } else {
+    snprintf(buf, sizeof(buf), "%s", a.type[0] ? a.type : (s_selected[0] ? "" : "en yakin"));
+    s_spr.setTextColor(kTextDim);
+  }
+  s_spr.drawString(buf, x1, kCardY + 6);
+
+  char alt[12];
+  formatAltitude(a.alt_ft, alt, sizeof(alt));
+  snprintf(buf, sizeof(buf), "%s  %dkt  %.1fkm", alt, static_cast<int>(lroundf(a.gs_knots)), dist_km[idx]);
+  s_spr.setTextDatum(textdatum_t::top_left);
+  s_spr.setTextColor(kText);
+  s_spr.drawString(buf, x0, kCardY + 24);
+  const int used = x0 + s_spr.textWidth(buf);
+  char tr[12] = "";
+  if (a.vrate_fpm > 300) snprintf(tr, sizeof(tr), "^%d", a.vrate_fpm);
+  else if (a.vrate_fpm < -300) snprintf(tr, sizeof(tr), "v%d", -a.vrate_fpm);
+  if (tr[0] && used + 6 + s_spr.textWidth(tr) <= x1) {
+    s_spr.setTextDatum(textdatum_t::top_right);
+    s_spr.setTextColor(a.vrate_fpm > 0 ? kGreen : kOrange);
+    s_spr.drawString(tr, x1, kCardY + 24);
+  }
 }
 
 void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
   if (idx < 0) return;
+  if (!s_card_expanded) {
+    drawCardCompact(idx, dist_km);
+    return;
+  }
   const auto& a = s_planes[idx];
   const uint8_t col = altitudeColor(a.alt_ft);
-  s_spr.fillRoundRect(kCardX, kCardY, kCardW, kCardH, 6, kPanel);
-  s_spr.drawRoundRect(kCardX, kCardY, kCardW, kCardH, 6, kPanelEdge);
+  s_spr.fillRoundRect(kCardX, kCardY, kCardW, kCardHFull, 6, kPanel);
+  s_spr.drawRoundRect(kCardX, kCardY, kCardW, kCardHFull, 6, kRingDim);
 
   const int x0 = kCardX + 9;
   int y = kCardY + 6;
@@ -1174,7 +1224,11 @@ bool handleTap(int x, int y) {
     memcpy(s_selected, s_hits[best].callsign, sizeof(s_selected));
     return true;
   }
-  const bool on_card = x >= kCardX && y >= kCardY && y < kCardY + kCardH;
+  const bool on_card = x >= kCardX && y >= kCardY && y < kCardY + cardH();
+  if (on_card) {
+    s_card_expanded = !s_card_expanded;
+    return true;
+  }
   if (!on_card && s_selected[0] != '\0') {
     s_selected[0] = '\0';  // tap on empty sky: back to "nearest"
     return true;
