@@ -54,6 +54,8 @@ Sensörü kutunun dışına ya da havalandırmalı ayrı bir bölmeye koyun. Ekr
 
 **ckaraman.github.io/plane-radar-3d**: yazılımı yükleme, güncelleme, Wi-Fi ve konum ayarı ve Windows için USB köprüsü bu sayfada. Chrome veya Edge ile açın.
 
+**Güncelleme:** Sayfada "Cihaza bağlan", sonra 3. adımdaki "Yazılımı güncelle". Yeni yazılım çalışan cihaza USB kablosundan gönderilir ve ikinci yazılım yuvasına yazılır; BOOT düğmesine gerek yoktur, ayarlar silinmez, sorun olursa eski yazılım çalışmaya devam eder (2–3 dakika). 3d-0.4.0'dan eski bir sürümden geçerken bir kereliğine "Gelişmiş → Tam kurulum" gerekir (bellek düzeni değişti).
+
 Depoya her gönderimde (`main`) GitHub Actions yazılımı derler ve bu sayfayı yeni sürümle yayınlar. İlk seferde depoda **Settings → Pages → Source: GitHub Actions** seçilmeli. Her yeni sürümde `include/config.h` içindeki `kFirmwareVersion` değerini artırın.
 
 ## Yükleme (elle, sayfa yoksa)

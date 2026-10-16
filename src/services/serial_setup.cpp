@@ -17,6 +17,7 @@
 #include "services/map_store.h"
 #include "services/radar_location.h"
 #include "services/usb_feed.h"
+#include "services/serial_ota.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_range.h"
 
@@ -425,6 +426,15 @@ void handleLine(char* line) {
     handleMapClear();
   } else if (strcmp(command, "RESET") == 0) {
     handleReset();
+  } else if (strcmp(command, "OTA") == 0) {
+    services::serial_ota::chunk(args);
+  } else if (strcmp(command, "OTABEGIN") == 0) {
+    services::serial_ota::begin(args);
+  } else if (strcmp(command, "OTAEND") == 0) {
+    services::serial_ota::end();
+  } else if (strcmp(command, "OTAABORT") == 0) {
+    services::serial_ota::abort(nullptr);
+    sendOk(false);
   } else if (strcmp(command, "A") == 0) {
     services::usb_feed::add(args);
   } else if (strcmp(command, "ABEGIN") == 0) {
@@ -439,7 +449,7 @@ void handleLine(char* line) {
 }  // namespace
 
 void poll() {
-  int budget = 2048;  // bytes per call; keeps the loop responsive
+  int budget = services::serial_ota::active() ? 8192 : 2048;  // bytes per call
   while (budget-- > 0 && Serial.available() > 0) {
     const int c = Serial.read();
     if (c < 0) {

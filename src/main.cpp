@@ -17,6 +17,7 @@
 #include "services/map_store.h"
 #include "services/radar_location.h"
 #include "services/route_service.h"
+#include "services/serial_ota.h"
 #include "services/sht30.h"
 #include "services/usb_feed.h"
 #include "services/weather_service.h"
@@ -254,6 +255,12 @@ void setup() {
 }
 
 void loop() {
+  if (services::serial_ota::active()) {
+    // Firmware update over USB: only read the cable, as fast as possible.
+    wifiLoop();
+    services::serial_ota::tick();
+    return;
+  }
   handleBootButton();
   wifiLoop();
   services::sht30::tick();

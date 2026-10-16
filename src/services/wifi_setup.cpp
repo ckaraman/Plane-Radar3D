@@ -16,6 +16,7 @@
 #include "services/weather_service.h"
 #include "services/serial_setup.h"
 #include "services/usb_feed.h"
+#include "services/serial_ota.h"
 #include "ui/radar_range.h"
 #include "ui/status_screens.h"
 
@@ -148,6 +149,11 @@ bool waitForLinkWithUi(unsigned long attempt_ms) {
     }
     bootButtonPollLongPress();
     services::serial_setup::poll();
+    if (services::serial_ota::active()) {
+      services::serial_ota::tick();
+      delay(1);
+      continue;  // a USB firmware update is running: leave the screen to it
+    }
     statusScreenConnectingTick();
     delay(config::kWifiConnectingFrameMs);
   }
@@ -228,6 +234,7 @@ bool waitForUsbSetup() {
   while (!wifiLinkUp() && !services::usb_feed::active()) {
     bootButtonPollLongPress();
     services::serial_setup::poll();
+    services::serial_ota::tick();
     delay(10);
   }
   return true;

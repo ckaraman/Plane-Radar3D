@@ -194,17 +194,22 @@
     <p class="hint">Güncelleme yalnızca yazılımı yeniler; WiFi, konum ve diğer ayarlarınız silinmez.</p>
     <div class="msg info" id="msg-version" hidden role="status" aria-live="polite"></div>
     <div class="row" style="margin-top:12px">
-      <esp-web-install-button id="install-update" manifest="manifest-update.json">
-        <button slot="activate" class="btn primary" type="button">Yazılımı güncelle</button>
-        <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
-        <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
-      </esp-web-install-button>
+      <button type="button" class="btn primary" id="btn-usb-update" disabled>Yazılımı güncelle</button>
     </div>
-    <p class="small">Güncelleme sırasında bir USB cihaz listesi açılır; cihazı seçin. Açılan pencerede <strong>“Erase device / Cihazı sil” kutusunu işaretlemeyin</strong> (işaretlerseniz WiFi ve konum ayarları silinir). “Install” düğmesine basıp %100 olmasını bekleyin; bitince 1. adımdan yeniden bağlanabilirsiniz.</p>
-    <p class="small"><strong>“Preparing installation” yazısında bekliyorsa</strong> kart yükleme moduna kendiliğinden geçememiştir: pencereyi kapatın, kartta <strong>BOOT</strong> düğmesini basılı tutup <strong>EN</strong> düğmesine bir kez basın, sonra BOOT'u bırakın ve “Yazılımı güncelle”ye yeniden basın. USB köprüsü açıksa önce onu kapatın.</p>
+    <progress id="ota-progress" max="100" value="0" hidden style="width:100%;height:14px;margin-top:10px"></progress>
+    <div class="msg info" id="msg-ota" hidden role="status" aria-live="polite"></div>
+    <p class="small">1. adımda cihaza bağlıyken çalışır. Yeni yazılım USB kablosundan gönderilir, <strong>BOOT düğmesine basmanız gerekmez</strong>. Yaklaşık 2–3 dakika sürer; bu sırada kabloyu çıkarmayın ve sayfayı kapatmayın. Ayarlarınız silinmez. Bir sorun olursa cihaz eski yazılımla çalışmaya devam eder.</p>
 
     <details>
       <summary>Gelişmiş</summary>
+      <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Gerekirse kartta BOOT'u basılı tutup EN'e basın, BOOT'u bırakın, sonra düğmeye basın. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
+      <div class="row">
+        <esp-web-install-button id="install-update" manifest="manifest-update.json">
+          <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
+          <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
+          <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
+        </esp-web-install-button>
+      </div>
       <p class="small">Cihaz hiç yanıt vermiyorsa ya da boşsa tam kurulum yapın. <strong>Bu işlem tüm ayarları siler</strong>; sonra 2. adımdan yeniden girmeniz gerekir. Cihaz görünmüyorsa BOOT düğmesine basılı tutarak USB'yi takın, sonra bırakın.</p>
       <div class="row">
         <esp-web-install-button id="install-full" manifest="manifest-full.json">
@@ -251,7 +256,7 @@
 
   const state = {
     port: null, reader: null, readDone: null, pending: null,
-    connected: false, device: null, zones: {}, latest: null, expectingDrop: false,
+    connected: false, device: null, zones: {}, latest: null, expectingDrop: false, otaHandler: null,
   };
 
   function setMsg(el, kind, text) {
@@ -309,6 +314,7 @@
     if (!m) return;
     let data = {};
     try { if (m[2]) data = JSON.parse(m[2]); } catch (_) { return; }
+    if (state.otaHandler && (m[1] === 'OTAACK' || m[1] === 'ERR')) { state.otaHandler(m[1], data); return; }
     const p = state.pending;
     if (p && p.tags.includes(m[1])) {
       state.pending = null;
@@ -456,6 +462,83 @@
     return null;
   }
 
+
+  // ---------------------------------------------------------------- USB update
+  // The running firmware receives the new image over the cable and writes it to its
+  // second app slot (no download mode, no BOOT button). Protocol: firmware serial_ota.h.
+  async function usbUpdate() {
+    const msg = $('#msg-ota'), bar = $('#ota-progress'), btn = $('#btn-usb-update');
+    if (!state.port || !state.connected) { setMsg(msg, 'warn', 'Önce 1. adımdan cihaza bağlanın.'); return; }
+    btn.disabled = true;
+    bar.hidden = false; bar.value = 0;
+    try {
+      setMsg(msg, 'info', 'Yeni yazılım indiriliyor…');
+      const r = await fetch('firmware.bin?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) throw new Error('indirme ' + r.status);
+      const fw = new Uint8Array(await r.arrayBuffer());
+      const begin = await request('PR:OTABEGIN ' + JSON.stringify({ len: fw.length, crc: crc32(fw) }), ['OTAACK', 'ERR'], 20000);
+      if (begin.tag === 'ERR') throw new Error(begin.data.msg || 'ota');
+      const CH = 480, total = Math.ceil(fw.length / CH), WINDOW = 5;  // 5 lines in flight fit the 4 KB serial buffer
+      let acked = 0, failed = null, wake = null;
+      state.otaHandler = (tag, data) => {
+        if (tag === 'OTAACK') acked = Math.max(acked, data.seq | 0); else failed = data.msg || 'ota';
+        if (wake) { const w = wake; wake = null; w(); }
+      };
+      const waitAck = (ms) => new Promise((res) => { wake = res; setTimeout(() => { if (wake === res) { wake = null; res(); } }, ms); });
+      const waitFor = async (cond) => {
+        while (!cond() && !failed) {
+          const before = acked;
+          await waitAck(10000);
+          if (acked === before && !failed && !cond()) throw new Error('cihaz yanıt vermedi');
+        }
+        if (failed) throw new Error(failed);
+      };
+      const t0 = Date.now();
+      const writer = state.port.writable.getWriter();
+      try {
+        for (let seq = 1; seq <= total; seq++) {
+          await waitFor(() => seq - acked <= WINDOW);
+          const part = fw.subarray((seq - 1) * CH, Math.min(seq * CH, fw.length));
+          let bin = ''; for (let i = 0; i < part.length; i++) bin += String.fromCharCode(part[i]);
+          await writer.write(encoder.encode('PR:OTA ' + seq + ' ' + btoa(bin) + '\n'));
+          if (seq % 8 === 0) {
+            const pct = Math.floor((acked / total) * 100);
+            bar.value = pct;
+            const rate = acked / Math.max(1, (Date.now() - t0) / 1000);
+            const left = rate > 0 ? Math.round((total - acked) / rate) : 0;
+            setMsg(msg, 'info', 'Cihaza gönderiliyor: %' + pct + (left ? ' (yaklaşık ' + (left >= 60 ? Math.ceil(left / 60) + ' dk' : left + ' sn') + ' kaldı)' : '') + '. Kabloyu çıkarmayın.');
+          }
+        }
+        await waitFor(() => acked >= total);
+      } finally {
+        writer.releaseLock();
+        state.otaHandler = null;
+      }
+      bar.value = 100;
+      setMsg(msg, 'info', 'Doğrulanıyor…');
+      state.expectingDrop = true;
+      const done = await request('PR:OTAEND', ['OTADONE', 'ERR'], 30000);
+      if (done.tag === 'ERR') throw new Error(done.data.msg || 'ota');
+      setMsg(msg, 'ok', 'Yazılım yazıldı, cihaz yeniden başlıyor…');
+      await sleep(6000);
+      const d = await handshake();
+      state.expectingDrop = false;
+      if (d) { state.device = d; renderConnection(); renderVersion(); }
+      setMsg(msg, 'ok', 'Güncelleme tamamlandı' + (d && d.fw ? ' (cihazdaki sürüm ' + d.fw + ').' : '.'));
+    } catch (e) {
+      state.otaHandler = null;
+      state.expectingDrop = false;
+      try { if (state.port) await sendLine('PR:OTAABORT'); } catch (_) { /* gone */ }
+      const m = String(e && e.message ? e.message : e);
+      const old = /unknown_command|ota_not_started/.test(m);
+      setMsg(msg, 'err', old
+        ? 'Cihazdaki yazılım USB güncellemeyi henüz bilmiyor. Bir kereliğine aşağıdaki “Gelişmiş → Tam kurulum” ile yükleyin; sonraki güncellemeler bu düğmeyle olur.'
+        : 'Güncelleme tamamlanamadı (' + m + '). Cihaz eski yazılımla çalışmaya devam eder; tekrar deneyin.');
+    } finally {
+      btn.disabled = !state.connected;
+    }
+  }
+
   async function disconnect() {
     await closePort();
     renderConnection();
@@ -480,6 +563,7 @@
     $('#btn-disconnect').hidden = !on;
     $('#settings-fields').disabled = !on;
     $('#btn-reset').disabled = !on;
+    $('#btn-usb-update').disabled = !on;
     $('#settings-hint').hidden = on;
     const chips = $('#device-chips');
     chips.hidden = !on;
@@ -1121,6 +1205,7 @@
       e.currentTarget.textContent = show ? 'Gizle' : 'Göster';
       e.currentTarget.setAttribute('aria-pressed', String(show));
     });
+    $('#btn-usb-update').addEventListener('click', usbUpdate);
     // The update tool needs the USB port to itself.
     for (const id of ['#install-update', '#install-full']) {
       $(id).addEventListener('click', () => { if (state.port) { state.expectingDrop = false; disconnect(); } }, true);
