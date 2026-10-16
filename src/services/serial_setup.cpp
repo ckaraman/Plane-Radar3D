@@ -101,6 +101,7 @@ void sendHello() {
   doc["map"] = static_cast<uint32_t>(services::map::size());
   doc["mapv"] = services::map::kBlobVersion;
   doc["elevv"] = services::terrain::kProtocolVersion;
+  doc["otav"] = 2;
   doc["elev"] = services::terrain::available();
   sendReply("HELLO", doc);
 }

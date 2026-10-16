@@ -198,7 +198,7 @@
     </div>
     <progress id="ota-progress" max="100" value="0" hidden style="width:100%;height:14px;margin-top:10px"></progress>
     <div class="msg info" id="msg-ota" hidden role="status" aria-live="polite"></div>
-    <p class="small">1. adımda cihaza bağlıyken çalışır. Yeni yazılım USB kablosundan gönderilir, <strong>BOOT düğmesine basmanız gerekmez</strong>. Yaklaşık 2–3 dakika sürer; bu sırada kabloyu çıkarmayın ve sayfayı kapatmayın. Ayarlarınız silinmez. Bir sorun olursa cihaz eski yazılımla çalışmaya devam eder.</p>
+    <p class="small">1. adımda cihaza bağlıyken çalışır. Yeni yazılım USB kablosundan gönderilir, <strong>BOOT düğmesine basmanız gerekmez</strong>. Yaklaşık 3 dakika sürer; bu sırada kabloyu çıkarmayın ve sayfayı kapatmayın. Ayarlarınız silinmez. Bir sorun olursa cihaz eski yazılımla çalışmaya devam eder.</p>
 
     <details>
       <summary>Gelişmiş</summary>
@@ -314,7 +314,7 @@
     if (!m) return;
     let data = {};
     try { if (m[2]) data = JSON.parse(m[2]); } catch (_) { return; }
-    if (state.otaHandler && (m[1] === 'OTAACK' || m[1] === 'ERR')) { state.otaHandler(m[1], data); return; }
+    if (state.otaHandler && (m[1] === 'OTAACK' || m[1] === 'OTANAK' || m[1] === 'ERR')) { state.otaHandler(m[1], data); return; }
     const p = state.pending;
     if (p && p.tags.includes(m[1])) {
       state.pending = null;
@@ -478,38 +478,49 @@
       const fw = new Uint8Array(await r.arrayBuffer());
       const begin = await request('PR:OTABEGIN ' + JSON.stringify({ len: fw.length, crc: crc32(fw) }), ['OTAACK', 'ERR'], 20000);
       if (begin.tag === 'ERR') throw new Error(begin.data.msg || 'ota');
-      const CH = 480, total = Math.ceil(fw.length / CH), WINDOW = 5;  // 5 lines in flight fit the 4 KB serial buffer
-      let acked = 0, failed = null, wake = null;
+      // One chunk at a time: while the chip writes flash it cannot take in more bytes,
+      // so the next line goes out only after the answer to the previous one.
+      const v2 = ((state.device && state.device.otav) | 0) >= 2;
+      const CH = 480, total = Math.ceil(fw.length / CH);
+      let answer = null, wake = null;
       state.otaHandler = (tag, data) => {
-        if (tag === 'OTAACK') acked = Math.max(acked, data.seq | 0); else failed = data.msg || 'ota';
+        answer = { tag, data };
         if (wake) { const w = wake; wake = null; w(); }
       };
-      const waitAck = (ms) => new Promise((res) => { wake = res; setTimeout(() => { if (wake === res) { wake = null; res(); } }, ms); });
-      const waitFor = async (cond) => {
-        while (!cond() && !failed) {
-          const before = acked;
-          await waitAck(10000);
-          if (acked === before && !failed && !cond()) throw new Error('cihaz yanıt vermedi');
-        }
-        if (failed) throw new Error(failed);
-      };
+      const waitAnswer = (ms) => new Promise((res) => {
+        if (answer) return res();
+        wake = res;
+        setTimeout(() => { if (wake === res) { wake = null; res(); } }, ms);
+      });
       const t0 = Date.now();
       const writer = state.port.writable.getWriter();
       try {
-        for (let seq = 1; seq <= total; seq++) {
-          await waitFor(() => seq - acked <= WINDOW);
+        let seq = 1, tries = 0;
+        while (seq <= total) {
           const part = fw.subarray((seq - 1) * CH, Math.min(seq * CH, fw.length));
           let bin = ''; for (let i = 0; i < part.length; i++) bin += String.fromCharCode(part[i]);
-          await writer.write(encoder.encode('PR:OTA ' + seq + ' ' + btoa(bin) + '\n'));
+          answer = null;
+          await writer.write(encoder.encode('PR:OTA ' + seq + (v2 ? ' ' + part.length : '') + ' ' + btoa(bin) + '\n'));
+          await waitAnswer(4000);
+          const a = answer;
+          if (a && a.tag === 'OTAACK' && (a.data.seq | 0) === seq) {
+            seq++; tries = 0;
+          } else if (a && a.tag === 'OTANAK') {
+            seq = Math.max(1, a.data.seq | 0);
+            if (++tries > 8) throw new Error('bağlantı kararsız');
+          } else if (a && a.tag === 'ERR') {
+            throw new Error(a.data.msg || 'ota');
+          } else {
+            if (!v2 || ++tries > 8) throw new Error('cihaz yanıt vermedi');  // v1 cannot resend safely
+          }
           if (seq % 8 === 0) {
-            const pct = Math.floor((acked / total) * 100);
+            const pct = Math.floor(((seq - 1) / total) * 100);
             bar.value = pct;
-            const rate = acked / Math.max(1, (Date.now() - t0) / 1000);
-            const left = rate > 0 ? Math.round((total - acked) / rate) : 0;
+            const rate = (seq - 1) / Math.max(1, (Date.now() - t0) / 1000);
+            const left = rate > 0 ? Math.round((total - seq + 1) / rate) : 0;
             setMsg(msg, 'info', 'Cihaza gönderiliyor: %' + pct + (left ? ' (yaklaşık ' + (left >= 60 ? Math.ceil(left / 60) + ' dk' : left + ' sn') + ' kaldı)' : '') + '. Kabloyu çıkarmayın.');
           }
         }
-        await waitFor(() => acked >= total);
       } finally {
         writer.releaseLock();
         state.otaHandler = null;

@@ -134,26 +134,46 @@ void begin(const char* json) {
   replyAck(0);
 }
 
+void replyNak() {
+  char body[32];
+  snprintf(body, sizeof(body), "{\"seq\":%lu}", static_cast<unsigned long>(s_next_seq));
+  reply("OTANAK", body);  // "send again from this chunk"
+}
+
+// "PR:OTA <seq> <len> <base64>" (v2) or "PR:OTA <seq> <base64>" (v1, no length check).
 void chunk(char* args) {
   if (!s_active) {
     replyError("ota_not_started");
     return;
   }
-  char* data = strchr(args, ' ');
-  if (data == nullptr) {
-    abort("ota_bad_chunk");
+  char* p1 = strchr(args, ' ');
+  if (p1 == nullptr) {
+    replyNak();
     return;
   }
-  *data++ = '\0';
+  *p1++ = '\0';
   const uint32_t seq = strtoul(args, nullptr, 10);
+  long want_len = -1;
+  char* data = p1;
+  char* p2 = strchr(p1, ' ');
+  if (p2 != nullptr) {
+    *p2++ = '\0';
+    want_len = strtol(p1, nullptr, 10);
+    data = p2;
+  }
+  s_last_ms = millis();
+  if (seq + 1 == s_next_seq) {
+    replyAck(seq);  // a repeat of the last chunk: already written
+    return;
+  }
   if (seq != s_next_seq) {
-    abort("ota_seq");
+    replyNak();
     return;
   }
   static uint8_t buf[600];
   const int n = b64Decode(data, buf, sizeof(buf));
-  if (n <= 0 || s_received + static_cast<size_t>(n) > s_len) {
-    abort("ota_bad_chunk");
+  if (n <= 0 || (want_len >= 0 && n != want_len) || s_received + static_cast<size_t>(n) > s_len) {
+    replyNak();  // damaged line (bytes lost on the cable): ask for it again
     return;
   }
   if (Update.write(buf, static_cast<size_t>(n)) != static_cast<size_t>(n)) {
@@ -163,7 +183,6 @@ void chunk(char* args) {
   crcUpdate(buf, static_cast<size_t>(n));
   s_received += static_cast<size_t>(n);
   ++s_next_seq;
-  s_last_ms = millis();
   replyAck(seq);
 }
 
