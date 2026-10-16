@@ -14,6 +14,7 @@
 #include "services/display_prefs.h"
 #include "services/map_store.h"
 #include "services/radar_location.h"
+#include "services/route_service.h"
 #include "services/sht30.h"
 #include "services/usb_feed.h"
 #include "ui/radar_range.h"
@@ -44,7 +45,7 @@ enum Pal : uint8_t {
   kGreen,
   kCoast,
   kRoad,
-  kCardinal,
+  kSea,       // sea fill of the map layer (lighter than the land/ground)
 };
 
 struct Rgb {
@@ -54,7 +55,7 @@ constexpr Rgb kPalette[16] = {
     {5, 8, 13},      {8, 16, 25},     {18, 48, 63},    {31, 81, 104},
     {42, 112, 144},  {91, 200, 245},  {237, 230, 211}, {255, 159, 67},
     {230, 237, 242}, {125, 139, 150}, {11, 22, 32},    {35, 72, 92},
-    {61, 220, 132},  {46, 110, 158},  {120, 82, 36},   {77, 156, 191},
+    {61, 220, 132},  {46, 110, 158},  {120, 82, 36},   {13, 38, 62},
 };
 
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
@@ -71,7 +72,7 @@ constexpr int kBtnY = kH - kBtnSize - 8;
 constexpr int kBtnLeftX = 8;
 constexpr int kBtnRightX = kBtnLeftX + kBtnSize + 8;
 constexpr int kCardW = 200;
-constexpr int kCardH = 100;
+constexpr int kCardH = 118;
 constexpr int kCardX = kW - kCardW - 8;
 constexpr int kCardY = kH - kCardH - 8;
 constexpr int kTapRadiusPx = 38;
@@ -164,8 +165,14 @@ uint8_t altitudeColor(int32_t ft) {
 void formatAltitude(int32_t ft, char* out, size_t n) {
   if (ft <= 0) {
     snprintf(out, n, "YER");
-  } else if (ft >= 18000) {
-    snprintf(out, n, "FL%03d", static_cast<int>((ft + 50) / 100));
+  } else if (ft >= 1000) {
+    // Same style as the round radar: 1.2K ft, 35K ft (decimal only when not .0)
+    const int tenths = static_cast<int>((ft + 50) / 100);
+    if (tenths % 10 == 0) {
+      snprintf(out, n, "%dK ft", tenths / 10);
+    } else {
+      snprintf(out, n, "%d.%dK ft", tenths / 10, tenths % 10);
+    }
   } else {
     snprintf(out, n, "%d ft", static_cast<int>(ft));
   }
@@ -261,7 +268,7 @@ bool overlapsUi(int x, int y, int w, int h) {
   const Box me{x, y, w, h};
   const Box fixed[] = {
       {0, 0, kW, kTopBarH + 2},
-      {0, kTopBarH, 80, 40},                                   // legend
+      {0, kTopBarH, 92, 40},                                   // legend
       {0, kBtnY - 2, kBtnRightX + kBtnSize + 140, kH - kBtnY + 2},  // buttons + hint
       {kCardX - 2, kCardY - 2, kCardW + 4, kCardH + 4},        // card
   };
@@ -292,7 +299,9 @@ void drawGround(const Cam& c) {
   s_spr.fillScreen(kBg);
   s_spr.fillRect(0, hy, kW, kH - hy, kGround);
   s_spr.drawFastHLine(0, hy, kW, kRingDim);
+}
 
+void drawGrid(const Cam& c) {
   // Grid clipped to the outer ring.
   const float step = c.R / 5.0f;
   for (int i = -4; i <= 4; ++i) {
@@ -304,6 +313,174 @@ void drawGround(const Cam& c) {
     }
     if (project(c, -h, k, 0, &ax, &ay) && project(c, h, k, 0, &bx, &by)) {
       s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kGrid);
+    }
+  }
+}
+
+
+// ---------------------------------------------------------------- sea fill
+//
+// The map blob's type-2 rings are sea polygons (even-odd). They are projected
+// once per camera change and filled scanline by scanline, clipped to the
+// projected outer ring so the sea stays on the radar disc.
+
+constexpr size_t kMaxSeaRings = 256;
+int16_t* s_sea_xy = nullptr;  // x0,y0,x1,y1,... screen coordinates
+size_t s_sea_cap = 0;         // points the buffer can hold
+size_t s_sea_points = 0;
+uint16_t s_ring_start[kMaxSeaRings];
+uint16_t s_ring_len[kMaxSeaRings];
+int16_t s_ring_ymin[kMaxSeaRings];
+int16_t s_ring_ymax[kMaxSeaRings];
+size_t s_ring_count = 0;
+int16_t s_disc_l[kH];
+int16_t s_disc_r[kH];
+struct SeaKey {
+  uint32_t gen;
+  float yaw, R;
+  double lat, lon;
+} s_sea_key = {0xFFFFFFFFu, -1, -1, 0, 0};
+
+void buildDiscSpans(const Cam& c) {
+  constexpr int kSeg = 144;
+  static int16_t px[kSeg], py[kSeg];
+  for (int i = 0; i < kSeg; ++i) {
+    const float t = static_cast<float>(i) / kSeg * 6.2831853f;
+    float sx = 0, sy = 0;
+    project(c, c.R * cosf(t), c.R * sinf(t), 0, &sx, &sy);
+    px[i] = static_cast<int16_t>(ri(sx));
+    py[i] = static_cast<int16_t>(ri(sy));
+  }
+  for (int y = 0; y < kH; ++y) {
+    const float ys = y + 0.5f;
+    float lo = 1e9f, hi = -1e9f;
+    for (int i = 0; i < kSeg; ++i) {
+      const int j = (i + 1) % kSeg;
+      const float y0 = py[i], y1 = py[j];
+      if ((y0 <= ys) != (y1 <= ys)) {
+        const float x = px[i] + (ys - y0) * (px[j] - px[i]) / (y1 - y0);
+        lo = std::min(lo, x);
+        hi = std::max(hi, x);
+      }
+    }
+    s_disc_l[y] = lo > hi ? 1 : static_cast<int16_t>(ceilf(lo));
+    s_disc_r[y] = lo > hi ? 0 : static_cast<int16_t>(floorf(hi));
+  }
+}
+
+void buildSea(const Cam& c) {
+  s_sea_points = 0;
+  s_ring_count = 0;
+  const uint8_t* m = services::map::data();
+  const size_t size = services::map::size();
+  if (m == nullptr || size < services::map::kHeaderBytes) return;
+  int32_t lat_e7, lon_e7;
+  uint16_t count;
+  memcpy(&lat_e7, m + 4, 4);
+  memcpy(&lon_e7, m + 8, 4);
+  memcpy(&count, m + 12, 2);
+  float ox, oy;
+  offsetKm(lat_e7 / 1e7f, lon_e7 / 1e7f, &ox, &oy);
+
+  // First pass: how many sea points?
+  size_t need = 0;
+  size_t pos = services::map::kHeaderBytes;
+  for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
+    uint16_t n;
+    memcpy(&n, m + pos + 1, 2);
+    if (m[pos] == 2) need += n;
+    pos += 3 + static_cast<size_t>(n) * 4;
+  }
+  if (need == 0) return;
+  if (need > s_sea_cap) {
+    int16_t* buf = static_cast<int16_t*>(realloc(s_sea_xy, need * 2 * sizeof(int16_t)));
+    if (buf == nullptr) return;  // not enough RAM: no sea fill, lines still draw
+    s_sea_xy = buf;
+    s_sea_cap = need;
+  }
+
+  pos = services::map::kHeaderBytes;
+  for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
+    const uint8_t type = m[pos];
+    uint16_t n;
+    memcpy(&n, m + pos + 1, 2);
+    pos += 3;
+    if (pos + static_cast<size_t>(n) * 4 > size) return;
+    if (type != 2 || n < 3 || s_ring_count >= kMaxSeaRings) {
+      pos += static_cast<size_t>(n) * 4;
+      continue;
+    }
+    const size_t start = s_sea_points;
+    int16_t ymin = 32767, ymax = -32768;
+    int16_t lx = 0, ly = 0;
+    for (uint16_t i = 0; i < n; ++i, pos += 4) {
+      int16_t xi, yi;
+      memcpy(&xi, m + pos, 2);
+      memcpy(&yi, m + pos + 2, 2);
+      float sx, sy;
+      if (project(c, ox + xi * 0.01f, oy + yi * 0.01f, 0, &sx, &sy)) {
+        sx = std::max(-2000.0f, std::min(2480.0f, sx));
+        sy = std::max(-2000.0f, std::min(2320.0f, sy));
+        lx = static_cast<int16_t>(ri(sx));
+        ly = static_cast<int16_t>(ri(sy));
+      }
+      s_sea_xy[s_sea_points * 2] = lx;
+      s_sea_xy[s_sea_points * 2 + 1] = ly;
+      ymin = std::min(ymin, ly);
+      ymax = std::max(ymax, ly);
+      ++s_sea_points;
+    }
+    s_ring_start[s_ring_count] = static_cast<uint16_t>(start);
+    s_ring_len[s_ring_count] = n;
+    s_ring_ymin[s_ring_count] = ymin;
+    s_ring_ymax[s_ring_count] = ymax;
+    ++s_ring_count;
+  }
+}
+
+void drawSea(const Cam& c) {
+  const SeaKey key{services::map::generation(), s_yaw_cur, c.R, services::location::lat(),
+                   services::location::lon()};
+  if (key.gen != s_sea_key.gen || key.yaw != s_sea_key.yaw || key.R != s_sea_key.R ||
+      key.lat != s_sea_key.lat || key.lon != s_sea_key.lon) {
+    s_sea_key = key;
+    buildDiscSpans(c);
+    buildSea(c);
+  }
+  if (s_ring_count == 0) return;
+
+  constexpr int kMaxCross = 128;
+  float xs[kMaxCross];
+  for (int y = kTopBarH; y < kH; ++y) {
+    if (s_disc_l[y] > s_disc_r[y]) continue;
+    const float ys = y + 0.5f;
+    int n = 0;
+    for (size_t r = 0; r < s_ring_count && n < kMaxCross; ++r) {
+      if (ys < s_ring_ymin[r] || ys > s_ring_ymax[r]) continue;
+      const int16_t* p = s_sea_xy + s_ring_start[r] * 2;
+      const int len = s_ring_len[r];
+      for (int i = 0; i < len && n < kMaxCross; ++i) {
+        const int j = (i + 1 == len) ? 0 : i + 1;
+        const float y0 = p[i * 2 + 1], y1 = p[j * 2 + 1];
+        if ((y0 <= ys) != (y1 <= ys)) {
+          xs[n++] = p[i * 2] + (ys - y0) * (p[j * 2] - p[i * 2]) / (y1 - y0);
+        }
+      }
+    }
+    if (n < 2) continue;
+    for (int i = 1; i < n; ++i) {  // insertion sort, n is small
+      const float v = xs[i];
+      int k = i;
+      while (k > 0 && xs[k - 1] > v) {
+        xs[k] = xs[k - 1];
+        --k;
+      }
+      xs[k] = v;
+    }
+    for (int k = 0; k + 1 < n; k += 2) {
+      const int xa = std::max<int>(static_cast<int>(ceilf(xs[k])), s_disc_l[y]);
+      const int xb = std::min<int>(static_cast<int>(floorf(xs[k + 1])), s_disc_r[y]);
+      if (xb >= xa) s_spr.drawFastHLine(xa, y, xb - xa + 1, kSea);
     }
   }
 }
@@ -434,7 +611,7 @@ void drawRings(const Cam& c) {
     float sx, sy;
     if (project(c, dirs[i][0] * c.R * 1.14f, dirs[i][1] * c.R * 1.14f, 0, &sx, &sy) &&
         !overlapsUi(ri(sx) - 8, ri(sy) - 8, 16, 16)) {
-      s_spr.setTextColor(kCardinal);
+      s_spr.setTextColor(kRing);
       s_spr.drawString(names[i], ri(sx), ri(sy));
     }
   }
@@ -634,7 +811,7 @@ void drawLegend() {
   const struct {
     uint8_t col;
     const char* text;
-  } rows[3] = {{kCyan, "FL250 +"}, {kCream, "FL100-250"}, {kOrange, "FL100 alti"}};
+  } rows[3] = {{kCyan, "25K ft +"}, {kCream, "10-25K ft"}, {kOrange, "10K ft alti"}};
   for (int i = 0; i < 3; ++i) {
     const int y = kTopBarH + 12 + i * 12;
     s_spr.fillCircle(12, y, 3, rows[i].col);
@@ -688,7 +865,35 @@ void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
   // and says so (the type moves to the direction line below).
   s_spr.drawString(s_selected[0] ? a.type : "EN YAKIN", kCardX + kCardW - 9, y + 2);
 
+  // Route (from adsbdb, by callsign): "IST > ESB  Istanbul > Ankara"
   y += 22;
+  s_spr.setTextDatum(textdatum_t::top_left);
+  services::route::Route rt;
+  const services::route::Status rs = services::route::get(a.callsign, &rt);
+  const int avail = kCardW - 18;
+  if (rs == services::route::Status::Found) {
+    char codes[16];
+    snprintf(codes, sizeof(codes), "%s > %s", rt.from_code[0] ? rt.from_code : "?",
+             rt.to_code[0] ? rt.to_code : "?");
+    s_spr.setTextColor(kText);
+    s_spr.drawString(codes, x0, y);
+    int cx = x0 + s_spr.textWidth(codes) + 8;
+    char cities[44];
+    for (int cut = 19; cut >= 4; cut -= 3) {
+      snprintf(cities, sizeof(cities), "%.*s > %.*s", cut, rt.from_city, cut, rt.to_city);
+      if (cx + s_spr.textWidth(cities) <= x0 + avail) break;
+      cities[0] = '\0';
+    }
+    if (cities[0] && (rt.from_city[0] || rt.to_city[0])) {
+      s_spr.setTextColor(kTextDim);
+      s_spr.drawString(cities, cx, y);
+    }
+  } else {
+    s_spr.setTextColor(kTextDim);
+    s_spr.drawString(rs == services::route::Status::Pending ? "Rota araniyor..." : "Rota bilinmiyor", x0, y);
+  }
+
+  y += 17;
   char buf[32];
   char alt[12];
   formatAltitude(a.alt_ft, alt, sizeof(alt));
@@ -777,6 +982,8 @@ void drawFrame() {
   static float bearing[services::adsb::kMaxAircraft];
 
   drawGround(c);
+  drawSea(c);
+  drawGrid(c);
   drawMap(c);
   drawRings(c);
   int card_idx = -1;

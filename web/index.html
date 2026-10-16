@@ -174,10 +174,10 @@
 
       <label for="opt-map">Radarın arkasına harita (deniz, kıyı çizgisi, otoyol ve devlet yolları)</label>
       <select id="opt-map">
-        <option value="17">17 km menzile kadar — ekran kenarı 22,7 km (en geniş haritalı menzil)</option>
-        <option value="15" selected>15 km menzile kadar — ekran kenarı 20 km (varsayılan)</option>
-        <option value="10">10 km menzile kadar — ekran kenarı 13,3 km</option>
-        <option value="5">5 km menzile kadar — ekran kenarı 6,7 km</option>
+        <option value="17">Geniş: yaklaşık 26 km çevre (25 km menzil için)</option>
+        <option value="15" selected>Normal: yaklaşık 23 km çevre (15 km menzil için, önerilen)</option>
+        <option value="10">Dar: yaklaşık 15 km çevre</option>
+        <option value="5">Çok dar: yaklaşık 7,5 km çevre</option>
         <option value="0">Haritasız (harita verisi indirilmez)</option>
       </select>
       <small id="map-note"></small>
@@ -1014,7 +1014,7 @@
 
     const ssid = $('#ssid').value;
     const pass = $('#pass').value;
-    if (!ssid.trim() && !(state.device && state.device.wifi)) { setMsg(msg, 'err', 'WiFi ağ adını girin ya da “Ağları tara”dan seçin.'); return; }
+    // WiFi is optional here: without it the device runs on the USB bridge (step 4).
     if (ssid.trim() && pass && pass.length < 8) { setMsg(msg, 'err', ERRORS.bad_wifi_password); return; }
 
     const payload = {

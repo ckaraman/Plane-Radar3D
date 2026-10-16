@@ -16,6 +16,7 @@
 #include "services/display_prefs.h"
 #include "services/map_store.h"
 #include "services/radar_location.h"
+#include "services/route_service.h"
 #include "services/sht30.h"
 #include "services/usb_feed.h"
 #include "services/weather_service.h"
@@ -203,6 +204,7 @@ void adsbFetchTask(void*) {
     if (WiFi.status() == WL_CONNECTED) {
       services::adsb::fetchUpdate(services::location::lat(), services::location::lon(),
                                   ui::radar::fetchRadiusKm());
+      services::route::fetchPending();
       services::weather::fetchIfDue(services::location::lat(), services::location::lon());
     }
     vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
@@ -242,6 +244,7 @@ void setup() {
   services::weather::init();
   ui::radar::rangeInit();
   services::adsb::init();
+  services::route::init();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();

@@ -10,7 +10,8 @@ namespace services::usb_feed {
  * (tools/usb-koprusu.html) downloads the traffic and sends, every few seconds:
  *
  *   PR:ABEGIN
- *   PR:A lat,lon,track_deg,gs_kt,alt_ft,vrate_fpm,callsign,type   (one per aircraft)
+ *   PR:A lat,lon,track_deg,gs_kt,alt_ft,vrate_fpm,callsign,type[,from,from_city,to,to_city]
+ *        (one per aircraft; route fields optional, "-" in "from" = no route known)
  *   PR:AEND <unix_time>            -> PR:AOK {"n":count}
  *
  * The batch replaces the aircraft list and sets the clock from unix_time.

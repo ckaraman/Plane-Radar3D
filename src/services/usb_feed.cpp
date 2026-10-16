@@ -8,6 +8,7 @@
 
 #include "services/adsb_client.h"
 #include "services/clock_service.h"
+#include "services/route_service.h"
 
 namespace services::usb_feed {
 
@@ -38,7 +39,9 @@ void formatAlt(int32_t ft, char* out, size_t n) {
   if (ft <= 0) {
     snprintf(out, n, "GND");
   } else if (ft >= 1000) {
-    snprintf(out, n, "%ldK ft", static_cast<long>((ft + 500) / 1000));
+    const long tenths = (ft + 50) / 100;
+    if (tenths % 10 == 0) snprintf(out, n, "%ldK ft", tenths / 10);
+    else snprintf(out, n, "%ld.%ldK ft", tenths / 10, tenths % 10);
   } else {
     snprintf(out, n, "%ld ft", static_cast<long>(ft));
   }
@@ -50,11 +53,11 @@ void begin() { s_count = 0; }
 
 void add(const char* args) {
   if (s_count >= services::adsb::kMaxAircraft || args == nullptr) return;
-  char buf[160];
+  char buf[200];
   strlcpy(buf, args, sizeof(buf));
   char* cur = buf;
-  const char* f[8] = {};
-  for (int i = 0; i < 8; ++i) f[i] = nextField(&cur);
+  const char* f[12] = {};
+  for (int i = 0; i < 12; ++i) f[i] = nextField(&cur);
   if (f[0] == nullptr || f[1] == nullptr || f[0][0] == '\0' || f[1][0] == '\0') return;
 
   services::adsb::Aircraft& a = s_staged[s_count];
@@ -70,6 +73,20 @@ void add(const char* args) {
   if (f[6]) strlcpy(a.callsign, f[6], sizeof(a.callsign));
   if (f[7]) strlcpy(a.type, f[7], sizeof(a.type));
   formatAlt(a.alt_ft, a.alt, sizeof(a.alt));
+  // Optional route fields from the PC bridge: from_code,from_city,to_code,to_city
+  // ("-" = looked up, no route known; missing = not looked up yet).
+  if (f[8] != nullptr && a.callsign[0] != '\0') {
+    if (strcmp(f[8], "-") == 0) {
+      services::route::put(a.callsign, nullptr);
+    } else {
+      services::route::Route r{};
+      strlcpy(r.from_code, f[8], sizeof(r.from_code));
+      if (f[9]) services::route::foldAscii(f[9], r.from_city, sizeof(r.from_city));
+      if (f[10]) strlcpy(r.to_code, f[10], sizeof(r.to_code));
+      if (f[11]) services::route::foldAscii(f[11], r.to_city, sizeof(r.to_city));
+      services::route::put(a.callsign, &r);
+    }
+  }
   ++s_count;
 }
 

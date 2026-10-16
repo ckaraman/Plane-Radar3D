@@ -100,7 +100,9 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 
 ### Ekranlar
 
-- **Radar 3D:** Perspektif zemin ızgarası, menzil halkaları, harita çizgileri ve uçaklar. Uçakların altında zemine inen çizgi ve gölge, arkalarında son bir dakikalık iz var. Renkler: turuncu FL100 altı, krem FL100–250, camgöbeği FL250 üstü.
+- **Radar 3D:** Perspektif zemin ızgarası, menzil halkaları, harita (deniz, kıyı çizgisi, ana yollar) ve uçaklar. Uçakların altında zemine inen çizgi ve gölge, arkalarında son bir dakikalık iz var. Renkler: turuncu 10K ft altı, krem 10–25K ft, camgöbeği 25K ft üstü. İrtifa diğer radardaki gibi `1.2K ft` biçiminde.
+- **Uçak kartı:** Seçilen (ya da en yakın) uçağın nereden nereye gittiği (adsbdb.com, çağrı koduna göre; bazı uçuşlarda bulunamayabilir), irtifa, hız, mesafe, rota ve tırmanma/alçalma.
+- **Harita:** Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
 - **Saat:** Menzilde 15 sn boyunca uçak yoksa açılır. Altında iç ortam (SHT30) ve dış ortam sıcaklığı gösterilir.
 - **Hava durumu:** 2 dakikada bir 15 sn görünür (Open-Meteo).
 

@@ -16,6 +16,7 @@ $Sources = @(
 )
 $script:SrcIdx = 0
 $script:Rx = ''
+$script:RouteCache = @{}   # callsign -> 'FROM,FromCity,TO,ToCity' or '-'
 $Inv = [Globalization.CultureInfo]::InvariantCulture
 
 function Find-RadarPort {
@@ -71,6 +72,37 @@ function Get-Traffic($lat, $lon) {
   throw $lastErr
 }
 
+function Fold-Ascii($t) {
+  $t = ([string]$t).Replace('ı', 'i').Replace('İ', 'I')
+  $d = $t.Normalize([Text.NormalizationForm]::FormD)
+  $sb = New-Object System.Text.StringBuilder
+  foreach ($ch in $d.ToCharArray()) {
+    if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($ch) -ne [Globalization.UnicodeCategory]::NonSpacingMark) { [void]$sb.Append($ch) }
+  }
+  $r = ($sb.ToString() -replace '[^A-Za-z0-9 .\-]', '').Trim()
+  if ($r.Length -gt 19) { $r = $r.Substring(0, 19) }
+  return $r
+}
+
+# Nereden-nereye bilgisi (adsbdb.com, çağrı koduna göre). Bulunamazsa '-', geçici hatada $null.
+function Get-Route($cs) {
+  try {
+    $r = Invoke-RestMethod -Uri "https://api.adsbdb.com/v0/callsign/$cs" -TimeoutSec 6 -UserAgent 'plane-radar-3d-usb'
+    $fr = $r.response.flightroute
+    if ($null -eq $fr) { return '-' }
+    $fc = [string]$fr.origin.iata_code; if (-not $fc) { $fc = [string]$fr.origin.icao_code }
+    $tc = [string]$fr.destination.iata_code; if (-not $tc) { $tc = [string]$fr.destination.icao_code }
+    if (-not $fc -and -not $tc) { return '-' }
+    $fc = ($fc -replace '[^A-Za-z0-9]', ''); $tc = ($tc -replace '[^A-Za-z0-9]', '')
+    return ('{0},{1},{2},{3}' -f $fc, (Fold-Ascii $fr.origin.municipality), $tc, (Fold-Ascii $fr.destination.municipality))
+  } catch {
+    $code = $null
+    try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+    if ($code -eq 404) { return '-' }
+    return $null
+  }
+}
+
 function Build-Lines($list, $lat0, $lon0) {
   $items = foreach ($a in $list) {
     $la = Get-Num $a.lat; $lo = Get-Num $a.lon
@@ -85,11 +117,25 @@ function Build-Lines($list, $lat0, $lon0) {
     $ty = ([string]$a.t) -replace '[^A-Za-z0-9]', ''; if ($ty.Length -gt 4) { $ty = $ty.Substring(0, 4) }
     $dx = ($lo - $lon0) * [math]::Cos($lat0 * [math]::PI / 180); $dy = $la - $lat0
     [pscustomobject]@{
+      Cs   = $cs
       D    = $dx * $dx + $dy * $dy
       Line = [string]::Format($Inv, 'PR:A {0:F5},{1:F5},{2:F0},{3:F0},{4:F0},{5:F0},{6},{7}', $la, $lo, $trk, $gs, $alt, $vr, $cs, $ty)
     }
   }
-  return @($items | Sort-Object D | Select-Object -First 64 | ForEach-Object { $_.Line })
+  $sel = @($items | Sort-Object D | Select-Object -First 64)
+  # Look up a few new routes per cycle (nearest aircraft first), keep them cached.
+  $lookups = 0
+  foreach ($it in $sel) {
+    if ($lookups -ge 6) { break }
+    if ($it.Cs -and -not $script:RouteCache.ContainsKey($it.Cs)) {
+      $rt = Get-Route $it.Cs
+      $lookups++
+      if ($null -ne $rt) { $script:RouteCache[$it.Cs] = $rt }
+    }
+  }
+  return @($sel | ForEach-Object {
+    if ($_.Cs -and $script:RouteCache.ContainsKey($_.Cs)) { $_.Line + ',' + $script:RouteCache[$_.Cs] } else { $_.Line }
+  })
 }
 
 Write-Host ''
