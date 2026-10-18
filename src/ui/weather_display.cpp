@@ -205,17 +205,17 @@ void drawDayDetail(const Day& d, int x, int y, int w, int h) {
   drawDegrees(buf, x + 82, y + 48, textdatum_t::middle_left, &ui::font::SansBold24, wText);
   // Low of the day under the high.
   snprintf(buf, sizeof(buf), "En düşük %d°", d.min_c);
-  text(buf, x + 84, y + 95, textdatum_t::middle_left, &ui::font::SansBold9, wCool);
-  text(services::weather::conditionLabel(d.cond), x + 84, y + 114, textdatum_t::middle_left,
+  text(buf, x + 84, y + 88, textdatum_t::middle_left, &ui::font::SansBold9, wCool);
+  text(services::weather::conditionLabel(d.cond), x + 84, y + 109, textdatum_t::middle_left,
        &ui::font::SansBold9, wDim);
 
-  // Four rows: nem, rüzgar, yağış olasılığı, yağış miktarı (missing ones are skipped).
+  // Rows: nem, rüzgar, yağış olasılığı (missing ones are skipped).
   const int lx = x + w - 138, vx = x + w - 10;
-  int ry = y + 28;
+  int ry = y + 32;
   auto row = [&](const char* label, const char* value) {
     text(label, lx, ry, textdatum_t::middle_left, &ui::font::Sans8, wFaint);
     text(value, vx, ry, textdatum_t::middle_right, &ui::font::Sans8, wText);
-    ry += 17;
+    ry += 18;
   };
   if (d.humidity >= 0) {
     snprintf(buf, sizeof(buf), "%%%d", d.humidity);
@@ -232,10 +232,6 @@ void drawDayDetail(const Day& d, int x, int y, int w, int h) {
   if (d.pop >= 0) {
     snprintf(buf, sizeof(buf), "%%%d", d.pop);
     row("YAĞIŞ", buf);
-  }
-  if (d.rain_x10 >= 0) {
-    snprintf(buf, sizeof(buf), "%d.%d mm", d.rain_x10 / 10, d.rain_x10 % 10);
-    row("MİKTAR", buf);
   }
 }
 
