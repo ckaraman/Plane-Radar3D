@@ -88,7 +88,8 @@ Harita katmanı (sahil ve ana yollar) da gönderilebilir. Yalnız sayfa haritay�
 | Üst şeride dokunma | Menzili değiştirir: 15 → 25 → 35 → 50 km |
 | **Ekrana 1,5 sn basılı tutma** | **Ayarlar menüsü** |
 | Sağ alttaki **HAVA** düğmesi | 5 günlük hava tahmini ekranını açar; orada **RADAR** düğmesi geri döner |
-| Saat ekranında dokunma | Radara döner |
+| **Damla** düğmesi (radar, hava ve saat ekranında) | Su takibi ekranını açar |
+| Saat ekranında dokunma | Radara döner (sağ üstteki damla ve HAVA düğmeleri hariç) |
 | BOOT kısa basma | Menzili değiştirir |
 | BOOT 3 sn basılı tutma | Wi-Fi ve ayarları siler, kurulum ekranına döner |
 | Açılışta ekrana dokunuyor olmak | Dokunmatik kalibrasyonunu başlatır |
@@ -108,7 +109,7 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 - **Uçak kartı:** Seçilen (ya da en yakın) uçağın nereden nereye gittiği (adsbdb.com, çağrı koduna göre; bazı uçuşlarda bulunamayabilir), irtifa, hız, mesafe, rota ve tırmanma/alçalma.
 - **3B arazi:** Haritayla birlikte arazi yükseklikleri (Open-Meteo) indirilir; zemin ızgarası tepelere göre kabarır, yollar ve kıyılar araziye oturur, yüksek yerler daha parlak çizilir.
 - **Harita:** Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
-- **Saat:** Menzilde 15 sn boyunca uçak yoksa açılır. Altında ortam (SHT30) ve dış hava sıcaklığı gösterilir.
+- **Saat:** Seçili menzilde 15 sn boyunca uçak yoksa açılır (menzil dışındaki uçaklar engellemez). Altında ORTAM SIC. (SHT30) ve DIŞ ORT. SIC. sıcaklık ve nemi gösterilir.
 - **Hava durumu:** Radarın sağ altındaki HAVA düğmesiyle açılır. Dış ortamın şimdiki durumu (sıcaklık, hissedilen, nem, rüzgâr, gün doğumu/batımı), SHT30'dan ortam sıcaklığı ve nemi (rahatlık etiketiyle) ile 5 günlük tahmin (en yüksek/en düşük sıcaklık, yağış olasılığı). Veri Open-Meteo'dan 10 dakikada bir gelir; Wi-Fi yokken USB köprüsü indirip gönderir.
 
 ## Teknik notlar
@@ -138,3 +139,10 @@ python3 tools/fonts/make_tr_fonts.py /usr/share/fonts/truetype/freefont
 ```
 
 Başka bir harf gerekirse `tools/fonts/make_tr_fonts.py` içindeki `RANGES` listesine eklenir.
+
+## Su takibi
+
+- Damla düğmesiyle açılır. Günün toplamı, hedefe göre dolan damla avatar, saatlik çubuklar (önceki günle), son 7 gün; ‹ › ile geçmiş günler.
+- 09:00–18:00 arası her saat başı ekran iki kez yanıp söner ve avatar "Su içtin mi?" diye sorar (o saatte zaten kayıt varsa sormaz, 10 dk sonra kapanır).
+- Hedef cihazdan ayarlanır ve değiştirilene kadar kalır. Kayıtlar NVS'de: 21 gün saatlik, 366 gün günlük toplam.
+- Yalnızca doğru saate ihtiyaç duyar: Wi-Fi'da NTP'den, USB modunda köprüden alır. Köprü olmadan Wi-Fi ile tek başına çalışır.

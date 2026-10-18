@@ -9,6 +9,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
+#include <cmath>
+
 #include "config.h"
 #include "hardware/display.h"
 #include "services/adsb_client.h"
@@ -71,11 +73,20 @@ void showRadarIfConnected() {
   g_radar_visible = true;
 }
 
+/** Aircraft inside the selected range (the fetch, and the USB bridge, cover more). */
 size_t aircraftInRange() {
   static services::adsb::Aircraft buf[services::adsb::kMaxAircraft];
   unsigned long fetched = 0;
   const size_t n = services::adsb::snapshotAircraft(buf, services::adsb::kMaxAircraft, &fetched);
-  return n;  // fetch radius is already the view radius (+15 %)
+  const double lat0 = services::location::lat(), lon0 = services::location::lon();
+  const double kx = 111.0 * cos(lat0 * 0.01745329252);
+  const float r = ui::radar::rangeCurrent().outer_km;
+  size_t in = 0;
+  for (size_t i = 0; i < n; ++i) {
+    const double dx = (buf[i].lon - lon0) * kx, dy = (buf[i].lat - lat0) * 111.0;
+    if (dx * dx + dy * dy <= static_cast<double>(r) * r) ++in;
+  }
+  return in;
 }
 
 void repaintScreen();
@@ -160,6 +171,16 @@ void handleBootButton() {
   }
 }
 
+void openWeather() {
+  g_screen = Screen::Weather;
+  ui::weatherDisplayEnter();
+}
+
+void openWater() {
+  g_screen = Screen::Water;
+  ui::water::enter();
+}
+
 void onTouchTap(int x, int y) {
   if (ui::water::overlayActive()) {
     ui::water::overlayTap(x, y);
@@ -168,10 +189,22 @@ void onTouchTap(int x, int y) {
   }
   if (g_screen == Screen::Weather) {
     if (ui::switchButtonHit(x, y)) {
-      g_screen = Screen::Water;
-      ui::water::enter();
+      wakeRadar();
+    } else if (ui::waterButtonHit(x, y)) {
+      openWater();
     } else {
       ui::weatherDisplayTap(x, y);
+    }
+    return;
+  }
+  if (g_screen == Screen::Clock) {
+    const int hit = ui::clockDisplayHit(x, y);
+    if (hit == 1) {
+      openWater();
+    } else if (hit == 2) {
+      openWeather();
+    } else {
+      wakeRadar();
     }
     return;
   }
@@ -188,8 +221,11 @@ void onTouchTap(int x, int y) {
     return;
   }
   if (ui::switchButtonHit(x, y)) {
-    g_screen = Screen::Weather;
-    ui::weatherDisplayEnter();
+    openWeather();
+    return;
+  }
+  if (ui::waterButtonHit(x, y)) {
+    openWater();
     return;
   }
   if (ui::radar3d::handleTap(x, y)) {
