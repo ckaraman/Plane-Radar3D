@@ -4,7 +4,7 @@ namespace ui {
 
 /**
  * Screen switch button, bottom right on both the radar and the forecast screen
- * (radar -> "HAVA", forecast -> "RADAR"). Same box on both so a second tap
+ * (radar -> "HAVA" -> "SU" -> "RADAR"). Same box on both so a second tap
  * returns to where you were.
  */
 constexpr int kSwitchW = 100;

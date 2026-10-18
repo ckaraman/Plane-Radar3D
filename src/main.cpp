@@ -22,6 +22,7 @@
 #include "services/terrain.h"
 #include "services/usb_feed.h"
 #include "services/weather_service.h"
+#include "services/water_store.h"
 #include "services/wifi_setup.h"
 #include "ui/clock_display.h"
 #include "ui/radar3d.h"
@@ -29,6 +30,7 @@
 #include "ui/screen_switch.h"
 #include "ui/settings_menu.h"
 #include "ui/status_screens.h"
+#include "ui/water_screen.h"
 #include "ui/weather_display.h"
 
 namespace {
@@ -38,7 +40,7 @@ unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_redraw_ms = 0;
 
-enum class Screen { Radar, Clock, Weather };
+enum class Screen { Radar, Clock, Weather, Water };
 Screen g_screen = Screen::Radar;
 unsigned long g_last_aircraft_ms = 0;
 
@@ -76,6 +78,8 @@ size_t aircraftInRange() {
   return n;  // fetch radius is already the view radius (+15 %)
 }
 
+void repaintScreen();
+
 // Runs at the redraw cadence: decide radar / clock / weather, then draw.
 void updateScreen() {
   const unsigned long now = millis();
@@ -85,9 +89,22 @@ void updateScreen() {
     g_last_aircraft_ms = now;
   }
 
-  // Forecast screen: stays until the switch button (or BOOT) brings the radar back.
+  // Water reminder / amount picker / goal setting on top of any screen.
+  if (ui::water::overlayActive()) {
+    if (!ui::water::overlayTick()) repaintScreen();
+    return;
+  }
+  if (ui::water::reminderDue()) {
+    ui::water::openReminder();
+    return;
+  }
+  // Forecast / water screens stay until the switch button (or BOOT) moves on.
   if (g_screen == Screen::Weather) {
     ui::weatherDisplayTick();
+    return;
+  }
+  if (g_screen == Screen::Water) {
+    ui::water::tick();
     return;
   }
 
@@ -104,6 +121,17 @@ void updateScreen() {
 
   g_screen = Screen::Radar;
   ui::radar3d::drawFrame();
+}
+
+/** Redraw the current screen after an overlay closed. */
+void repaintScreen() {
+  switch (g_screen) {
+    case Screen::Clock: ui::clockDisplayEnter(); break;
+    case Screen::Weather: ui::weatherDisplayEnter(); break;
+    case Screen::Water: ui::water::enter(); break;
+    case Screen::Radar: break;
+  }
+  g_last_redraw_ms = 0;
 }
 
 /** Back to the radar (from the clock or the forecast screen). */
@@ -133,11 +161,25 @@ void handleBootButton() {
 }
 
 void onTouchTap(int x, int y) {
+  if (ui::water::overlayActive()) {
+    ui::water::overlayTap(x, y);
+    if (!ui::water::overlayActive()) repaintScreen();
+    return;
+  }
   if (g_screen == Screen::Weather) {
+    if (ui::switchButtonHit(x, y)) {
+      g_screen = Screen::Water;
+      ui::water::enter();
+    } else {
+      ui::weatherDisplayTap(x, y);
+    }
+    return;
+  }
+  if (g_screen == Screen::Water) {
     if (ui::switchButtonHit(x, y)) {
       wakeRadar();
     } else {
-      ui::weatherDisplayTap(x, y);
+      ui::water::tap(x, y);
     }
     return;
   }
@@ -178,9 +220,7 @@ void pollTouch() {
       g_touch_long_fired = true;
       ui::settingsMenuRun();
       // Back from the menu: repaint whatever screen is active.
-      if (g_screen == Screen::Clock) ui::clockDisplayEnter();
-      if (g_screen == Screen::Weather) ui::weatherDisplayEnter();
-      g_last_redraw_ms = 0;
+      repaintScreen();
       g_touch_down = false;
     }
     return;
@@ -244,6 +284,7 @@ void setup() {
   services::terrain::init();
   services::clock::init();
   services::weather::init();
+  services::water::init();
   ui::radar::rangeInit();
   services::adsb::init();
   services::route::init();

@@ -342,16 +342,13 @@ void drawDay(const Day& d, bool today, bool selected, int x, int y, int w, int h
 void drawSwitchButton() {
   s_spr->fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, wPanel);
   s_spr->drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, wCool);
-  // Small radar: two rings, crosshair and a blip.
-  const int cx = kSwitchX + 21, cy = kSwitchY + kSwitchH / 2;
-  s_spr->drawCircle(cx, cy, 13, wCool);
-  s_spr->drawCircle(cx, cy, 7, wEdge);
-  s_spr->drawFastHLine(cx - 13, cy, 27, wEdge);
-  s_spr->drawFastVLine(cx, cy - 13, 27, wEdge);
-  s_spr->drawLine(cx, cy, cx + 9, cy - 9, wCool);
-  s_spr->fillCircle(cx + 5, cy - 2, 2, wWarm);
-  text("RADAR", (kSwitchX + 38 + kSwitchX + kSwitchW) / 2, cy + 1, textdatum_t::middle_center,
-       &ui::font::SansBold8, wText);
+  // Next screen: water tracking (a small droplet).
+  const int cx = kSwitchX + 22, cy = kSwitchY + kSwitchH / 2 + 3;
+  s_spr->fillCircle(cx, cy, 9, wRain);
+  s_spr->fillTriangle(cx, cy - 19, cx - 8, cy - 4, cx + 8, cy - 4, wRain);
+  s_spr->fillEllipse(cx - 4, cy - 2, 2, 3, wText);
+  text("SU", (kSwitchX + 38 + kSwitchX + kSwitchW) / 2, cy - 2, textdatum_t::middle_center,
+       &ui::font::SansBold9, wText);
 }
 
 /** Half sun on a horizon line, with an up (sunrise) or down (sunset) tick. */
