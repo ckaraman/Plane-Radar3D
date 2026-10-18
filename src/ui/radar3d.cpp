@@ -17,8 +17,11 @@
 #include "services/route_service.h"
 #include "services/terrain.h"
 #include "services/sht30.h"
+#include "services/weather_parse.h"
 #include "services/usb_feed.h"
 #include "ui/radar_range.h"
+#include "ui/screen_switch.h"
+#include "ui/weather_icons.h"
 
 namespace ui::radar3d {
 
@@ -77,12 +80,13 @@ constexpr float kCamDistOverR = 2.1f;  // camera ground distance / outer radius
 // --- Layout ---
 constexpr int kTopBarH = 22;
 // Arrow keys like a keyboard, bottom left: up above down, left/down/right in a row.
-constexpr int kBtnSize = 30;
-constexpr int kPadStep = kBtnSize + 2;
+// Big enough for the resistive panel; the 4 px gap keeps neighbouring keys apart.
+constexpr int kBtnSize = 42;
+constexpr int kPadStep = kBtnSize + 4;
 constexpr int kPadLeft = 6;
-constexpr int kPadTop = kH - 4 - 2 * kBtnSize - 2;
-constexpr int kPadW = 3 * kPadStep - 2;
-constexpr int kPadH = 2 * kPadStep - 2;
+constexpr int kPadTop = kH - 4 - kBtnSize - kPadStep;
+constexpr int kPadW = 2 * kPadStep + kBtnSize;
+constexpr int kPadH = kPadStep + kBtnSize;
 constexpr int kPitchStepDeg = 8;
 constexpr int kCardW = 196;
 constexpr int kCardHFull = 116;
@@ -317,6 +321,7 @@ bool overlapsUi(int x, int y, int w, int h) {
       {0, kTopBarH, 112, 58},                                  // legend
       {kPadLeft - 2, kPadTop - 2, kPadW + 4, kPadH + 4},        // arrow keys
       {kCardX - 2, kCardY - 2, kCardW + 4, cardH() + 4},       // card
+      {ui::kSwitchX - 2, ui::kSwitchY - 2, ui::kSwitchW + 4, ui::kSwitchH + 4},  // HAVA
   };
   for (const Box& b : fixed) {
     if (intersects(me, b)) return true;
@@ -927,10 +932,10 @@ PadButton padButton(int i) {
 }
 
 void drawButton(int x, int y, Arrow dir) {
-  s_spr.fillRoundRect(x, y, kBtnSize, kBtnSize, 6, kPanel);
-  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, 6, kRingDim);
+  s_spr.fillRoundRect(x, y, kBtnSize, kBtnSize, 7, kPanel);
+  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, 7, kRing);
   const int cx = x + kBtnSize / 2, cy = y + kBtnSize / 2;
-  constexpr int a = 6, b = 4;
+  constexpr int a = 8, b = 5;
   switch (dir) {
     case Arrow::Left:
       thickLine(cx + b, cy - a, cx - b, cy, kCyan);
@@ -951,11 +956,27 @@ void drawButton(int x, int y, Arrow dir) {
   }
 }
 
+/** Bottom right: opens the forecast screen. Sun + cloud and "HAVA". */
+void drawSwitchButton() {
+  using namespace ui;
+  s_spr.fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, kPanel);
+  s_spr.drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, kRing);
+  const weather::IconPalette<Pal> pal{kPanel, kOrange, kCream, kCream, kTextDim,
+                                      kCyan,  kText,   kOrange, kTextDim};
+  weather::drawWeatherIcon(s_spr, kSwitchX + 22, kSwitchY + kSwitchH / 2, 14,
+                           services::weather::Condition::PartlyCloudy, true, pal);
+  setFont(&fonts::Font2);
+  s_spr.setTextDatum(textdatum_t::middle_left);
+  s_spr.setTextColor(kText);
+  s_spr.drawString("HAVA", kSwitchX + 42, kSwitchY + kSwitchH / 2 + 1);
+}
+
 void drawControls() {
   for (int i = 0; i < 4; ++i) {
     const PadButton b = padButton(i);
     drawButton(b.x, b.y, b.dir);
   }
+  drawSwitchButton();
 }
 
 /** Two-line card: callsign + route codes, then altitude / speed / distance / climb. */
@@ -1105,8 +1126,8 @@ void drawEmptyNote(unsigned long fetched_ms) {
 }
 
 void applyPalette() {
+  // Set every frame: the forecast screen shares the sprite with its own palette.
   const bool hc = services::display_prefs::get().high_contrast;
-  if (s_palette_set && hc == s_palette_hc) return;
   const Rgb* pal = hc ? kPaletteHighContrast : kPalette;
   for (int i = 0; i < 16; ++i) s_spr.setPaletteColor(i, pal[i].r, pal[i].g, pal[i].b);
   s_palette_hc = hc;
@@ -1175,6 +1196,8 @@ void drawFrame() {
 #endif
 }
 
+LGFX_Sprite* frame() { return s_ready ? &s_spr : nullptr; }
+
 #ifdef RADAR3D_HOST_TEST
 bool hostHitPos(const char* callsign, int* x, int* y) {
   for (size_t i = 0; i < s_hit_count; ++i) {
@@ -1194,7 +1217,8 @@ bool handleTap(int x, int y) {
     if (x >= b.x - 2 && x < b.x + kBtnSize + 2 && y >= b.y - 2 && y < b.y + kBtnSize + 2) {
       auto p = services::display_prefs::get();
       if (i == 0 || i == 1) {
-        s_yaw_target += i == 0 ? -kYawStepDeg : kYawStepDeg;
+        // Right arrow turns the view to the right (the map swings left), left to the left.
+        s_yaw_target += i == 0 ? kYawStepDeg : -kYawStepDeg;
         s_yaw_target = fmodf(s_yaw_target + 360.0f, 360.0f);
         p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_target)) % 360;
       } else if (i == 2) {

@@ -26,6 +26,7 @@
 #include "ui/clock_display.h"
 #include "ui/radar3d.h"
 #include "ui/radar_range.h"
+#include "ui/screen_switch.h"
 #include "ui/settings_menu.h"
 #include "ui/status_screens.h"
 #include "ui/weather_display.h"
@@ -40,8 +41,6 @@ unsigned long g_last_redraw_ms = 0;
 enum class Screen { Radar, Clock, Weather };
 Screen g_screen = Screen::Radar;
 unsigned long g_last_aircraft_ms = 0;
-unsigned long g_main_since_ms = 0;
-unsigned long g_weather_started_ms = 0;
 
 // Touch state (polled; the XPT2046 shares the SPI bus with the panel).
 bool g_touch_down = false;
@@ -66,7 +65,6 @@ void showRadarIfConnected() {
   services::clock::startSync();  // no-op after the first call
   g_screen = Screen::Radar;
   g_last_aircraft_ms = millis();
-  g_main_since_ms = millis();
   ui::radar3d::drawFrame();
   g_radar_visible = true;
 }
@@ -87,17 +85,9 @@ void updateScreen() {
     g_last_aircraft_ms = now;
   }
 
+  // Forecast screen: stays until the switch button (or BOOT) brings the radar back.
   if (g_screen == Screen::Weather) {
-    if (now - g_weather_started_ms < config::kWeatherShowMs) {
-      ui::weatherDisplayTick();
-      return;
-    }
-    g_main_since_ms = now;
-  } else if (services::weather::enabled() && now - g_main_since_ms >= config::kWeatherEveryMs &&
-             services::weather::snapshot(nullptr, nullptr)) {
-    g_screen = Screen::Weather;
-    g_weather_started_ms = now;
-    ui::weatherDisplayEnter();
+    ui::weatherDisplayTick();
     return;
   }
 
@@ -116,13 +106,9 @@ void updateScreen() {
   ui::radar3d::drawFrame();
 }
 
-/** Clock / weather: any tap (or BOOT tap) brings the radar back for a while. */
+/** Back to the radar (from the clock or the forecast screen). */
 void wakeRadar() {
   g_last_aircraft_ms = millis();
-  if (g_screen == Screen::Weather) {
-    g_weather_started_ms = millis() - config::kWeatherShowMs;
-  }
-  g_main_since_ms = millis();
   g_screen = Screen::Radar;
   g_last_redraw_ms = 0;  // redraw right away
 }
@@ -147,8 +133,17 @@ void handleBootButton() {
 }
 
 void onTouchTap(int x, int y) {
+  if (g_screen == Screen::Weather) {
+    if (ui::switchButtonHit(x, y)) wakeRadar();
+    return;
+  }
   if (g_screen != Screen::Radar) {
     wakeRadar();
+    return;
+  }
+  if (ui::switchButtonHit(x, y)) {
+    g_screen = Screen::Weather;
+    ui::weatherDisplayEnter();
     return;
   }
   if (ui::radar3d::handleTap(x, y)) {

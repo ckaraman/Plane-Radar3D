@@ -98,6 +98,7 @@ void sendHello() {
   doc["runways"] = ui::radar::showRunways();
   doc["rings"] = ui::radar::showRings();
   doc["weather"] = services::weather::enabled();
+  doc["wxv"] = 1;  // accepts PR:W forecast lines from the USB bridge
   doc["map"] = static_cast<uint32_t>(services::map::size());
   doc["mapv"] = services::map::kBlobVersion;
   doc["elevv"] = services::terrain::kProtocolVersion;
@@ -447,6 +448,8 @@ void handleLine(char* line) {
   } else if (strcmp(command, "OTAABORT") == 0) {
     services::serial_ota::abort(nullptr);
     sendOk(false);
+  } else if (strcmp(command, "W") == 0) {
+    services::weather::handleBridge(args);
   } else if (strcmp(command, "A") == 0) {
     services::usb_feed::add(args);
   } else if (strcmp(command, "ABEGIN") == 0) {

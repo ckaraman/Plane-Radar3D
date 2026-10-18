@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hardware/display.h"  // LGFX_Sprite
+
 namespace ui::radar3d {
 
 /**
@@ -17,5 +19,9 @@ void drawFrame();
 /** Touch tap in screen coordinates. Rotate buttons, aircraft selection,
  *  range change (tap the top bar). Returns true when something changed. */
 bool handleTap(int x, int y);
+
+/** The shared full-screen frame sprite (nullptr if it could not be allocated).
+ *  The forecast screen draws into it with its own palette. */
+LGFX_Sprite* frame();
 
 }  // namespace ui::radar3d

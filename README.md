@@ -81,13 +81,14 @@ Harita katmanı (sahil ve ana yollar) da gönderilebilir. Yalnız sayfa haritay�
 
 | Hareket | Sonuç |
 |---|---|
-| Sol alttaki **‹ ›** düğmeleri | Kamerayı 30° döndürür (yumuşak geçişle). Açı kaydedilir. |
+| Sol alttaki **‹ ›** düğmeleri | Görüşü 30° sola / sağa çevirir (yumuşak geçişle). Açı kaydedilir. |
 | **˄ ˅** düğmeleri | Kamerayı eğer: yukarı daha tepeden, aşağı daha yatay bakış. Kaydedilir. |
 | Bir uçağa dokunma | Seçer. Sağ alttaki kartta bilgileri görünür. |
 | Boş bir yere dokunma | Seçimi kaldırır. Kart en yakın uçağı göstermeye döner. |
 | Üst şeride dokunma | Menzili değiştirir: 15 → 25 → 35 → 50 km |
 | **Ekrana 1,5 sn basılı tutma** | **Ayarlar menüsü** |
-| Saat / hava ekranında dokunma | Radara döner |
+| Sağ alttaki **HAVA** düğmesi | 5 günlük hava tahmini ekranını açar; orada **RADAR** düğmesi geri döner |
+| Saat ekranında dokunma | Radara döner |
 | BOOT kısa basma | Menzili değiştirir |
 | BOOT 3 sn basılı tutma | Wi-Fi ve ayarları siler, kurulum ekranına döner |
 | Açılışta ekrana dokunuyor olmak | Dokunmatik kalibrasyonunu başlatır |
@@ -108,7 +109,7 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 - **3B arazi:** Haritayla birlikte arazi yükseklikleri (Open-Meteo) indirilir; zemin ızgarası tepelere göre kabarır, yollar ve kıyılar araziye oturur, yüksek yerler daha parlak çizilir.
 - **Harita:** Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
 - **Saat:** Menzilde 15 sn boyunca uçak yoksa açılır. Altında iç ortam (SHT30) ve dış ortam sıcaklığı gösterilir.
-- **Hava durumu:** 2 dakikada bir 15 sn görünür (Open-Meteo).
+- **Hava durumu:** Radarın sağ altındaki HAVA düğmesiyle açılır. Dış ortamın şimdiki durumu (sıcaklık, hissedilen, nem, rüzgâr, gün doğumu/batımı), SHT30'dan iç ortam sıcaklığı ve nemi ile 5 günlük tahmin (en yüksek/en düşük sıcaklık, yağış olasılığı). Veri Open-Meteo'dan 10 dakikada bir gelir; Wi-Fi yokken USB köprüsü indirip gönderir.
 
 ## Teknik notlar
 

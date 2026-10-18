@@ -1,6 +1,7 @@
 ﻿# Radar USB köprüsü (Windows PowerShell 5.1, ek kurulum gerekmez)
 # Uçuş verisini internetten indirir, USB seri port üzerinden Plane Radar 3D cihazına gönderir.
 # Protokol: PR:ABEGIN / PR:A lat,lon,track,gs,alt,vrate,callsign,type / PR:AEND <unix>
+#           PR:W ... (hava durumu, 10 dakikada bir; Open-Meteo)
 
 $ErrorActionPreference = 'Stop'
 [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::InvariantCulture
@@ -17,6 +18,8 @@ $Sources = @(
 $script:SrcIdx = 0
 $script:Rx = ''
 $script:RouteCache = @{}   # callsign -> 'FROM,FromCity,TO,ToCity' or '-'
+$WeatherEverySec = 600
+$script:WeatherNext = [DateTime]::MinValue
 $Inv = [Globalization.CultureInfo]::InvariantCulture
 
 function Find-RadarPort {
@@ -100,6 +103,52 @@ function Get-Route($cs) {
     try { $code = [int]$_.Exception.Response.StatusCode } catch {}
     if ($code -eq 404) { return '-' }
     return $null
+  }
+}
+
+function NumOr($v, $def) { $n = Get-Num $v; if ($null -eq $n) { return $def }; return $n }
+
+# Hava durumu (Open-Meteo, anahtar gerekmez): şimdiki durum + 5 günlük tahmin, tek satır PR:W.
+function Get-WeatherLine($lat, $lon) {
+  $la = $lat.ToString('F4', $Inv); $lo = $lon.ToString('F4', $Inv)
+  $url = "https://api.open-meteo.com/v1/forecast?latitude=$la&longitude=$lo" +
+    '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_direction_10m' +
+    '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset' +
+    '&forecast_days=5&timezone=auto&timeformat=unixtime'
+  $r = Invoke-RestMethod -Uri $url -TimeoutSec 10 -UserAgent 'plane-radar-3d-usb'
+  $c = $r.current
+  $d = $r.daily
+  $rise = 0; $set = 0
+  if ($d.sunrise -and $d.sunrise.Count -gt 0) { $rise = NumOr $d.sunrise[0] 0 }
+  if ($d.sunset -and $d.sunset.Count -gt 0) { $set = NumOr $d.sunset[0] 0 }
+  $t = NumOr $c.temperature_2m $null
+  if ($null -eq $t) { throw 'hava durumu cevabı beklenmedik' }
+  $line = [string]::Format($Inv, 'PR:W {0:F0} {1:F1} {2:F0} {3:F1} {4:F0} {5:F0} {6:F1} {7:F0} {8:F0} {9:F0}',
+    (NumOr $r.utc_offset_seconds 0), $t, (NumOr $c.relative_humidity_2m -1), (NumOr $c.apparent_temperature $t),
+    (NumOr $c.weather_code 3), (NumOr $c.is_day 1), (NumOr $c.wind_speed_10m -1), (NumOr $c.wind_direction_10m -1),
+    $rise, $set)
+  $days = @()
+  $n = @($d.time).Count
+  for ($i = 0; $i -lt $n -and $days.Count -lt 5; $i++) {
+    $code = Get-Num $d.weather_code[$i]; $mx = Get-Num $d.temperature_2m_max[$i]; $mn = Get-Num $d.temperature_2m_min[$i]
+    if ($null -eq $code -or $null -eq $mx -or $null -eq $mn) { continue }
+    $pop = -1
+    if ($d.precipitation_probability_max) { $pop = NumOr $d.precipitation_probability_max[$i] -1 }
+    $days += [string]::Format($Inv, '{0:F0},{1:F0},{2:F1},{3:F1},{4:F0}', (NumOr $d.time[$i] 0), $code, $mx, $mn, $pop)
+  }
+  return $line + ' ' + $days.Count + ' ' + ($days -join ' ')
+}
+
+function Send-Weather($sp, $lat, $lon) {
+  if ((Get-Date) -lt $script:WeatherNext) { return }
+  try {
+    $line = Get-WeatherLine $lat $lon
+    $sp.WriteLine($line)
+    $script:WeatherNext = (Get-Date).AddSeconds($WeatherEverySec)
+    Write-Host ("[{0}] Hava durumu gönderildi" -f (Get-Date).ToString('HH:mm:ss')) -ForegroundColor Cyan
+  } catch {
+    $script:WeatherNext = (Get-Date).AddSeconds(60)   # bir dakika sonra tekrar dene
+    Write-Host ("Hava durumu alınamadı: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
   }
 }
 
@@ -201,6 +250,7 @@ try {
     } catch {
       Write-Host ("[{0}] Veri alınamadı: {1}" -f $t, $_.Exception.Message) -ForegroundColor Yellow
     }
+    Send-Weather $sp $lat $lon
     Start-Sleep -Seconds $IntervalSec
   }
 } catch {

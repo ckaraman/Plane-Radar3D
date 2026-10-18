@@ -25,4 +25,7 @@ bool snapshot(Forecast* out, unsigned long* fetched_ms);
  */
 void fetchIfDue(double lat, double lon);
 
+/** USB mode: "PR:W ..." line from the PC bridge (format: weather_parse.h). */
+void handleBridge(const char* args);
+
 }  // namespace services::weather

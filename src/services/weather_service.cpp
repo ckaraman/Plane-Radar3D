@@ -54,23 +54,20 @@ bool checkboxChecked(const char* value) {
 }
 
 bool fetchNow(double lat, double lon) {
-  char url[320];
+  char url[400];
   snprintf(url, sizeof(url),
            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-           "&current=temperature_2m,weather_code,is_day"
-           "&hourly=temperature_2m,weather_code,is_day&forecast_hours=6"
-           "&timeformat=unixtime&timezone=GMT",
-           lat, lon);
+           "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,"
+           "is_day,wind_speed_10m,wind_direction_10m"
+           "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
+           "precipitation_probability_max,sunrise,sunset"
+           "&forecast_days=%d&timezone=auto&timeformat=unixtime",
+           lat, lon, kMaxDays);
 
   JsonDocument filter;
-  filter["current"]["time"] = true;
-  filter["current"]["temperature_2m"] = true;
-  filter["current"]["weather_code"] = true;
-  filter["current"]["is_day"] = true;
-  filter["hourly"]["time"] = true;
-  filter["hourly"]["temperature_2m"] = true;
-  filter["hourly"]["weather_code"] = true;
-  filter["hourly"]["is_day"] = true;
+  filter["utc_offset_seconds"] = true;
+  filter["current"] = true;
+  filter["daily"] = true;
 
   WiFiClientSecure client;
   client.setInsecure();
@@ -105,12 +102,12 @@ bool fetchNow(double lat, double lon) {
   s_forecast = f;
   s_have = true;
   s_fetched_ms = millis();
+  if (s_fetched_ms == 0) s_fetched_ms = 1;
   s_lat = lat;
   s_lon = lon;
   unlock();
-  Serial.printf("weather: now %d C (%s), +2h %s%d C\n", f.now.temp_c,
-                conditionLabel(f.now.cond), f.later.valid ? "" : "n/a ",
-                f.later.valid ? f.later.temp_c : 0);
+  Serial.printf("weather: now %d C (%s), %u days\n", f.now.temp_c,
+                conditionLabel(f.now.cond), static_cast<unsigned>(f.day_count));
   return true;
 }
 
@@ -158,6 +155,21 @@ bool snapshot(Forecast* out, unsigned long* fetched_ms) {
   }
   unlock();
   return have;
+}
+
+void handleBridge(const char* args) {
+  Forecast f;
+  if (!parseBridgeLine(args, &f)) {
+    Serial.println("PR:ERR {\"msg\":\"bad_weather\"}");
+    return;
+  }
+  lock();
+  s_forecast = f;
+  s_have = true;
+  s_fetched_ms = millis();
+  if (s_fetched_ms == 0) s_fetched_ms = 1;
+  unlock();
+  Serial.printf("PR:WOK {\"days\":%u}\n", static_cast<unsigned>(f.day_count));
 }
 
 void fetchIfDue(double lat, double lon) {
