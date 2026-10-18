@@ -39,6 +39,7 @@ struct Day {
   int16_t wind_kmh = -1;   // max wind speed, -1 = unknown
   int16_t wind_dir = -1;   // dominant direction (degrees, from), -1 = unknown
   int16_t rain_x10 = -1;   // precipitation sum in 0.1 mm, -1 = unknown
+  int16_t humidity = -1;   // mean relative humidity %, -1 = unknown
 };
 
 constexpr int kMaxDays = 5;
@@ -148,7 +149,8 @@ inline int16_t localMinutes(long unix_s, long utc_offset_s) {
  *           wind_speed_10m,wind_direction_10m
  *   daily=weather_code,temperature_2m_max,temperature_2m_min,
  *         precipitation_probability_max,sunrise,sunset,
- *         wind_speed_10m_max,wind_direction_10m_dominant,precipitation_sum
+ *         wind_speed_10m_max,wind_direction_10m_dominant,precipitation_sum,
+ *         relative_humidity_2m_mean
  *   forecast_days=5, timezone=auto, timeformat=unixtime
  * Timestamps are UTC epoch seconds; utc_offset_seconds gives the local calendar.
  */
@@ -183,6 +185,7 @@ inline bool parseForecast(const JsonDocument& doc, Forecast* out) {
   JsonArrayConst wmax = d["wind_speed_10m_max"];
   JsonArrayConst wdom = d["wind_direction_10m_dominant"];
   JsonArrayConst psum = d["precipitation_sum"];
+  JsonArrayConst rhm = d["relative_humidity_2m_mean"];
   const size_t n = times.size();
   for (size_t i = 0; i < n && f.day_count < kMaxDays; ++i) {
     if (codes[i].isNull() || tmax[i].isNull() || tmin[i].isNull()) continue;
@@ -197,6 +200,7 @@ inline bool parseForecast(const JsonDocument& doc, Forecast* out) {
     if (!wmax[i].isNull()) day.wind_kmh = static_cast<int16_t>(lroundf(wmax[i].as<float>()));
     if (!wdom[i].isNull()) day.wind_dir = static_cast<int16_t>(lroundf(wdom[i].as<float>()));
     if (!psum[i].isNull()) day.rain_x10 = static_cast<int16_t>(lroundf(psum[i].as<float>() * 10.0f));
+    if (!rhm[i].isNull()) day.humidity = static_cast<int16_t>(lroundf(rhm[i].as<float>()));
   }
   if (rise.size() > 0 && !rise[0].isNull()) f.sunrise_min = date_util::localMinutes(rise[0].as<long>(), off);
   if (set.size() > 0 && !set[0].isNull()) f.sunset_min = date_util::localMinutes(set[0].as<long>(), off);
@@ -207,8 +211,8 @@ inline bool parseForecast(const JsonDocument& doc, Forecast* out) {
 /**
  * Same data from the PC bridge (USB mode), one line, space separated:
  *   <utc_off> <temp> <rh> <feels> <code> <is_day> <wind_kmh> <wind_dir> <sunrise> <sunset> <n>
- *   then n groups "<unix>,<code>,<max>,<min>,<pop>[,<wind_kmh>,<wind_dir>,<rain_mm>]"
- *   (-1 = unknown; the last three are optional, older bridges send five fields)
+ *   then n groups "<unix>,<code>,<max>,<min>,<pop>[,<wind_kmh>,<wind_dir>,<rain_mm>[,<rh>]]"
+ *   (-1 = unknown; fields after <pop> are optional, older bridges send fewer)
  * sunrise/sunset are unix seconds (0 = unknown). Returns false on malformed input.
  */
 inline bool parseBridgeLine(const char* s, Forecast* out) {
@@ -239,10 +243,10 @@ inline bool parseBridgeLine(const char* s, Forecast* out) {
   if (rise > 0) f.sunrise_min = date_util::localMinutes(static_cast<long>(rise), o);
   if (set > 0) f.sunset_min = date_util::localMinutes(static_cast<long>(set), o);
   for (int i = 0; i < static_cast<int>(n) && f.day_count < kMaxDays; ++i) {
-    double v[8] = {0, 0, 0, 0, -1, -1, -1, -1};
+    double v[9] = {0, 0, 0, 0, -1, -1, -1, -1, -1};
     while (*p == ' ') ++p;
     int k = 0;
-    for (; k < 8; ++k) {
+    for (; k < 9; ++k) {
       if (k > 0) {
         if (*p != ',') break;  // end of this group
         ++p;
@@ -260,6 +264,7 @@ inline bool parseBridgeLine(const char* s, Forecast* out) {
     day.wind_kmh = v[5] < 0 ? -1 : static_cast<int16_t>(lround(v[5]));
     day.wind_dir = v[6] < 0 ? -1 : static_cast<int16_t>(lround(v[6]));
     day.rain_x10 = v[7] < 0 ? -1 : static_cast<int16_t>(lround(v[7] * 10));
+    day.humidity = v[8] < 0 ? -1 : static_cast<int16_t>(lround(v[8]));
   }
   *out = f;
   return true;

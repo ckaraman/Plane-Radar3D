@@ -61,7 +61,8 @@ bool fetchNow(double lat, double lon) {
            "is_day,wind_speed_10m,wind_direction_10m"
            "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
            "precipitation_probability_max,sunrise,sunset,"
-           "wind_speed_10m_max,wind_direction_10m_dominant,precipitation_sum"
+           "wind_speed_10m_max,wind_direction_10m_dominant,precipitation_sum,"
+           "relative_humidity_2m_mean"
            "&forecast_days=%d&timezone=auto&timeformat=unixtime",
            lat, lon, kMaxDays);
 

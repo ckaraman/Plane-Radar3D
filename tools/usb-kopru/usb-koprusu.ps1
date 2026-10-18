@@ -116,7 +116,7 @@ function Get-WeatherLine($lat, $lon) {
   $la = $lat.ToString('F4', $Inv); $lo = $lon.ToString('F4', $Inv)
   $url = "https://api.open-meteo.com/v1/forecast?latitude=$la&longitude=$lo" +
     '&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,wind_direction_10m' +
-    '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_sum' +
+    '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,wind_speed_10m_max,wind_direction_10m_dominant,precipitation_sum,relative_humidity_2m_mean' +
     '&forecast_days=5&timezone=auto&timeformat=unixtime'
   $r = Invoke-RestMethod -Uri $url -TimeoutSec 10 -UserAgent 'plane-radar-3d-usb'
   $c = $r.current
@@ -141,7 +141,9 @@ function Get-WeatherLine($lat, $lon) {
     if ($d.wind_speed_10m_max) { $wmx = NumOr $d.wind_speed_10m_max[$i] -1 }
     if ($d.wind_direction_10m_dominant) { $wdr = NumOr $d.wind_direction_10m_dominant[$i] -1 }
     if ($d.precipitation_sum) { $rain = NumOr $d.precipitation_sum[$i] -1 }
-    $days += [string]::Format($Inv, '{0:F0},{1:F0},{2:F1},{3:F1},{4:F0},{5:F0},{6:F0},{7:F1}', (NumOr $d.time[$i] 0), $code, $mx, $mn, $pop, $wmx, $wdr, $rain)
+    $rh = -1
+    if ($d.relative_humidity_2m_mean) { $rh = NumOr $d.relative_humidity_2m_mean[$i] -1 }
+    $days += [string]::Format($Inv, '{0:F0},{1:F0},{2:F1},{3:F1},{4:F0},{5:F0},{6:F0},{7:F1},{8:F0}', (NumOr $d.time[$i] 0), $code, $mx, $mn, $pop, $wmx, $wdr, $rain, $rh)
   }
   return $line + ' ' + $days.Count + ' ' + ($days -join ' ')
 }
