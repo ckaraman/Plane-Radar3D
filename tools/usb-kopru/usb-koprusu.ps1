@@ -75,14 +75,17 @@ function Get-Traffic($lat, $lon) {
   throw $lastErr
 }
 
+# Şehir adı: Türkçe harfler kalır (cihaz fontunda var), diğer aksanlar sadeleşir.
+$TrLetters = 'çÇğĞıİöÖşŞüÜ'
 function Fold-Ascii($t) {
-  $t = ([string]$t).Replace('ı', 'i').Replace('İ', 'I')
-  $d = $t.Normalize([Text.NormalizationForm]::FormD)
   $sb = New-Object System.Text.StringBuilder
-  foreach ($ch in $d.ToCharArray()) {
-    if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($ch) -ne [Globalization.UnicodeCategory]::NonSpacingMark) { [void]$sb.Append($ch) }
+  foreach ($ch in ([string]$t).ToCharArray()) {
+    if ($TrLetters.IndexOf($ch) -ge 0) { [void]$sb.Append($ch); continue }
+    foreach ($d in ([string]$ch).Normalize([Text.NormalizationForm]::FormD).ToCharArray()) {
+      if ([Globalization.CharUnicodeInfo]::GetUnicodeCategory($d) -ne [Globalization.UnicodeCategory]::NonSpacingMark) { [void]$sb.Append($d) }
+    }
   }
-  $r = ($sb.ToString() -replace '[^A-Za-z0-9 .\-]', '').Trim()
+  $r = ($sb.ToString() -replace '[^A-Za-z0-9 .\-çÇğĞıİöÖşŞüÜ]', '').Trim()
   if ($r.Length -gt 19) { $r = $r.Substring(0, 19) }
   return $r
 }
@@ -198,6 +201,7 @@ try {
   $portName = Find-RadarPort
   $sp = New-Object System.IO.Ports.SerialPort $portName, 115200, 'None', 8, 'One'
   $sp.NewLine = "`n"
+  $sp.Encoding = New-Object System.Text.UTF8Encoding $false   # Türkçe şehir adları için
   $sp.DtrEnable = $false
   $sp.RtsEnable = $false
   $sp.WriteTimeout = 3000

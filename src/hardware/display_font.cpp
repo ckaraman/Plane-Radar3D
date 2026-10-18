@@ -27,12 +27,12 @@ bool vlwActiveOn(const lgfx::LGFXBase& gfx) {
 }  // namespace
 
 bool displayFontInit() {
-  s_vlw_loaded = vlwDataLen() > 0 &&
-                 tft.loadFont(vlwData(), lgfx::IFont::font_type_t::ft_vlw);
-  if (!s_vlw_loaded) {
-    Serial.println("Smooth font load failed — using bitmap fallback");
-  }
-  return s_vlw_loaded;
+  // The embedded smooth (VLW) font is ASCII only; the bitmap fonts in ui/fonts_tr.h
+  // have the Turkish letters, so the status screens use those.
+  s_vlw_loaded = false;
+  (void)vlwData;
+  (void)vlwDataLen;
+  return false;
 }
 
 bool displayFontIsSmooth() { return s_vlw_loaded; }

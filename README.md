@@ -108,8 +108,8 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 - **Uçak kartı:** Seçilen (ya da en yakın) uçağın nereden nereye gittiği (adsbdb.com, çağrı koduna göre; bazı uçuşlarda bulunamayabilir), irtifa, hız, mesafe, rota ve tırmanma/alçalma.
 - **3B arazi:** Haritayla birlikte arazi yükseklikleri (Open-Meteo) indirilir; zemin ızgarası tepelere göre kabarır, yollar ve kıyılar araziye oturur, yüksek yerler daha parlak çizilir.
 - **Harita:** Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
-- **Saat:** Menzilde 15 sn boyunca uçak yoksa açılır. Altında iç ortam (SHT30) ve dış ortam sıcaklığı gösterilir.
-- **Hava durumu:** Radarın sağ altındaki HAVA düğmesiyle açılır. Dış ortamın şimdiki durumu (sıcaklık, hissedilen, nem, rüzgâr, gün doğumu/batımı), SHT30'dan iç ortam sıcaklığı ve nemi ile 5 günlük tahmin (en yüksek/en düşük sıcaklık, yağış olasılığı). Veri Open-Meteo'dan 10 dakikada bir gelir; Wi-Fi yokken USB köprüsü indirip gönderir.
+- **Saat:** Menzilde 15 sn boyunca uçak yoksa açılır. Altında ortam (SHT30) ve dış hava sıcaklığı gösterilir.
+- **Hava durumu:** Radarın sağ altındaki HAVA düğmesiyle açılır. Dış ortamın şimdiki durumu (sıcaklık, hissedilen, nem, rüzgâr, gün doğumu/batımı), SHT30'dan ortam sıcaklığı ve nemi (rahatlık etiketiyle) ile 5 günlük tahmin (en yüksek/en düşük sıcaklık, yağış olasılığı). Veri Open-Meteo'dan 10 dakikada bir gelir; Wi-Fi yokken USB köprüsü indirip gönderir.
 
 ## Teknik notlar
 
@@ -127,3 +127,14 @@ pio run -e wroom32u -t merge    # firmware-merged.bin (0x0'a yazılır)
 Projeyi GitHub'a koyarsanız `.github/workflows/build.yml` her gönderimde derleme yapar ve `.bin` dosyalarını Actions sekmesinde hazır eder.
 
 Pinler ve zamanlamalar `include/config.h` içinde. Renk paleti ve kamera ayarları `src/ui/radar3d.cpp` içinde.
+
+## Türkçe karakterler
+
+Ekran fontları GNU FreeFont'tan (FreeSans) üretilmiş bitmap fontlardır ve Türkçe harfleri (ÇĞİÖŞÜ çğıöşü) ile ° işaretini içerir. Yazılımdaki metinler UTF-8 yazılır. Fontları yeniden üretmek için:
+
+```
+pip install freetype-py
+python3 tools/fonts/make_tr_fonts.py /usr/share/fonts/truetype/freefont
+```
+
+Başka bir harf gerekirse `tools/fonts/make_tr_fonts.py` içindeki `RANGES` listesine eklenir.

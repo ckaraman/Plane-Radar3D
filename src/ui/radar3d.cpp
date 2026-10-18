@@ -22,6 +22,7 @@
 #include "ui/radar_range.h"
 #include "ui/screen_switch.h"
 #include "ui/weather_icons.h"
+#include "ui/fonts_tr.h"
 
 namespace ui::radar3d {
 
@@ -299,6 +300,17 @@ void drawPlaneIcon(int cx, int cy, float heading_deg, float scale, uint8_t color
 void setFont(const lgfx::IFont* f) {
   s_spr.setFont(f);
   s_spr.setTextSize(1);
+}
+
+/** Bytes taking up the first `chars` letters of a UTF-8 string. */
+int utf8Bytes(const char* s, int chars) {
+  int i = 0;
+  while (s[i] != '\0' && chars > 0) {
+    ++i;
+    while ((static_cast<unsigned char>(s[i]) & 0xC0) == 0x80) ++i;
+    --chars;
+  }
+  return i;
 }
 
 // ---------------------------------------------------------------- label layout
@@ -693,7 +705,7 @@ void drawRings(const Cam& c) {
   }
 
   // Cardinal letters (Turkish: K north, D east, G south, B west).
-  setFont(&fonts::FreeSansBold9pt7b);
+  setFont(&ui::font::SansBold9);
   const char* names[4] = {"K", "D", "G", "B"};
   const float dirs[4][2] = {{0, 1}, {1, 0}, {0, -1}, {-1, 0}};
   for (int i = 0; i < 4; ++i) {
@@ -835,7 +847,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       const LabelPos& lp = s_label_pos[k];
       char alt[12];
       formatAltitude(a.alt_ft, alt, sizeof(alt));
-      setFont(&fonts::Font2);
+      setFont(&ui::font::Sans8);
       const int w = std::max<int>(s_spr.textWidth(a.callsign), 6 * static_cast<int>(strlen(alt))) + 2;
       const int h = 24;
       const int off = ri(lp.size * 0.6f) + 5;
@@ -861,18 +873,19 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   const bool fresh = fetched_ms != 0 && millis() - fetched_ms < 20000;
   s_spr.fillCircle(10, 11, 3, fresh ? kGreen : kOrange);
 
-  setFont(&fonts::Font2);
+  setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::middle_left);
   s_spr.setTextColor(kText);
   s_spr.drawString("RADAR 3B", 19, 11);
+  const int src_x = 19 + s_spr.textWidth("RADAR 3B") + 10;
   s_spr.setTextColor(kTextDim);
-  s_spr.drawString(services::usb_feed::active() ? "USB" : "adsb.fi", 94, 11);
+  s_spr.drawString(services::usb_feed::active() ? "USB" : "adsb.fi", src_x, 11);
 
   char buf[40];
   char range[12];
   ui::radar::formatRing3Label(range, sizeof(range), ui::radar::rangeCurrent().outer_km,
                               ui::radar::useMiles());
-  snprintf(buf, sizeof(buf), "%u ucak  /  %s", static_cast<unsigned>(in_range), range);
+  snprintf(buf, sizeof(buf), "%u uçak  /  %s", static_cast<unsigned>(in_range), range);
   s_spr.setTextDatum(textdatum_t::middle_center);
   s_spr.setTextColor(kText);
   s_spr.drawString(buf, kW / 2, 11);
@@ -892,21 +905,18 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
     s_spr.setTextColor(kTextDim);
     s_spr.drawString(buf, x, 11);
     x -= s_spr.textWidth(buf) + 10;
-    snprintf(buf, sizeof(buf), "%.1f C", services::sht30::temperatureC());
+    snprintf(buf, sizeof(buf), "%.1f°C", services::sht30::temperatureC());
     s_spr.drawString(buf, x, 11);
-    // degree ring between the number and "C"
-    const int cw = s_spr.textWidth("C");
-    s_spr.drawCircle(x - cw - 3, 7, 2, kTextDim);
   }
 }
 
 void drawLegend() {
-  setFont(&fonts::Font2);
+  setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::middle_left);
   const struct {
     uint8_t col;
     const char* text;
-  } rows[3] = {{kCyan, "25K ft +"}, {kCream, "10-25K ft"}, {kOrange, "10K ft alti"}};
+  } rows[3] = {{kCyan, "25K ft +"}, {kCream, "10-25K ft"}, {kOrange, "10K ft altı"}};
   for (int i = 0; i < 3; ++i) {
     const int y = kTopBarH + 13 + i * 17;
     s_spr.fillCircle(12, y, 5, rows[i].col);
@@ -965,10 +975,12 @@ void drawSwitchButton() {
                                       kCyan,  kText,   kOrange, kTextDim};
   weather::drawWeatherIcon(s_spr, kSwitchX + 22, kSwitchY + kSwitchH / 2, 14,
                            services::weather::Condition::PartlyCloudy, true, pal);
-  setFont(&fonts::Font2);
+  setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::middle_left);
   s_spr.setTextColor(kText);
-  s_spr.drawString("HAVA", kSwitchX + 42, kSwitchY + kSwitchH / 2 + 1);
+  setFont(&ui::font::SansBold8);
+  s_spr.setTextDatum(textdatum_t::middle_center);
+  s_spr.drawString("HAVA", (kSwitchX + 40 + kSwitchX + kSwitchW) / 2, kSwitchY + kSwitchH / 2 + 1);
 }
 
 void drawControls() {
@@ -987,12 +999,12 @@ void drawCardCompact(int idx, const float* dist_km) {
   s_spr.drawRoundRect(kCardX, kCardY, kCardW, kCardHCompact, 6, kRingDim);
   const int x0 = kCardX + 8, x1 = kCardX + kCardW - 8;
 
-  setFont(&fonts::FreeSansBold9pt7b);
+  setFont(&ui::font::SansBold9);
   s_spr.setTextDatum(textdatum_t::top_left);
   s_spr.setTextColor(col);
   s_spr.drawString(a.callsign, x0, kCardY + 4);
 
-  setFont(&fonts::Font2);
+  setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::top_right);
   services::route::Route rt;
   const services::route::Status rs = services::route::get(a.callsign, &rt);
@@ -1036,11 +1048,11 @@ void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
 
   const int x0 = kCardX + 9;
   int y = kCardY + 6;
-  setFont(&fonts::FreeSansBold9pt7b);
+  setFont(&ui::font::SansBold9);
   s_spr.setTextDatum(textdatum_t::top_left);
   s_spr.setTextColor(col);
   s_spr.drawString(a.callsign, x0, y);
-  setFont(&fonts::Font2);
+  setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::top_right);
   s_spr.setTextColor(kTextDim);
   // Tapped aircraft: its type here. Otherwise the card follows the nearest one
@@ -1060,9 +1072,11 @@ void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
     s_spr.setTextColor(kText);
     s_spr.drawString(codes, x0, y);
     int cx = x0 + s_spr.textWidth(codes) + 8;
-    char cities[44];
+    char cities[48];
     for (int cut = 19; cut >= 4; cut -= 3) {
-      snprintf(cities, sizeof(cities), "%.*s > %.*s", cut, rt.from_city, cut, rt.to_city);
+      // Cut by letters, not bytes: Turkish letters are two bytes in UTF-8.
+      snprintf(cities, sizeof(cities), "%.*s > %.*s", utf8Bytes(rt.from_city, cut), rt.from_city,
+               utf8Bytes(rt.to_city, cut), rt.to_city);
       if (cx + s_spr.textWidth(cities) <= x0 + avail) break;
       cities[0] = '\0';
     }
@@ -1072,7 +1086,7 @@ void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
     }
   } else {
     s_spr.setTextColor(kTextDim);
-    s_spr.drawString(rs == services::route::Status::Pending ? "Rota araniyor..." : "Rota bilinmiyor", x0, y);
+    s_spr.drawString(rs == services::route::Status::Pending ? "Rota aranıyor..." : "Rota bilinmiyor", x0, y);
   }
 
   y += 17;
@@ -1087,7 +1101,7 @@ void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
     s_spr.setTextColor(kText);
     s_spr.drawString(val, x + s_spr.textWidth(key) + 5, yy);
   };
-  field(x0, y, "IRT", alt);
+  field(x0, y, "İRT", alt);
   snprintf(buf, sizeof(buf), "%d kt", static_cast<int>(lroundf(a.gs_knots)));
   field(col2, y, "HIZ", buf);
   y += 17;
@@ -1097,31 +1111,31 @@ void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
   field(col2, y, "RTA", buf);
   y += 17;
   if (s_selected[0] == '\0' && a.type[0]) {
-    snprintf(buf, sizeof(buf), "%s  -  %s yonunde", a.type, compass8(bearing_deg[idx]));
+    snprintf(buf, sizeof(buf), "%s  -  %s yönünde", a.type, compass8(bearing_deg[idx]));
   } else {
-    snprintf(buf, sizeof(buf), "%s yonunde", compass8(bearing_deg[idx]));
+    snprintf(buf, sizeof(buf), "%s yönünde", compass8(bearing_deg[idx]));
   }
   s_spr.setTextColor(kTextDim);
   s_spr.drawString(buf, x0, y);
   y += 17;
   if (a.vrate_fpm > 300) {
-    snprintf(buf, sizeof(buf), "^ tirmaniyor  +%d fpm", a.vrate_fpm);
+    snprintf(buf, sizeof(buf), "^ tırmanıyor  +%d fpm", a.vrate_fpm);
     s_spr.setTextColor(kGreen);
   } else if (a.vrate_fpm < -300) {
-    snprintf(buf, sizeof(buf), "v alcaliyor  %d fpm", a.vrate_fpm);
+    snprintf(buf, sizeof(buf), "v alçalıyor  %d fpm", a.vrate_fpm);
     s_spr.setTextColor(kOrange);
   } else {
-    snprintf(buf, sizeof(buf), "- seyir irtifasinda");
+    snprintf(buf, sizeof(buf), "- seyir irtifasında");
     s_spr.setTextColor(kTextDim);
   }
   s_spr.drawString(buf, x0, y);
 }
 
 void drawEmptyNote(unsigned long fetched_ms) {
-  setFont(&fonts::FreeSans9pt7b);
+  setFont(&ui::font::Sans9);
   s_spr.setTextDatum(textdatum_t::middle_center);
   s_spr.setTextColor(kTextDim);
-  s_spr.drawString(fetched_ms == 0 ? "Ucak verisi bekleniyor..." : "Menzilde ucak yok", kW / 2,
+  s_spr.drawString(fetched_ms == 0 ? "Uçak verisi bekleniyor..." : "Menzilde uçak yok", kW / 2,
                    kTopBarH + 26);
 }
 

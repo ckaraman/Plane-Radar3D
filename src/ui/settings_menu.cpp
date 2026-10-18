@@ -14,6 +14,7 @@
 #include "services/sht30.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_range.h"
+#include "ui/fonts_tr.h"
 
 namespace ui {
 
@@ -52,23 +53,23 @@ void itemText(int item, char* title, char* value, size_t n) {
       snprintf(value, n, "Kalibre et");
       break;
     case kInvert:
-      snprintf(title, n, "Renkleri ters cevir");
-      snprintf(value, n, p.invert ? "Acik" : "Kapali");
+      snprintf(title, n, "Renkleri ters çevir");
+      snprintf(value, n, p.invert ? "Açık" : "Kapalı");
       break;
     case kBgr:
-      snprintf(title, n, "Kirmizi / Mavi");
-      snprintf(value, n, p.bgr ? "Yer degisti" : "Normal");
+      snprintf(title, n, "Kırmızı / Mavi");
+      snprintf(value, n, p.bgr ? "Yer değişti" : "Normal");
       break;
     case kFlip:
-      snprintf(title, n, "Ekrani 180 cevir");
-      snprintf(value, n, p.flip ? "Acik" : "Kapali");
+      snprintf(title, n, "Ekranı 180° çevir");
+      snprintf(value, n, p.flip ? "Açık" : "Kapalı");
       break;
     case kLabels:
-      snprintf(title, n, "Ucak etiketleri");
-      snprintf(value, n, p.labels ? "Acik" : "Kapali");
+      snprintf(title, n, "Uçak etiketleri");
+      snprintf(value, n, p.labels ? "Açık" : "Kapalı");
       break;
     case kExag:
-      snprintf(title, n, "Irtifa abartma");
+      snprintf(title, n, "İrtifa abartma");
       snprintf(value, n, "%ux", p.exag);
       break;
     case kRange: {
@@ -79,10 +80,10 @@ void itemText(int item, char* title, char* value, size_t n) {
     }
     case kContrast:
       snprintf(title, n, "Renkler");
-      snprintf(value, n, p.high_contrast ? "Yuksek kontrast" : "Normal");
+      snprintf(value, n, p.high_contrast ? "Yüksek kontrast" : "Normal");
       break;
     case kBrightness:
-      snprintf(title, n, "Parlaklik");
+      snprintf(title, n, "Parlaklık");
       snprintf(value, n, "%%%d", static_cast<int>(lroundf(p.brightness * 100.0f / 255.0f)));
       break;
   }
@@ -104,11 +105,11 @@ void drawButton(int item, bool pressed) {
   char title[32], value[24];
   itemText(item, title, value, sizeof(title));
   // One row per button: name on the left, current value on the right.
-  displayFontSetBitmap(tft, &fonts::FreeSans9pt7b);
+  displayFontSetBitmap(tft, &ui::font::Sans9);
   tft.setTextDatum(textdatum_t::middle_left);
   tft.setTextColor(c(175, 188, 198), bg);
   tft.drawString(title, x + 12, y + kBtnH / 2);
-  displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+  displayFontSetBitmap(tft, &ui::font::SansBold9);
   tft.setTextDatum(textdatum_t::middle_right);
   tft.setTextColor(c(110, 215, 255), bg);
   tft.drawString(value, x + kBtnW - 12, y + kBtnH / 2);
@@ -117,12 +118,12 @@ void drawButton(int item, bool pressed) {
 void drawAll() {
   tft.fillScreen(c(5, 8, 13));
   tft.fillRect(0, 0, config::kDisplayWidth, kTitleH, c(11, 22, 32));
-  displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
+  displayFontSetBitmap(tft, &ui::font::SansBold12);
   tft.setTextDatum(textdatum_t::middle_left);
   tft.setTextColor(c(230, 237, 242), c(11, 22, 32));
   tft.drawString("Ayarlar", 12, kTitleH / 2);
 
-  tft.setFont(&fonts::Font2);
+  tft.setFont(&ui::font::Sans8);
   tft.setTextSize(1);
   tft.setTextColor(c(125, 139, 150), c(11, 22, 32));
   char info[64];
@@ -134,16 +135,16 @@ void drawAll() {
   }
   tft.drawString(info, 112, kTitleH / 2 - 7);
   if (services::sht30::valid()) {
-    snprintf(info, sizeof(info), "SHT30 %.1f C  %%%d", services::sht30::temperatureC(),
+    snprintf(info, sizeof(info), "SHT30 %.1f°C  %%%d", services::sht30::temperatureC(),
              static_cast<int>(lroundf(services::sht30::humidity())));
   } else {
-    snprintf(info, sizeof(info), "SHT30 okunamiyor");
+    snprintf(info, sizeof(info), "SHT30 okunamıyor");
   }
   tft.drawString(info, 112, kTitleH / 2 + 8);
 
   const int cx = config::kDisplayWidth - kCloseW - kPad;
   tft.fillRoundRect(cx, 6, kCloseW, kTitleH - 12, 6, c(255, 159, 67));
-  displayFontSetBitmap(tft, &fonts::FreeSansBold9pt7b);
+  displayFontSetBitmap(tft, &ui::font::SansBold9);
   tft.setTextDatum(textdatum_t::middle_center);
   tft.setTextColor(c(5, 8, 13), c(255, 159, 67));
   tft.drawString("Kapat", cx + kCloseW / 2, kTitleH / 2);

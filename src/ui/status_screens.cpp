@@ -10,6 +10,7 @@
 #include "config.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#include "ui/fonts_tr.h"
 
 namespace {
 
@@ -36,13 +37,13 @@ float s_spinner_angle_deg = -90.0f;
 SpinnerDot s_spinner_dots[kSpinnerDotCount];
 bool s_connecting_text_drawn = false;
 
-constexpr auto& kGfxTitle = fonts::FreeSans18pt7b;
-constexpr auto& kGfxBody = fonts::FreeSans12pt7b;
-constexpr auto& kGfxDetail = fonts::Font2;
-constexpr auto& kPortalGfxTitle = fonts::FreeSansBold18pt7b;
-constexpr auto& kPortalGfxBody = fonts::FreeSansBold12pt7b;
-constexpr auto& kPortalGfxEmphasis = fonts::FreeSansBold18pt7b;
-constexpr auto& kConnectingGfxDetail = fonts::FreeSans9pt7b;
+constexpr auto& kGfxTitle = ui::font::Sans18;
+constexpr auto& kGfxBody = ui::font::Sans12;
+constexpr auto& kGfxDetail = ui::font::Sans8;
+constexpr auto& kPortalGfxTitle = ui::font::SansBold18;
+constexpr auto& kPortalGfxBody = ui::font::SansBold12;
+constexpr auto& kPortalGfxEmphasis = ui::font::SansBold18;
+constexpr auto& kConnectingGfxDetail = ui::font::Sans9;
 
 struct TextLine {
   const char* text;
@@ -156,7 +157,7 @@ void drawConnectingText() {
                kConnectingTextMaxWidthPx, total_h + kPanelPadY * 2, config::kColorBlack);
 
   int y = block_top;
-  tft.drawString("Connecting to", kCenterX, y + detail_h / 2);
+  tft.drawString("Bağlanılıyor:", kCenterX, y + detail_h / 2);
   y += detail_h + kLineGap;
   tft.drawString(s_ssid_line, kCenterX, y + detail_h / 2);
 
@@ -196,7 +197,7 @@ void drawSpinnerDots() {
 }  // namespace
 
 void statusScreenConnectingBegin(const char* ssid) {
-  const char* name = (ssid != nullptr && ssid[0] != '\0') ? ssid : "network";
+  const char* name = (ssid != nullptr && ssid[0] != '\0') ? ssid : "ağ";
   strncpy(s_connecting_ssid, name, sizeof(s_connecting_ssid) - 1);
   s_connecting_ssid[sizeof(s_connecting_ssid) - 1] = '\0';
   fitSsidLine();
@@ -239,17 +240,17 @@ void statusScreenPortal() {
     const float host_size = displayFontIsSmooth() ? fitVlwSize(host, 1.4f, 440) : 1.0f;
     const float path_size = displayFontIsSmooth() ? fitVlwSize(path, 1.4f, 440) : 1.0f;
     const TextLine with_path[] = {
-        {"Setup", 1.65f, &kPortalGfxTitle},
-        {"Open on a computer:", 1.27f, &kPortalGfxBody},
+        {"Kurulum", 1.65f, &kPortalGfxTitle},
+        {"Bilgisayarda açın:", 1.27f, &kPortalGfxBody},
         {host, host_size, &kConnectingGfxDetail},
         {path, path_size, &kConnectingGfxDetail},
-        {"(Chrome/Edge, USB)", 1.20f, &kPortalGfxBody},
+        {"(Chrome/Edge, USB kablosu)", 1.20f, &kPortalGfxBody},
     };
     const TextLine no_path[] = {
-        {"Setup", 1.65f, &kPortalGfxTitle},
-        {"Open on a computer:", 1.27f, &kPortalGfxBody},
+        {"Kurulum", 1.65f, &kPortalGfxTitle},
+        {"Bilgisayarda açın:", 1.27f, &kPortalGfxBody},
         {host, host_size, &kConnectingGfxDetail},
-        {"(Chrome/Edge, USB)", 1.20f, &kPortalGfxBody},
+        {"(Chrome/Edge, USB kablosu)", 1.20f, &kPortalGfxBody},
     };
     if (path[0] != '\0') {
       drawTextBlock(config::kColorYellow, config::kTextOnYellow, with_path,
@@ -261,10 +262,10 @@ void statusScreenPortal() {
     return;
   }
   const TextLine lines[] = {
-      {"Setup", 1.72f, &kPortalGfxTitle},
-      {"Plug USB into a", 1.50f, &kPortalGfxBody},
-      {"computer and open", 1.50f, &kPortalGfxBody},
-      {"the setup page", 1.50f, &kPortalGfxBody},
+      {"Kurulum", 1.72f, &kPortalGfxTitle},
+      {"USB kablosunu", 1.50f, &kPortalGfxBody},
+      {"bilgisayara takıp", 1.50f, &kPortalGfxBody},
+      {"kurulum sayfasını açın", 1.50f, &kPortalGfxBody},
       {"(Chrome / Edge)", 1.35f, &kPortalGfxBody},
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
@@ -273,11 +274,11 @@ void statusScreenPortal() {
 
 void statusScreenConnectFailed() {
   const TextLine lines[] = {
-      {"Could not connect", 1.72f, &kGfxTitle},
-      {"Retrying... or fix", 1.50f, &kGfxBody},
-      {"Wi-Fi on setup page", 1.50f, &kGfxBody},
-      {"Hold BOOT 3 sec", 1.50f, &kGfxBody},
-      {"to reset Wi-Fi", 1.50f, &kGfxBody},
+      {"Bağlanılamadı", 1.72f, &kGfxTitle},
+      {"Yeniden deneniyor...", 1.50f, &kGfxBody},
+      {"Wi-Fi'yi kurulum sayfasından", 1.50f, &kGfxBody},
+      {"düzeltin ya da BOOT'a", 1.50f, &kGfxBody},
+      {"3 sn basılı tutun", 1.50f, &kGfxBody},
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
                 sizeof(lines) / sizeof(lines[0]));
@@ -285,8 +286,8 @@ void statusScreenConnectFailed() {
 
 void statusScreenWifiReset() {
   const TextLine lines[] = {
-      {"Wi-Fi reset", 1.72f, &kPortalGfxTitle},
-      {"Restarting...", 1.58f, &kPortalGfxBody},
+      {"Wi-Fi sıfırlandı", 1.72f, &kPortalGfxTitle},
+      {"Yeniden başlatılıyor...", 1.58f, &kPortalGfxBody},
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
                 sizeof(lines) / sizeof(lines[0]));

@@ -7,7 +7,7 @@ namespace ui {
  * (radar -> "HAVA", forecast -> "RADAR"). Same box on both so a second tap
  * returns to where you were.
  */
-constexpr int kSwitchW = 84;
+constexpr int kSwitchW = 100;
 constexpr int kSwitchH = 42;
 constexpr int kSwitchX = 480 - 4 - kSwitchW;
 constexpr int kSwitchY = 320 - 4 - kSwitchH;

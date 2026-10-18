@@ -13,6 +13,7 @@
 #include "services/clock_service.h"
 #include "services/sht30.h"
 #include "services/weather_service.h"
+#include "ui/fonts_tr.h"
 
 namespace ui {
 
@@ -29,29 +30,26 @@ int s_last_minute = -1;
 int s_last_yday = -1;
 int s_last_info_key = -99999;
 
-// ASCII only: the bitmap fonts have no Turkish letters.
+// UTF-8: the display fonts (ui/fonts_tr.h) have the Turkish letters.
 const char* const kWeekdaysEn[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
 const char* const kMonthsEn[] = {"JAN", "FEB", "MAR", "APR", "MAY", "JUN",
                                  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"};
-const char* const kWeekdaysTr[] = {"PAZAR", "PAZARTESI", "SALI", "CARSAMBA",
-                                   "PERSEMBE", "CUMA", "CUMARTESI"};
-const char* const kMonthsTr[] = {"OCAK",   "SUBAT", "MART",  "NISAN", "MAYIS", "HAZIRAN",
-                                 "TEMMUZ", "AGUSTOS", "EYLUL", "EKIM", "KASIM", "ARALIK"};
+const char* const kWeekdaysTr[] = {"PAZAR", "PAZARTESİ", "SALI", "ÇARŞAMBA",
+                                   "PERŞEMBE", "CUMA", "CUMARTESİ"};
+const char* const kMonthsTr[] = {"OCAK",   "ŞUBAT",   "MART",  "NİSAN", "MAYIS", "HAZİRAN",
+                                 "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM",  "KASIM", "ARALIK"};
 
 uint16_t dimColor() { return tft.color565(125, 139, 150); }
 uint16_t softColor() { return tft.color565(190, 200, 215); }
 
-/** "23.4" + degree ring + "C", left aligned at x; returns the x after "C".
- *  With draw == false it only measures. */
+/** "23.4°C", left aligned at x; returns the x after it. With draw == false it only measures. */
 int drawDegrees(const char* number, int x, int y, uint16_t color, bool draw) {
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%s°C", number);
   tft.setTextColor(color, kBackground);
   tft.setTextDatum(textdatum_t::middle_left);
-  if (draw) tft.drawString(number, x, y);
-  x += tft.textWidth(number) + 3;
-  if (draw) tft.drawCircle(x + 3, y - 7, 3, color);
-  x += 9;
-  if (draw) tft.drawString("C", x, y);
-  return x + tft.textWidth("C");
+  if (draw) tft.drawString(buf, x, y);
+  return x + tft.textWidth(buf);
 }
 
 int drawText(const char* text, int x, int y, uint16_t color, bool draw) {
@@ -64,7 +62,7 @@ int drawText(const char* text, int x, int y, uint16_t color, bool draw) {
 /** Bottom line: indoor (SHT30) and outdoor (Open-Meteo) temperature, centred. */
 void drawInfoLine() {
   tft.fillRect(0, kInfoY - 22, config::kDisplayWidth, 44, kBackground);
-  displayFontSetBitmap(tft, &fonts::FreeSansBold12pt7b);
+  displayFontSetBitmap(tft, &ui::font::SansBold12);
 
   const bool indoor = services::sht30::valid();
   services::weather::Forecast f;
@@ -79,13 +77,13 @@ void drawInfoLine() {
 
   auto line = [&](int x, bool draw) {
     if (indoor) {
-      x = drawText("IC", x, kInfoY, dimColor(), draw) + 10;
+      x = drawText("ORTAM", x, kInfoY, dimColor(), draw) + 10;
       x = drawDegrees(t_in, x, kInfoY, softColor(), draw) + 16;
       x = drawText(h_in, x, kInfoY, softColor(), draw);
       if (outdoor) x += 40;
     }
     if (outdoor) {
-      x = drawText("DIS", x, kInfoY, dimColor(), draw) + 10;
+      x = drawText("DIŞARI", x, kInfoY, dimColor(), draw) + 10;
       x = drawDegrees(t_out, x, kInfoY, softColor(), draw);
     }
     return x;
@@ -148,7 +146,7 @@ void clockDisplayTick() {
   tft.setTextColor(kTimeColor, kBackground);
   tft.drawString(time_text, kCenterX, kTimeY);
 
-  displayFontSetBitmap(tft, &fonts::FreeSansBold18pt7b);
+  displayFontSetBitmap(tft, &ui::font::SansBold18);
   tft.setTextPadding(460);
   tft.setTextColor(dimColor(), kBackground);
   tft.drawString(date_text, kCenterX, kDateY);

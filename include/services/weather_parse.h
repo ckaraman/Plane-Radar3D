@@ -98,18 +98,18 @@ inline Condition conditionFromWmo(int code) {
   }
 }
 
-/** Short ASCII label (the bitmap font has no Turkish letters). */
+/** Short label (UTF-8; the display fonts have the Turkish letters). */
 inline const char* conditionLabel(Condition c) {
   switch (c) {
-    case Condition::Clear: return "ACIK";
-    case Condition::PartlyCloudy: return "P.BULUTLU";
-    case Condition::Cloudy: return "BULUTLU";
-    case Condition::Fog: return "SISLI";
-    case Condition::Drizzle: return "CISELEME";
-    case Condition::Rain: return "YAGMURLU";
-    case Condition::Showers: return "SAGANAK";
-    case Condition::Snow: return "KARLI";
-    case Condition::Thunder: return "FIRTINA";
+    case Condition::Clear: return "Açık";
+    case Condition::PartlyCloudy: return "Parçalı bulutlu";
+    case Condition::Cloudy: return "Bulutlu";
+    case Condition::Fog: return "Sisli";
+    case Condition::Drizzle: return "Çiseleme";
+    case Condition::Rain: return "Yağmurlu";
+    case Condition::Showers: return "Sağanak";
+    case Condition::Snow: return "Karlı";
+    case Condition::Thunder: return "Gök gürültülü";
   }
   return "";
 }

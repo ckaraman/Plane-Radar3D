@@ -17,6 +17,7 @@
 #include "ui/radar3d.h"
 #include "ui/screen_switch.h"
 #include "ui/weather_icons.h"
+#include "ui/fonts_tr.h"
 
 #ifdef RADAR3D_HOST_TEST
 namespace ui::radar3d {
@@ -64,11 +65,11 @@ constexpr Rgb kPalette[16] = {
     {110, 210, 255}, {255, 228, 0},   {80, 235, 140},  {255, 70, 60},
 };
 
-const char* const kDayShort[7] = {"PAZ", "PZT", "SAL", "CAR", "PER", "CUM", "CMT"};
-const char* const kDayLong[7] = {"Pazar",    "Pazartesi", "Sali",     "Carsamba",
-                                 "Persembe", "Cuma",      "Cumartesi"};
-const char* const kMonth[12] = {"Ocak",   "Subat",   "Mart",  "Nisan", "Mayis", "Haziran",
-                                "Temmuz", "Agustos", "Eylul", "Ekim",  "Kasim", "Aralik"};
+const char* const kDayShort[7] = {"PAZ", "PZT", "SAL", "ÇAR", "PER", "CUM", "CMT"};
+const char* const kDayLong[7] = {"Pazar",    "Pazartesi", "Salı",     "Çarşamba",
+                                 "Perşembe", "Cuma",      "Cumartesi"};
+const char* const kMonth[12] = {"Ocak",   "Şubat",   "Mart",  "Nisan", "Mayıs", "Haziran",
+                                "Temmuz", "Ağustos", "Eylül", "Ekim",  "Kasım", "Aralık"};
 const char* const kCompass[8] = {"K", "KD", "D", "GD", "G", "GB", "B", "KB"};
 
 LGFX_Sprite* s_spr = nullptr;
@@ -82,24 +83,16 @@ void font(const lgfx::IFont* f) {
   s_spr->setTextSize(1);
 }
 
-/** Text with a small degree ring after it ("17°"); returns the total width. */
+/** Number with the font's degree sign ("17°"); returns the width. */
 int drawDegrees(const char* num, int x, int y, textdatum_t datum, const lgfx::IFont* f,
-                uint8_t color, int ring_r) {
+                uint8_t color, int /*unused*/ = 0) {
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%s°", num);
   font(f);
-  const int w = s_spr->textWidth(num);
-  const int total = w + ring_r * 2 + 3;
-  int left = x;
-  if (datum == textdatum_t::middle_center) left = x - total / 2;
-  if (datum == textdatum_t::middle_right) left = x - total;
-  s_spr->setTextDatum(textdatum_t::middle_left);
+  s_spr->setTextDatum(datum);
   s_spr->setTextColor(color);
-  s_spr->drawString(num, left, y);
-  const int fh = s_spr->fontHeight();
-  const int rx = left + w + ring_r + 2;
-  const int ry = y - fh / 3 + ring_r / 2;
-  s_spr->drawCircle(rx, ry, ring_r, color);
-  if (ring_r >= 3) s_spr->drawCircle(rx, ry, ring_r - 1, color);
-  return total;
+  s_spr->drawString(buf, x, y);
+  return s_spr->textWidth(buf);
 }
 
 void text(const char* t, int x, int y, textdatum_t datum, const lgfx::IFont* f, uint8_t color) {
@@ -122,15 +115,15 @@ void drop(int cx, int cy, int r, uint8_t color) {
 void drawTopBar() {
   s_spr->fillRect(0, 0, kW, kTopBarH, wPanel);
   s_spr->drawFastHLine(0, kTopBarH, kW, wEdge);
-  text("HAVA DURUMU", 10, 11, textdatum_t::middle_left, &fonts::Font2, wText);
+  text("HAVA DURUMU", 10, 11, textdatum_t::middle_left, &ui::font::Sans8, wText);
   tm t;
   if (services::clock::now(&t)) {
     char buf[40];
     snprintf(buf, sizeof(buf), "%d %s %s", t.tm_mday, kMonth[t.tm_mon % 12],
              kDayLong[t.tm_wday % 7]);
-    text(buf, kW / 2, 11, textdatum_t::middle_center, &fonts::Font2, wDim);
+    text(buf, kW / 2, 11, textdatum_t::middle_center, &ui::font::Sans8, wDim);
     snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
-    text(buf, kW - 8, 11, textdatum_t::middle_right, &fonts::Font2, wText);
+    text(buf, kW - 8, 11, textdatum_t::middle_right, &ui::font::Sans8, wText);
   }
 }
 
@@ -138,30 +131,30 @@ void drawTopBar() {
 
 void drawOutdoor(const Forecast& f, int x, int y, int w, int h) {
   panel(x, y, w, h);
-  text("DISARIDA", x + 10, y + 12, textdatum_t::middle_left, &fonts::Font2, wDim);
+  text("DIŞARIDA", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
   if (!f.now.valid) {
-    text("--", x + w / 2, y + h / 2, textdatum_t::middle_center, &fonts::FreeSansBold18pt7b,
+    text("--", x + w / 2, y + h / 2, textdatum_t::middle_center, &ui::font::SansBold18,
          wFaint);
     return;
   }
-  weather::drawWeatherIcon(*s_spr, x + 50, y + 62, 34, f.now.cond, f.now.day, kIcons);
+  weather::drawWeatherIcon(*s_spr, x + 42, y + 66, 31, f.now.cond, f.now.day, kIcons);
 
   char buf[24];
   snprintf(buf, sizeof(buf), "%d", f.now.temp_c);
-  drawDegrees(buf, x + 96, y + 52, textdatum_t::middle_left, &fonts::FreeSansBold24pt7b, wText,
+  drawDegrees(buf, x + 82, y + 52, textdatum_t::middle_left, &ui::font::SansBold24, wText,
               5);
-  text(services::weather::conditionLabel(f.now.cond), x + 98, y + 92,
-       textdatum_t::middle_left, &fonts::FreeSansBold9pt7b, wDim);
+  text(services::weather::conditionLabel(f.now.cond), x + 84, y + 100,
+       textdatum_t::middle_left, &ui::font::SansBold9, wDim);
 
   // Detail rows on the right of the card.
-  const int lx = x + w - 130, vx = x + w - 10;
-  int ry = y + 34;
+  const int lx = x + w - 138, vx = x + w - 10;
+  int ry = y + 36;
   auto row = [&](const char* label, const char* value, bool degrees) {
-    text(label, lx, ry, textdatum_t::middle_left, &fonts::Font2, wFaint);
+    text(label, lx, ry, textdatum_t::middle_left, &ui::font::Sans8, wFaint);
     if (degrees) {
-      drawDegrees(value, vx, ry, textdatum_t::middle_right, &fonts::Font2, wText, 2);
+      drawDegrees(value, vx, ry, textdatum_t::middle_right, &ui::font::Sans8, wText, 2);
     } else {
-      text(value, vx, ry, textdatum_t::middle_right, &fonts::Font2, wText);
+      text(value, vx, ry, textdatum_t::middle_right, &ui::font::Sans8, wText);
     }
     ry += 20;
   };
@@ -178,61 +171,55 @@ void drawOutdoor(const Forecast& f, int x, int y, int w, int h) {
     } else {
       snprintf(buf, sizeof(buf), "%d km/s", f.wind_kmh);
     }
-    row("Ruzgar", buf, false);
+    // Wind: a small gust icon instead of the word, so "12 km/s KB" has room.
+    for (int i = 0; i < 3; ++i) {
+      const int wy = ry - 5 + i * 5;
+      const int len = i == 1 ? 16 : 11 - i * 2;
+      s_spr->drawFastHLine(lx, wy, len, wFaint);
+      s_spr->drawFastHLine(lx, wy + 1, len, wFaint);
+    }
+    text(buf, vx, ry, textdatum_t::middle_right, &ui::font::Sans8, wText);
+    ry += 20;
   }
 
-  // Sunrise / sunset along the bottom of the card.
-  if (f.sunrise_min >= 0 && f.sunset_min >= 0) {
-    const int by = y + h - 16;
-    s_spr->drawFastHLine(x + 10, by - 13, w - 20, wEdge);
-    snprintf(buf, sizeof(buf), "Gun dogumu  %02d:%02d", f.sunrise_min / 60, f.sunrise_min % 60);
-    s_spr->fillCircle(x + 18, by + 1, 4, wSun);
-    s_spr->fillRect(x + 12, by + 2, 13, 4, wPanel);  // half sun on the horizon
-    s_spr->drawFastHLine(x + 11, by + 2, 15, wSun);
-    text(buf, x + 32, by, textdatum_t::middle_left, &fonts::Font2, wDim);
-    snprintf(buf, sizeof(buf), "Gun batimi  %02d:%02d", f.sunset_min / 60, f.sunset_min % 60);
-    const int sx = x + w / 2 + 12;
-    s_spr->fillCircle(sx + 6, by + 1, 4, wWarm);
-    s_spr->fillRect(sx, by + 2, 13, 4, wPanel);
-    s_spr->drawFastHLine(sx - 1, by + 2, 15, wWarm);
-    text(buf, sx + 20, by, textdatum_t::middle_left, &fonts::Font2, wDim);
-  }
 }
 
 // --- Indoor (SHT30) -----------------------------------------------------------
 
 void drawIndoor(int x, int y, int w, int h) {
   panel(x, y, w, h);
-  text("ICERIDE", x + 10, y + 12, textdatum_t::middle_left, &fonts::Font2, wDim);
-  text("SHT30", x + w - 10, y + 12, textdatum_t::middle_right, &fonts::Font2, wFaint);
+  text("ORTAM", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
+  text("SHT30", x + w - 10, y + 12, textdatum_t::middle_right, &ui::font::Sans8, wFaint);
   if (!services::sht30::valid()) {
-    text("Sensor", x + w / 2, y + h / 2 - 10, textdatum_t::middle_center,
-         &fonts::FreeSansBold9pt7b, wFaint);
-    text("okunamiyor", x + w / 2, y + h / 2 + 10, textdatum_t::middle_center,
-         &fonts::FreeSansBold9pt7b, wFaint);
+    text("Sensör", x + w / 2, y + h / 2 - 10, textdatum_t::middle_center,
+         &ui::font::SansBold9, wFaint);
+    text("okunamıyor", x + w / 2, y + h / 2 + 10, textdatum_t::middle_center,
+         &ui::font::SansBold9, wFaint);
     return;
   }
   const float t = services::sht30::temperatureC();
   const int rh = static_cast<int>(lroundf(services::sht30::humidity()));
   char buf[16];
   snprintf(buf, sizeof(buf), "%.1f", t);
-  // Centre "23.4°C" in the card.
-  font(&fonts::FreeSansBold12pt7b);
+  // "23.4°" big + "C" small, centred together in the card.
+  char deg[20];
+  snprintf(deg, sizeof(deg), "%s°", buf);
+  font(&ui::font::SansBold12);
   const int cw = s_spr->textWidth("C");
-  font(&fonts::FreeSansBold24pt7b);
-  const int total = s_spr->textWidth(buf) + 13 + cw + 1;
+  font(&ui::font::SansBold24);
+  const int total = s_spr->textWidth(deg) + cw + 1;
   const int left = x + (w - total) / 2;
-  const int tw = drawDegrees(buf, left, y + 48, textdatum_t::middle_left,
-                             &fonts::FreeSansBold24pt7b, wText, 5);
-  text("C", left + tw + 1, y + 52, textdatum_t::middle_left, &fonts::FreeSansBold12pt7b, wText);
+  const int tw = drawDegrees(buf, left, y + 48, textdatum_t::middle_left, &ui::font::SansBold24,
+                             wText);
+  text("C", left + tw + 1, y + 54, textdatum_t::middle_left, &ui::font::SansBold12, wText);
 
   // Humidity with a drop and a small bar.
   snprintf(buf, sizeof(buf), "%%%d", rh);
-  font(&fonts::FreeSansBold12pt7b);
+  font(&ui::font::SansBold12);
   const int hw = s_spr->textWidth(buf) + 18;
   const int hx = x + (w - hw) / 2;
   drop(hx + 5, y + 82, 5, wRain);
-  text(buf, hx + 18, y + 83, textdatum_t::middle_left, &fonts::FreeSansBold12pt7b, wText);
+  text(buf, hx + 18, y + 83, textdatum_t::middle_left, &ui::font::SansBold12, wText);
   const int bx = x + 16, bw = w - 32, byy = y + 98;
   s_spr->fillRoundRect(bx, byy, bw, 5, 2, wBg);
   s_spr->fillRoundRect(bx, byy, std::max(4, bw * std::min(rh, 100) / 100), 5, 2, wRain);
@@ -244,16 +231,16 @@ void drawIndoor(int x, int y, int w, int h) {
     label = "SICAK";
     col = wRed;
   } else if (t < 18.0f) {
-    label = "SERIN";
+    label = "SERİN";
     col = wCool;
   } else if (rh < 30) {
     label = "KURU";
     col = wWarm;
   } else if (rh > 65) {
-    label = "NEMLI";
+    label = "NEMLİ";
     col = wRain;
   }
-  text(label, x + w / 2, y + h - 12, textdatum_t::middle_center, &fonts::FreeSansBold9pt7b, col);
+  text(label, x + w / 2, y + h - 12, textdatum_t::middle_center, &ui::font::SansBold9, col);
 }
 
 // --- Days ---------------------------------------------------------------------
@@ -263,11 +250,11 @@ void drawDay(const Day& d, bool today, int x, int y, int w, int h) {
   const int cx = x + w / 2;
   char buf[16];
   if (today) {
-    snprintf(buf, sizeof(buf), "BUGUN");
+    snprintf(buf, sizeof(buf), "BUGÜN");
   } else {
     snprintf(buf, sizeof(buf), "%s %d", kDayShort[d.wday % 7], d.mday);
   }
-  text(buf, cx, y + 13, textdatum_t::middle_center, &fonts::FreeSansBold9pt7b,
+  text(buf, cx, y + 13, textdatum_t::middle_center, &ui::font::SansBold9,
        today ? wCool : wText);
   weather::drawWeatherIcon(*s_spr, cx, y + 44, 18, d.cond, true, kIcons);
 
@@ -275,22 +262,25 @@ void drawDay(const Day& d, bool today, int x, int y, int w, int h) {
   char mx[8], mn[8];
   snprintf(mx, sizeof(mx), "%d", d.max_c);
   snprintf(mn, sizeof(mn), "%d", d.min_c);
-  font(&fonts::FreeSansBold12pt7b);
-  const int w1 = s_spr->textWidth(mx) + 9;
-  font(&fonts::FreeSansBold9pt7b);
-  const int w2 = s_spr->textWidth(mn) + 7;
-  const int left = cx - (w1 + 6 + w2) / 2;
-  drawDegrees(mx, left, y + 76, textdatum_t::middle_left, &fonts::FreeSansBold12pt7b, wText, 3);
-  drawDegrees(mn, left + w1 + 6, y + 78, textdatum_t::middle_left, &fonts::FreeSansBold9pt7b,
+  char t1[10], t2[10];
+  snprintf(t1, sizeof(t1), "%s°", mx);
+  snprintf(t2, sizeof(t2), "%s°", mn);
+  font(&ui::font::SansBold12);
+  const int w1 = s_spr->textWidth(t1);
+  font(&ui::font::SansBold9);
+  const int w2 = s_spr->textWidth(t2);
+  const int left = cx - (w1 + 8 + w2) / 2;
+  drawDegrees(mx, left, y + 76, textdatum_t::middle_left, &ui::font::SansBold12, wText, 3);
+  drawDegrees(mn, left + w1 + 8, y + 78, textdatum_t::middle_left, &ui::font::SansBold9,
               wCool, 2);
 
   if (d.pop >= 0) {
     snprintf(buf, sizeof(buf), "%%%d", d.pop);
-    font(&fonts::Font2);
+    font(&ui::font::Sans8);
     const int pw = s_spr->textWidth(buf) + 12;
     const int px = cx - pw / 2;
     drop(px + 3, y + h - 13, 3, d.pop >= 50 ? wRain : wFaint);
-    text(buf, px + 12, y + h - 12, textdatum_t::middle_left, &fonts::Font2,
+    text(buf, px + 12, y + h - 12, textdatum_t::middle_left, &ui::font::Sans8,
          d.pop >= 50 ? wRain : wDim);
   }
 }
@@ -306,36 +296,61 @@ void drawSwitchButton() {
   s_spr->drawFastVLine(cx, cy - 13, 27, wEdge);
   s_spr->drawLine(cx, cy, cx + 9, cy - 9, wCool);
   s_spr->fillCircle(cx + 5, cy - 2, 2, wWarm);
-  text("RADAR", kSwitchX + 39, cy + 1, textdatum_t::middle_left, &fonts::Font2, wText);
+  text("RADAR", (kSwitchX + 38 + kSwitchX + kSwitchW) / 2, cy + 1, textdatum_t::middle_center,
+       &ui::font::SansBold8, wText);
 }
 
-void drawStatusLine(bool have, unsigned long fetched_ms) {
+/** Half sun on a horizon line, with an up (sunrise) or down (sunset) tick. */
+void sunIcon(int cx, int cy, bool rise, uint8_t color) {
+  s_spr->fillCircle(cx, cy, 6, color);
+  s_spr->fillRect(cx - 8, cy + 1, 17, 7, wBg);
+  s_spr->drawFastHLine(cx - 9, cy + 1, 19, color);
+  if (rise) {
+    s_spr->fillTriangle(cx - 3, cy - 9, cx + 3, cy - 9, cx, cy - 13, color);
+  } else {
+    s_spr->fillTriangle(cx - 3, cy - 13, cx + 3, cy - 13, cx, cy - 9, color);
+  }
+}
+
+void drawStatusLine(const Forecast& f, bool have, unsigned long fetched_ms) {
+  const int y = kSwitchY + kSwitchH / 2;
+  int x = 10;
   char buf[48];
+  if (have && f.sunrise_min >= 0 && f.sunset_min >= 0) {
+    sunIcon(x + 9, y + 3, true, wSun);
+    snprintf(buf, sizeof(buf), "%02d:%02d", f.sunrise_min / 60, f.sunrise_min % 60);
+    text(buf, x + 24, y, textdatum_t::middle_left, &ui::font::SansBold9, wText);
+    x += 24 + s_spr->textWidth(buf) + 14;
+    sunIcon(x + 9, y + 3, false, wWarm);
+    snprintf(buf, sizeof(buf), "%02d:%02d", f.sunset_min / 60, f.sunset_min % 60);
+    text(buf, x + 24, y, textdatum_t::middle_left, &ui::font::SansBold9, wText);
+    x += 24 + s_spr->textWidth(buf) + 22;
+  }
   if (have) {
     const unsigned long mins = (millis() - fetched_ms) / 60000UL;
     if (mins == 0) {
-      snprintf(buf, sizeof(buf), "Open-Meteo  -  az once guncellendi");
+      snprintf(buf, sizeof(buf), "Open-Meteo, az önce");
     } else {
-      snprintf(buf, sizeof(buf), "Open-Meteo  -  %lu dk once guncellendi", mins);
+      snprintf(buf, sizeof(buf), "Open-Meteo, %lu dk önce", mins);
     }
   } else {
     snprintf(buf, sizeof(buf), "Open-Meteo");
   }
-  text(buf, 10, kSwitchY + kSwitchH / 2, textdatum_t::middle_left, &fonts::Font2, wFaint);
+  text(buf, x, y, textdatum_t::middle_left, &ui::font::Sans8, wFaint);
 }
 
 void drawNoData(int y) {
   const char* l1 = "Hava durumu bekleniyor...";
   const char* l2 = services::usb_feed::active()
-                       ? "USB koprusunun yeni surumu gerekli (kurulum sayfasi, adim 4)"
-                       : "Wi-Fi baglaninca birkac saniye icinde gelir";
+                       ? "USB köprüsünün yeni sürümü gerekli (kurulum sayfası, adım 4)"
+                       : "Wi-Fi bağlanınca birkaç saniye içinde gelir";
   if (!services::weather::enabled()) {
-    l1 = "Hava durumu kapali";
-    l2 = "Kurulum sayfasindan acabilirsiniz";
+    l1 = "Hava durumu kapalı";
+    l2 = "Kurulum sayfasından açabilirsiniz";
   }
   panel(6, y, kW - 12, 104);
-  text(l1, kW / 2, y + 38, textdatum_t::middle_center, &fonts::FreeSansBold12pt7b, wDim);
-  text(l2, kW / 2, y + 70, textdatum_t::middle_center, &fonts::Font2, wFaint);
+  text(l1, kW / 2, y + 38, textdatum_t::middle_center, &ui::font::SansBold12, wDim);
+  text(l2, kW / 2, y + 70, textdatum_t::middle_center, &ui::font::Sans8, wFaint);
 }
 
 void applyPalette() {
@@ -369,7 +384,7 @@ void drawScreen() {
     drawNoData(kDaysY);
   }
 
-  drawStatusLine(have, fetched);
+  drawStatusLine(f, have, fetched);
   drawSwitchButton();
 
 #ifdef RADAR3D_HOST_TEST

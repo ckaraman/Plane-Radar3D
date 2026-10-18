@@ -95,6 +95,16 @@ void copyCode(JsonObjectConst airport, char* out, size_t n) {
 
 }  // namespace
 
+bool isTurkishLetter(uint32_t cp) {
+  switch (cp) {
+    case 0x00C7: case 0x00E7: case 0x00D6: case 0x00F6: case 0x00DC: case 0x00FC:
+    case 0x011E: case 0x011F: case 0x0130: case 0x0131: case 0x015E: case 0x015F:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void foldAscii(const char* in, char* out, size_t out_len) {
   if (out_len == 0) return;
   size_t o = 0;
@@ -104,6 +114,12 @@ void foldAscii(const char* in, char* out, size_t out_len) {
     const int used = decodeUtf8(s, &cp);
     if (used == 0) break;
     s += used;
+    if (isTurkishLetter(cp)) {  // the display fonts have these: keep them (2 bytes)
+      if (o + 2 >= out_len) break;
+      out[o++] = static_cast<char>(0xC0 | (cp >> 6));
+      out[o++] = static_cast<char>(0x80 | (cp & 0x3F));
+      continue;
+    }
     const char c = foldCodePoint(cp);
     if (c == 0 || c == ',') continue;
     out[o++] = c;
