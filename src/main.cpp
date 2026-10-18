@@ -134,7 +134,11 @@ void handleBootButton() {
 
 void onTouchTap(int x, int y) {
   if (g_screen == Screen::Weather) {
-    if (ui::switchButtonHit(x, y)) wakeRadar();
+    if (ui::switchButtonHit(x, y)) {
+      wakeRadar();
+    } else {
+      ui::weatherDisplayTap(x, y);
+    }
     return;
   }
   if (g_screen != Screen::Radar) {

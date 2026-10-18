@@ -12,4 +12,8 @@ void weatherDisplayEnter();
 /** Cheap to call often: redraws only when something on the screen changed. */
 void weatherDisplayTick();
 
+/** Tap on the forecast screen: a day column shows that day in the big card
+ *  (today = current conditions). Returns true when the screen changed. */
+bool weatherDisplayTap(int x, int y);
+
 }  // namespace ui

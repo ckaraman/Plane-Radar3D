@@ -74,6 +74,16 @@ const char* const kCompass[8] = {"K", "KD", "D", "GD", "G", "GB", "B", "KB"};
 
 LGFX_Sprite* s_spr = nullptr;
 long s_drawn_key = -1;
+int s_selected = 0;  // day shown in the big card: 0 = today (current conditions)
+struct Rect {
+  int x, y, w, h;
+};
+Rect s_day_rects[services::weather::kMaxDays];
+int s_day_rect_count = 0;
+const char* const kMonthUpper[12] = {"OCAK",   "ŞUBAT",   "MART",  "NİSAN", "MAYIS", "HAZİRAN",
+                                     "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM",  "KASIM", "ARALIK"};
+const char* const kDayUpper[7] = {"PAZAR",    "PAZARTESİ", "SALI",     "ÇARŞAMBA",
+                                  "PERŞEMBE", "CUMA",      "CUMARTESİ"};
 
 const ui::weather::IconPalette<Pal> kIcons{wPanel, wSun,  wMoon, wCloud,    wCloudDark,
                                                wRain,  wText, wBolt, wCloudDark};
@@ -131,7 +141,7 @@ void drawTopBar() {
 
 void drawOutdoor(const Forecast& f, int x, int y, int w, int h) {
   panel(x, y, w, h);
-  text("DIŞARIDA", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
+  text("DIŞ ORT. SIC.", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
   if (!f.now.valid) {
     text("--", x + w / 2, y + h / 2, textdatum_t::middle_center, &ui::font::SansBold18,
          wFaint);
@@ -148,7 +158,7 @@ void drawOutdoor(const Forecast& f, int x, int y, int w, int h) {
 
   // Detail rows on the right of the card.
   const int lx = x + w - 138, vx = x + w - 10;
-  int ry = y + 36;
+  int ry = y + 32;
   auto row = [&](const char* label, const char* value, bool degrees) {
     text(label, lx, ry, textdatum_t::middle_left, &ui::font::Sans8, wFaint);
     if (degrees) {
@@ -156,13 +166,13 @@ void drawOutdoor(const Forecast& f, int x, int y, int w, int h) {
     } else {
       text(value, vx, ry, textdatum_t::middle_right, &ui::font::Sans8, wText);
     }
-    ry += 20;
+    ry += 18;
   };
   snprintf(buf, sizeof(buf), "%d", f.feels_c);
-  row("Hissedilen", buf, true);
+  row("HİSSEDİLEN", buf, true);
   if (f.humidity >= 0) {
     snprintf(buf, sizeof(buf), "%%%d", f.humidity);
-    row("Nem", buf, false);
+    row("NEM", buf, false);
   }
   if (f.wind_kmh >= 0) {
     if (f.wind_dir >= 0) {
@@ -171,25 +181,64 @@ void drawOutdoor(const Forecast& f, int x, int y, int w, int h) {
     } else {
       snprintf(buf, sizeof(buf), "%d km/s", f.wind_kmh);
     }
-    // Wind: a small gust icon instead of the word, so "12 km/s KB" has room.
-    for (int i = 0; i < 3; ++i) {
-      const int wy = ry - 5 + i * 5;
-      const int len = i == 1 ? 16 : 11 - i * 2;
-      s_spr->drawFastHLine(lx, wy, len, wFaint);
-      s_spr->drawFastHLine(lx, wy + 1, len, wFaint);
-    }
-    text(buf, vx, ry, textdatum_t::middle_right, &ui::font::Sans8, wText);
-    ry += 20;
+    row("RÜZ.", buf, false);
   }
+}
 
+/** Big card for a forecast day (tapped in the row below). */
+void drawDayDetail(const Day& d, int x, int y, int w, int h) {
+  panel(x, y, w, h);
+  s_spr->drawRoundRect(x, y, w, h, 8, wCool);
+  char buf[40];
+  int month = -1;
+  tm t;
+  if (services::clock::now(&t)) month = d.mday >= t.tm_mday ? t.tm_mon : (t.tm_mon + 1) % 12;
+  if (month >= 0) {
+    snprintf(buf, sizeof(buf), "%s  %d %s", kDayUpper[d.wday % 7], d.mday, kMonthUpper[month]);
+  } else {
+    snprintf(buf, sizeof(buf), "%s  %d", kDayUpper[d.wday % 7], d.mday);
+  }
+  text(buf, x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wCool);
+  weather::drawWeatherIcon(*s_spr, x + 42, y + 66, 31, d.cond, true, kIcons);
+
+  snprintf(buf, sizeof(buf), "%d", d.max_c);
+  drawDegrees(buf, x + 82, y + 48, textdatum_t::middle_left, &ui::font::SansBold24, wText);
+  // Low of the day under the high.
+  snprintf(buf, sizeof(buf), "En düşük %d°", d.min_c);
+  text(buf, x + 84, y + 88, textdatum_t::middle_left, &ui::font::SansBold9, wCool);
+  text(services::weather::conditionLabel(d.cond), x + 84, y + 109, textdatum_t::middle_left,
+       &ui::font::SansBold9, wDim);
+
+  const int lx = x + w - 138, vx = x + w - 10;
+  int ry = y + 32;
+  auto row = [&](const char* label, const char* value) {
+    text(label, lx, ry, textdatum_t::middle_left, &ui::font::Sans8, wFaint);
+    text(value, vx, ry, textdatum_t::middle_right, &ui::font::Sans8, wText);
+    ry += 18;
+  };
+  if (d.pop >= 0) {
+    snprintf(buf, sizeof(buf), "%%%d", d.pop);
+    row("YAĞIŞ", buf);
+  }
+  if (d.rain_x10 >= 0) {
+    snprintf(buf, sizeof(buf), "%d.%d mm", d.rain_x10 / 10, d.rain_x10 % 10);
+    row("MİKTAR", buf);
+  }
+  if (d.wind_kmh >= 0) {
+    if (d.wind_dir >= 0) {
+      snprintf(buf, sizeof(buf), "%d km/s %s", d.wind_kmh, kCompass[((d.wind_dir + 22) / 45) % 8]);
+    } else {
+      snprintf(buf, sizeof(buf), "%d km/s", d.wind_kmh);
+    }
+    row("RÜZ.", buf);
+  }
 }
 
 // --- Indoor (SHT30) -----------------------------------------------------------
 
 void drawIndoor(int x, int y, int w, int h) {
   panel(x, y, w, h);
-  text("ORTAM", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
-  text("SHT30", x + w - 10, y + 12, textdatum_t::middle_right, &ui::font::Sans8, wFaint);
+  text("ORTAM SIC.", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
   if (!services::sht30::valid()) {
     text("Sensör", x + w / 2, y + h / 2 - 10, textdatum_t::middle_center,
          &ui::font::SansBold9, wFaint);
@@ -245,8 +294,12 @@ void drawIndoor(int x, int y, int w, int h) {
 
 // --- Days ---------------------------------------------------------------------
 
-void drawDay(const Day& d, bool today, int x, int y, int w, int h) {
+void drawDay(const Day& d, bool today, bool selected, int x, int y, int w, int h) {
   panel(x, y, w, h);
+  if (selected) {
+    s_spr->drawRoundRect(x, y, w, h, 8, wCool);
+    s_spr->drawRoundRect(x + 1, y + 1, w - 2, h - 2, 7, wCool);
+  }
   const int cx = x + w / 2;
   char buf[16];
   if (today) {
@@ -369,7 +422,12 @@ void drawScreen() {
   constexpr int kTopY = kTopBarH + 5;
   constexpr int kTopH = 128;
   constexpr int kIndoorW = 160;
-  drawOutdoor(have ? f : Forecast(), 6, kTopY, kW - 12 - kIndoorW - 6, kTopH);
+  if (!have || s_selected >= f.day_count) s_selected = 0;
+  if (s_selected > 0) {
+    drawDayDetail(f.days[s_selected], 6, kTopY, kW - 12 - kIndoorW - 6, kTopH);
+  } else {
+    drawOutdoor(have ? f : Forecast(), 6, kTopY, kW - 12 - kIndoorW - 6, kTopH);
+  }
   drawIndoor(kW - 6 - kIndoorW, kTopY, kIndoorW, kTopH);
 
   constexpr int kDaysY = kTopY + kTopH + 6;
@@ -379,8 +437,13 @@ void drawScreen() {
     constexpr int gap = 6;
     const int w = (kW - 12 - (n - 1) * gap) / n;
     const int x0 = (kW - (n * w + (n - 1) * gap)) / 2;
-    for (int i = 0; i < n; ++i) drawDay(f.days[i], i == 0, x0 + i * (w + gap), kDaysY, w, kDaysH);
+    s_day_rect_count = n;
+    for (int i = 0; i < n; ++i) {
+      s_day_rects[i] = Rect{x0 + i * (w + gap), kDaysY, w, kDaysH};
+      drawDay(f.days[i], i == 0, i == s_selected, s_day_rects[i].x, kDaysY, w, kDaysH);
+    }
   } else {
+    s_day_rect_count = 0;
     drawNoData(kDaysY);
   }
 
@@ -409,16 +472,34 @@ long screenKey() {
   }
   key += services::weather::enabled() ? 3 : 0;
   key += services::usb_feed::active() ? 5 : 0;
+  key += s_selected * 524287L;
   return key & 0x7fffffffL;
 }
 
 }  // namespace
 
 void weatherDisplayEnter() {
+  s_selected = 0;
   s_spr = ui::radar3d::frame();
   if (s_spr == nullptr) return;
   drawScreen();
   s_drawn_key = screenKey();
+}
+
+bool weatherDisplayTap(int x, int y) {
+  for (int i = 0; i < s_day_rect_count; ++i) {
+    const Rect& r = s_day_rects[i];
+    if (x >= r.x - 3 && x < r.x + r.w + 3 && y >= r.y - 3 && y < r.y + r.h + 3) {
+      if (s_selected == i) return false;
+      s_selected = i;  // 0 (today) brings back the current conditions
+      if (s_spr != nullptr) {
+        drawScreen();
+        s_drawn_key = screenKey();
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 void weatherDisplayTick() {
