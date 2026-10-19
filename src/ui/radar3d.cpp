@@ -104,6 +104,9 @@ int cardH() { return s_card_expanded ? kCardHFull : kCardHCompact; }
 bool s_ready = false;
 
 float s_yaw_cur = 20.0f;  // animated camera heading
+// Altitude auto-fit: shrinks the vertical scale smoothly when the highest aircraft
+// would rise above the top of the view, and relaxes back when there is room.
+float s_zfit = 1.0f;
 float s_yaw_target = 20.0f;
 char s_selected[9] = "";  // callsign of the tapped aircraft ("" = nearest)
 
@@ -150,7 +153,7 @@ Cam makeCam() {
   c.H = c.D * tanf(pitch);
   // Altitude is exaggerated so it reads at a 50 km range; scale it down with
   // smaller ranges so the view keeps its proportions.
-  c.zscale = 0.0003048f * static_cast<float>(services::display_prefs::get().exag) * (c.R / 50.0f);
+  c.zscale = 0.0003048f * static_cast<float>(services::display_prefs::get().exag) * (c.R / 50.0f) * s_zfit;
   // Terrain: scale so the highest point of the loaded grid rises to ~15 % of the
   // radius, whatever the range or how flat the area is, so the relief stays visible.
   const float max_h = std::max(60.0f, services::terrain::maxHeightM());
@@ -1069,6 +1072,22 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       --j;
     }
     s_items[j] = t;
+  }
+
+  // Auto-fit the altitude scale for the next frame (highest icon just under the top bar).
+  {
+    float min_y = 1e9f;
+    for (size_t k = 0; k < n_items; ++k) {
+      if (dist_km[s_items[k].idx] > c.R) continue;
+      float sx, sy;
+      if (project(c, s_items[k].x_km, s_items[k].y_km, s_items[k].z, &sx, &sy)) min_y = std::min(min_y, sy);
+    }
+    constexpr float kTopLimit = kTopBarH + 18.0f;
+    if (min_y < kTopLimit) {
+      s_zfit = std::max(0.12f, s_zfit * 0.82f);
+    } else if (min_y > kTopLimit + 30.0f && s_zfit < 1.0f) {
+      s_zfit = std::min(1.0f, s_zfit * 1.03f);
+    }
   }
 
   const int card_idx = cardAircraft(count, dist_km, c.R);

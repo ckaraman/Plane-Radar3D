@@ -187,6 +187,7 @@ void fetchPending() {
   http.setConnectTimeout(5000);
   http.setTimeout(6000);
   http.setUserAgent("plane-radar-3d");
+  http.useHTTP10(true);  // plain body: the JSON parser reads the stream directly
   const int code = http.GET();
   if (code == 404) {  // adsbdb answers 404 for callsigns it does not know
     http.end();
@@ -195,8 +196,22 @@ void fetchPending() {
   }
   if (code != HTTP_CODE_OK) {
     http.end();
-    Serial.printf("route: HTTP %d for %s\n", code, callsign);
-    return;  // try again on the next cycle
+    Serial.printf("route: HTTP %d for %s (free heap %u, largest block %u)\n", code, callsign,
+                  static_cast<unsigned>(ESP.getFreeHeap()),
+                  static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    // Try again on the next cycles; after a few failures leave it (asked again in 30 min)
+    // so the card does not say "searching" forever.
+    static char s_fail_cs[9] = "";
+    static int s_fails = 0;
+    if (strcmp(s_fail_cs, callsign) != 0) {
+      strlcpy(s_fail_cs, callsign, sizeof(s_fail_cs));
+      s_fails = 0;
+    }
+    if (++s_fails >= 3) {
+      s_fails = 0;
+      put(callsign, nullptr);
+    }
+    return;
   }
   JsonDocument filter;
   JsonObject fr = filter["response"]["flightroute"].to<JsonObject>();
