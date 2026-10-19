@@ -1,0 +1,9 @@
+{
+  "name": "bearssl",
+  "version": "0.6.0",
+  "description": "BearSSL by Thomas Pornin (MIT), vendored from arduino-libraries/ArduinoBearSSL. Small fixed-memory TLS client used instead of mbedTLS (the ESP32 heap cannot hold the frame buffer and an mbedTLS session).",
+  "license": "MIT",
+  "build": {
+    "flags": ["-O2", "-w"]
+  }
+}

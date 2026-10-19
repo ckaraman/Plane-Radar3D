@@ -4,7 +4,8 @@
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
+#include "services/tls_client.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -76,7 +77,7 @@ bool fetchOnce(const char* url, bool secure, Forecast* out) {
 
   if (secure) services::adsb::releaseConnection();  // one TLS session at a time
   WiFiClient plain;
-  WiFiClientSecure tls;
+  services::tls::Client tls;
   if (secure) {
     tls.setInsecure();
     tls.setHandshakeTimeout(8);

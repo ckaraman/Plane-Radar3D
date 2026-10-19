@@ -1,7 +1,7 @@
 #include "services/adsb_client.h"
 
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
 
 #include <ArduinoJson.h>
 
@@ -12,6 +12,7 @@
 
 #include "config.h"
 #include "services/http_body_framing.h"
+#include "services/tls_client.h"
 
 namespace services::adsb {
 
@@ -41,7 +42,7 @@ uint8_t s_plain_state[3] = {0, 0, 0};
 // state each time, and the heap fragmented until no two 16 KB blocks were left
 // (mbedTLS -32512, "SSL - Memory allocation failed"). Kept open, the buffers are
 // taken once and reused; a handshake only happens when the server closes the link.
-WiFiClientSecure* s_tls = nullptr;
+services::tls::Client* s_tls = nullptr;
 HTTPClient* s_tls_http = nullptr;
 int s_tls_source = -1;  // which source the open connection belongs to
 constexpr float kKmPerNm = 1.852f;
@@ -385,14 +386,14 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   WiFiClient plain;
   HTTPClient plain_http;
   if (s_tls == nullptr) {
-    s_tls = new WiFiClientSecure();
+    s_tls = new services::tls::Client();
     s_tls->setInsecure();
     s_tls->setHandshakeTimeout(8);  // seconds; the default (120 s) froze the network task
     s_tls_http = new HTTPClient();
     s_tls_http->setReuse(true);
   }
   if (!try_plain && s_tls_source != s_source) releaseConnection();  // other host
-  WiFiClientSecure& client = *s_tls;
+  services::tls::Client& client = *s_tls;
   HTTPClient& http = try_plain ? plain_http : *s_tls_http;
   // Any early return below must not leave a half-read response on the kept socket.
   struct CloseOnFail {

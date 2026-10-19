@@ -5,7 +5,8 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
+#include <WiFiClient.h>
+#include "services/tls_client.h"
 
 #include <ArduinoJson.h>
 
@@ -192,7 +193,7 @@ void fetchPending() {
   // Only one TLS session fits in the heap: close the aircraft feed's kept-open one
   // (it reconnects on its next fetch).
   services::adsb::releaseConnection();
-  WiFiClientSecure client;
+  services::tls::Client client;
   client.setInsecure();
   client.setHandshakeTimeout(8);
   HTTPClient http;
