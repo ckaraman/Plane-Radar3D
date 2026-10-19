@@ -35,6 +35,15 @@ int s_source = 0;
 // HTTPS or refuses). Plain HTTP needs no TLS session (~40 KB of heap), so it is tried
 // first; the answer is remembered until the next restart.
 uint8_t s_plain_state[3] = {0, 0, 0};
+
+// One TLS connection, kept open between fetches (HTTP/1.1 keep-alive). A new
+// session every 5 s allocated and freed two 16 KB record buffers plus the handshake
+// state each time, and the heap fragmented until no two 16 KB blocks were left
+// (mbedTLS -32512, "SSL - Memory allocation failed"). Kept open, the buffers are
+// taken once and reused; a handshake only happens when the server closes the link.
+WiFiClientSecure* s_tls = nullptr;
+HTTPClient* s_tls_http = nullptr;
+int s_tls_source = -1;  // which source the open connection belongs to
 constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectTimeoutMs = 5000;  // TLS handshake needs room
 constexpr unsigned long kRequestTimeoutMs = 6000;
@@ -322,6 +331,12 @@ const char* sourceName() { return kSources[s_source].name; }
 
 const char* lastError() { return s_error; }
 
+void releaseConnection() {
+  if (s_tls_http != nullptr) s_tls_http->end();
+  if (s_tls != nullptr) s_tls->stop();
+  s_tls_source = -1;
+}
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
@@ -363,10 +378,25 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const unsigned heap_before = ESP.getFreeHeap();
   const unsigned block_before = ESP.getMaxAllocHeap();
   WiFiClient plain;
-  WiFiClientSecure client;
-  if (!try_plain) client.setInsecure();
+  HTTPClient plain_http;
+  if (s_tls == nullptr) {
+    s_tls = new WiFiClientSecure();
+    s_tls->setInsecure();
+    s_tls_http = new HTTPClient();
+    s_tls_http->setReuse(true);
+  }
+  if (!try_plain && s_tls_source != s_source) releaseConnection();  // other host
+  WiFiClientSecure& client = *s_tls;
+  HTTPClient& http = try_plain ? plain_http : *s_tls_http;
+  // Any early return below must not leave a half-read response on the kept socket.
+  struct CloseOnFail {
+    bool ok = false;
+    bool tls;
+    ~CloseOnFail() {
+      if (!ok && tls) releaseConnection();
+    }
+  } close_on_fail{false, !try_plain};
 
-  HTTPClient http;
   http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
   if (!(try_plain ? http.begin(plain, url) : http.begin(client, url))) {
     Serial.println("adsb: http.begin failed");
@@ -409,6 +439,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
   if (try_plain) s_plain_state[s_source] = 1;
+  if (!try_plain) s_tls_source = s_source;
 
   WiFiClient* stream = http.getStreamPtr();
   if (stream == nullptr) {
@@ -574,6 +605,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     return false;
   }
   s_error[0] = '\0';
+  close_on_fail.ok = true;
 
   publish(parsed, n);
   if (total > n) {

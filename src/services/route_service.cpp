@@ -1,5 +1,7 @@
 #include "services/route_service.h"
 
+#include "services/adsb_client.h"
+
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
@@ -180,6 +182,9 @@ void fetchPending() {
 
   String url = "https://api.adsbdb.com/v0/callsign/";
   url += callsign;
+  // Only one TLS session fits in the heap: close the aircraft feed's kept-open one
+  // (it reconnects on its next fetch).
+  services::adsb::releaseConnection();
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;

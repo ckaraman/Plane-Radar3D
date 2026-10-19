@@ -276,6 +276,7 @@ void adsbFetchTask(void*) {
     static unsigned long last_adsb = 0;
     const bool aircraft_visible = g_screen == Screen::Radar || g_screen == Screen::Clock;
     const bool adsb_due = aircraft_visible || last_adsb == 0 || millis() - last_adsb >= 30000;
+    if (services::serial_ota::active()) services::adsb::releaseConnection();
     if (WiFi.status() == WL_CONNECTED && !services::serial_ota::active()) {
       if (adsb_due) {
         last_adsb = millis();

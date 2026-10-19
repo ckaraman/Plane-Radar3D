@@ -14,6 +14,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "services/adsb_client.h"
 
 namespace services::weather {
 
@@ -73,6 +74,7 @@ bool fetchOnce(const char* url, bool secure, Forecast* out) {
   filter["daily"] = true;
   filter["reason"] = true;  // Open-Meteo's error text
 
+  if (secure) services::adsb::releaseConnection();  // one TLS session at a time
   WiFiClient plain;
   WiFiClientSecure tls;
   if (secure) tls.setInsecure();
