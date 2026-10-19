@@ -394,7 +394,7 @@ void drawGround(const Cam& c) {
 // once per camera change and filled scanline by scanline, clipped to the
 // projected outer ring so the sea stays on the radar disc.
 
-constexpr size_t kMaxRings = 256;
+constexpr size_t kMaxRings = 128;
 struct RingSet {
   int16_t* xy = nullptr;  // x0,y0,x1,y1,... screen coordinates
   size_t cap = 0;         // points the buffer can hold
@@ -442,7 +442,13 @@ void buildDiscSpans(const Cam& c) {
   }
 }
 
-/** Project all map rings of one type (2 sea, 3 lakes) into a ring set. */
+/**
+ * Project all map rings of one type (2 sea, 3 lakes) into a ring set, keeping only
+ * the points the fill needs: points closer than ~1.5 px to the previous one are
+ * dropped, and runs of points that all lie beyond the same screen edge collapse to
+ * their ends (a straight edge between them stays beyond that edge, so the filled
+ * area on screen is unchanged). Two passes: count, then allocate exactly and fill.
+ */
 void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
   set->points = 0;
   set->count = 0;
@@ -456,87 +462,120 @@ void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
   memcpy(&count, m + 12, 2);
   float ox, oy;
   offsetKm(lat_e7 / 1e7f, lon_e7 / 1e7f, &ox, &oy);
+  const float near_y = -(c.D - 0.3f * c.R);
 
-  size_t need = 0;
-  size_t pos = services::map::kHeaderBytes;
-  for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
-    uint16_t n;
-    memcpy(&n, m + pos + 1, 2);
-    if (m[pos] == want) need += static_cast<size_t>(n) + n / 4 + 8;  // clipping can add points
-    pos += 3 + static_cast<size_t>(n) * 4;
-  }
-  if (need == 0) return;
-  if (need > set->cap) {
-    int16_t* buf = static_cast<int16_t*>(realloc(set->xy, need * 2 * sizeof(int16_t)));
-    if (buf == nullptr) return;  // not enough RAM: no fill, lines still draw
-    set->xy = buf;
-    set->cap = need;
-  }
+  auto outcode = [](int x, int y) {
+    return (x < -8 ? 1 : 0) | (x > kW + 8 ? 2 : 0) | (y < kTopBarH - 8 ? 4 : 0) | (y > kH + 8 ? 8 : 0);
+  };
 
-  pos = services::map::kHeaderBytes;
-  for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
-    const uint8_t type = m[pos];
-    uint16_t n;
-    memcpy(&n, m + pos + 1, 2);
-    pos += 3;
-    if (pos + static_cast<size_t>(n) * 4 > size) return;
-    if (type != want || n < 3 || set->count >= kMaxRings) {
-      pos += static_cast<size_t>(n) * 4;
-      continue;
-    }
-    const size_t start = set->points;
-    int16_t ymin = 32767, ymax = -32768;
-    // Clip the ring against a plane in front of the camera (Sutherland-Hodgman) so
-    // far-away points behind the viewer do not fold the polygon over the disc.
-    const float near_y = -(c.D - 0.3f * c.R);
-    auto toCam = [&](size_t at, float* xr, float* yr, float* z) {
-      int16_t xi, yi;
-      memcpy(&xi, m + at, 2);
-      memcpy(&yi, m + at + 2, 2);
-      const float x = ox + xi * 0.01f, y = oy + yi * 0.01f;
-      *xr = x * c.cyaw - y * c.syaw;
-      *yr = x * c.syaw + y * c.cyaw;
-      *z = draped ? groundZ(c, x, y) : 0.0f;
-    };
-    auto emit = [&](float xr, float yr, float z) {
-      if (set->points >= set->cap) return;  // (only on pathological rings)
-      float sx = 0, sy = 0;
-      projectCam(c, xr, yr, z, &sx, &sy);
-      sx = std::max(-2000.0f, std::min(2480.0f, sx));
-      sy = std::max(-2000.0f, std::min(2320.0f, sy));
-      const int16_t ix = static_cast<int16_t>(ri(sx)), iy = static_cast<int16_t>(ri(sy));
-      set->xy[set->points * 2] = ix;
-      set->xy[set->points * 2 + 1] = iy;
-      ymin = std::min(ymin, iy);
-      ymax = std::max(ymax, iy);
-      ++set->points;
-    };
-    float pxr, pyr, pz;
-    toCam(pos + static_cast<size_t>(n - 1) * 4, &pxr, &pyr, &pz);
-    for (uint16_t i = 0; i < n; ++i) {
-      float xr, yr, z;
-      toCam(pos + static_cast<size_t>(i) * 4, &xr, &yr, &z);
-      const bool in = yr >= near_y, pin = pyr >= near_y;
-      if (in != pin) {
-        const float t = (near_y - pyr) / (yr - pyr);
-        emit(pxr + t * (xr - pxr), near_y, pz + t * (z - pz));
+  for (int pass = 0; pass < 2; ++pass) {
+    const bool write = pass == 1;
+    size_t total = 0;
+    set->points = 0;
+    set->count = 0;
+    size_t pos = services::map::kHeaderBytes;
+    for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
+      const uint8_t type = m[pos];
+      uint16_t n;
+      memcpy(&n, m + pos + 1, 2);
+      pos += 3;
+      if (pos + static_cast<size_t>(n) * 4 > size) return;
+      if (type != want || n < 3 || set->count >= kMaxRings) {
+        pos += static_cast<size_t>(n) * 4;
+        continue;
       }
-      if (in) emit(xr, yr, z);
-      pxr = xr;
-      pyr = yr;
-      pz = z;
+      // Ring state: committed points, plus one pending point that may still be merged.
+      size_t ring_pts = 0;
+      const size_t start = write ? set->points : 0;
+      int16_t ymin = 32767, ymax = -32768;
+      bool have_last = false, have_pend = false;
+      int16_t lx = 0, ly = 0, px = 0, py = 0;
+      auto commit = [&](int16_t x, int16_t y) {
+        if (write) {
+          if (set->points >= set->cap) return;
+          set->xy[set->points * 2] = x;
+          set->xy[set->points * 2 + 1] = y;
+          ++set->points;
+          ymin = std::min(ymin, y);
+          ymax = std::max(ymax, y);
+        }
+        ++ring_pts;
+        lx = x;
+        ly = y;
+        have_last = true;
+      };
+      auto add = [&](int16_t x, int16_t y) {
+        if (have_last && !have_pend && std::abs(x - lx) + std::abs(y - ly) < 2) return;
+        if (have_pend) {
+          if (have_last && (outcode(lx, ly) & outcode(px, py) & outcode(x, y)) != 0) {
+            px = x;  // pending point is redundant: replace it
+            py = y;
+            return;
+          }
+          commit(px, py);
+        }
+        px = x;
+        py = y;
+        have_pend = true;
+      };
+      auto emit = [&](float xr, float yr, float z) {
+        float sx = 0, sy = 0;
+        projectCam(c, xr, yr, z, &sx, &sy);
+        sx = std::max(-2000.0f, std::min(2480.0f, sx));
+        sy = std::max(-2000.0f, std::min(2320.0f, sy));
+        add(static_cast<int16_t>(ri(sx)), static_cast<int16_t>(ri(sy)));
+      };
+      auto toCam = [&](size_t at, float* xr, float* yr, float* z) {
+        int16_t xi, yi;
+        memcpy(&xi, m + at, 2);
+        memcpy(&yi, m + at + 2, 2);
+        const float x = ox + xi * 0.01f, y = oy + yi * 0.01f;
+        *xr = x * c.cyaw - y * c.syaw;
+        *yr = x * c.syaw + y * c.cyaw;
+        *z = draped ? groundZ(c, x, y) : 0.0f;
+      };
+      // Clip against a plane in front of the camera (Sutherland-Hodgman) so far points
+      // behind the viewer do not fold the polygon over the disc.
+      float pxr, pyr, pz;
+      toCam(pos + static_cast<size_t>(n - 1) * 4, &pxr, &pyr, &pz);
+      for (uint16_t i = 0; i < n; ++i) {
+        float xr, yr, z;
+        toCam(pos + static_cast<size_t>(i) * 4, &xr, &yr, &z);
+        const bool in = yr >= near_y, pin = pyr >= near_y;
+        if (in != pin) {
+          const float t = (near_y - pyr) / (yr - pyr);
+          emit(pxr + t * (xr - pxr), near_y, pz + t * (z - pz));
+        }
+        if (in) emit(xr, yr, z);
+        pxr = xr;
+        pyr = yr;
+        pz = z;
+      }
+      if (have_pend) commit(px, py);
+      pos += static_cast<size_t>(n) * 4;
+      if (ring_pts < 3) {
+        if (write) set->points = start;
+        continue;
+      }
+      total += ring_pts;
+      if (write) {
+        set->start[set->count] = static_cast<uint16_t>(start);
+        set->len[set->count] = static_cast<uint16_t>(set->points - start);
+        set->ymin[set->count] = ymin;
+        set->ymax[set->count] = ymax;
+      }
+      ++set->count;
     }
-    pos += static_cast<size_t>(n) * 4;
-    const size_t got = set->points - start;
-    if (got < 3) {
-      set->points = start;
-      continue;
+    if (!write) {
+      set->count = 0;
+      if (total == 0) return;
+      if (total > set->cap || total + 256 < set->cap) {  // grow, or give back a lot of slack
+        free(set->xy);
+        set->xy = static_cast<int16_t*>(malloc(total * 2 * sizeof(int16_t)));
+        set->cap = set->xy ? total : 0;
+        if (set->xy == nullptr) return;  // not enough RAM: no fill, lines still draw
+      }
     }
-    set->start[set->count] = static_cast<uint16_t>(start);
-    set->len[set->count] = static_cast<uint16_t>(got);
-    set->ymin[set->count] = ymin;
-    set->ymax[set->count] = ymax;
-    ++set->count;
   }
 }
 
@@ -598,7 +637,9 @@ const float* s_rc_depth = nullptr;  // only valid while sorting
 // Grid vertices that lie in the sea (map type 2 rings, world coordinates). The terrain
 // grid is coarse, so without this the relief cells would spill over the coastline.
 // Depends only on the range, the map and the location, not on the camera angle.
-uint8_t s_sea_vertex[(kReliefN + 1) * (kReliefN + 1)];
+uint8_t s_sea_vertex_bits[((kReliefN + 1) * (kReliefN + 1) + 7) / 8];
+inline bool seaVertex(int k) { return (s_sea_vertex_bits[k >> 3] >> (k & 7)) & 1; }
+inline void toggleSeaVertex(int k) { s_sea_vertex_bits[k >> 3] ^= static_cast<uint8_t>(1u << (k & 7)); }
 struct MaskKey {
   uint32_t gen;
   float R;
@@ -607,7 +648,7 @@ struct MaskKey {
 
 void buildSeaMask(float R) {
   constexpr int N = kReliefN;
-  memset(s_sea_vertex, 0, sizeof(s_sea_vertex));
+  memset(s_sea_vertex_bits, 0, sizeof(s_sea_vertex_bits));
   const uint8_t* m = services::map::data();
   const size_t size = services::map::size();
   if (m == nullptr || size < services::map::kHeaderBytes) return;
@@ -652,7 +693,7 @@ void buildSeaMask(float R) {
         const float xc = x0 + (yv - y0) * (x1 - x0) / (y1 - y0);
         int i0 = static_cast<int>(ceilf((xc + R) / step));
         i0 = std::max(i0, 0);
-        for (int i = i0; i <= N; ++i) s_sea_vertex[j * (N + 1) + i] ^= 1;
+        for (int i = i0; i <= N; ++i) toggleSeaVertex(j * (N + 1) + i);
       }
     }
     pos += static_cast<size_t>(n) * 4;
@@ -723,7 +764,7 @@ void buildRelief(const Cam& c) {
         continue;  // outside the disc
       }
       if (hm[k00] < 1.0f || hm[k10] < 1.0f || hm[k01] < 1.0f || hm[k11] < 1.0f) continue;  // sea / shore
-      if (s_sea_vertex[k00] | s_sea_vertex[k10] | s_sea_vertex[k01] | s_sea_vertex[k11]) continue;
+      if (seaVertex(k00) || seaVertex(k10) || seaVertex(k01) || seaVertex(k11)) continue;
       if (!okv[k00] || !okv[k10] || !okv[k01] || !okv[k11]) continue;
       const uint16_t idx = static_cast<uint16_t>(j * N + i);
       const float cxw = x0 + 0.5f * step, cyw = y0 + 0.5f * step;

@@ -16,7 +16,9 @@ namespace {
 
 constexpr unsigned long kActiveMs = 20000;
 
-services::adsb::Aircraft s_staged[services::adsb::kMaxAircraft];
+// Allocated on first use: in Wi-Fi mode the USB feed is never used and the RAM is
+// needed by the HTTPS client.
+services::adsb::Aircraft* s_staged = nullptr;
 size_t s_count = 0;
 unsigned long s_last_batch_ms = 0;
 bool s_have_batch = false;
@@ -49,10 +51,16 @@ void formatAlt(int32_t ft, char* out, size_t n) {
 
 }  // namespace
 
-void begin() { s_count = 0; }
+void begin() {
+  s_count = 0;
+  if (s_staged == nullptr) {
+    s_staged = static_cast<services::adsb::Aircraft*>(
+        malloc(sizeof(services::adsb::Aircraft) * services::adsb::kMaxAircraft));
+  }
+}
 
 void add(const char* args) {
-  if (s_count >= services::adsb::kMaxAircraft || args == nullptr) return;
+  if (s_staged == nullptr || s_count >= services::adsb::kMaxAircraft || args == nullptr) return;
   char buf[200];
   strlcpy(buf, args, sizeof(buf));
   char* cur = buf;
@@ -97,7 +105,7 @@ void end(const char* args) {
     timeval tv{static_cast<time_t>(unix_time), 0};
     settimeofday(&tv, nullptr);
   }
-  services::adsb::publishExternal(s_staged, s_count);
+  if (s_staged != nullptr) services::adsb::publishExternal(s_staged, s_count);
   s_last_batch_ms = millis();
   s_have_batch = true;
   Serial.printf("PR:AOK {\"n\":%u}\n", static_cast<unsigned>(s_count));

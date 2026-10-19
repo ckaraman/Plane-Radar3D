@@ -283,6 +283,18 @@ void publishExternal(const Aircraft* src, size_t count) {
 
 size_t aircraftCount() { return s_aircraft_count; }
 
+size_t countWithin(double lat0, double lon0, float radius_km) {
+  const double kx = 111.0 * cos(lat0 * 0.01745329252), r2 = static_cast<double>(radius_km) * radius_km;
+  if (s_mutex != nullptr) xSemaphoreTake(s_mutex, portMAX_DELAY);
+  size_t in = 0;
+  for (size_t i = 0; i < s_aircraft_count; ++i) {
+    const double dx = (s_aircraft[i].lon - lon0) * kx, dy = (s_aircraft[i].lat - lat0) * 111.0;
+    if (dx * dx + dy * dy <= r2) ++in;
+  }
+  if (s_mutex != nullptr) xSemaphoreGive(s_mutex);
+  return in;
+}
+
 const Aircraft* aircraftList() { return s_aircraft; }
 
 unsigned long lastUpdateMs() { return s_last_update_ms; }

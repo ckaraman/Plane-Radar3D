@@ -45,7 +45,7 @@ void updateMax() {
 // Upload staging
 bool s_staging = false;
 Header s_stage_hdr{};
-int16_t s_stage[kMaxN * kMaxN];
+int16_t* s_stage = nullptr;  // only during an upload
 uint64_t s_rows_mask = 0;
 
 void reply(const char* tag, const char* body) {
@@ -133,14 +133,19 @@ void handleBegin(const char* json) {
   }
   s_stage_hdr = Header{1, static_cast<uint8_t>(n), 0, half, doc["lat"].as<double>(),
                        doc["lon"].as<double>()};
-  memset(s_stage, 0, sizeof(s_stage));
+  if (s_stage == nullptr) s_stage = static_cast<int16_t*>(malloc(sizeof(int16_t) * kMaxN * kMaxN));
+  if (s_stage == nullptr) {
+    replyError("no_ram");
+    return;
+  }
+  memset(s_stage, 0, sizeof(int16_t) * kMaxN * kMaxN);
   s_rows_mask = 0;
   s_staging = true;
   replyRow(-1);
 }
 
 void handleRow(char* args) {
-  if (!s_staging) {
+  if (!s_staging || s_stage == nullptr) {
     replyError("elev_not_started");
     return;
   }
@@ -183,6 +188,8 @@ void handleEnd() {
   s_staging = false;
   s_hdr = s_stage_hdr;
   memcpy(s_h, s_stage, sizeof(int16_t) * n * n);
+  free(s_stage);
+  s_stage = nullptr;
   s_have = true;
   ++s_gen;
   updateMax();
