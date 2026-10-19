@@ -58,16 +58,16 @@ struct Rgb {
   uint8_t r, g, b;
 };
 constexpr Rgb kPaletteHighContrast[16] = {
-    {0, 0, 0},       {20, 33, 26},    {38, 58, 42},    {60, 130, 165},
+    {0, 0, 0},       {58, 68, 34},    {96, 112, 54},   {60, 130, 165},
     {90, 180, 225},  {110, 215, 255}, {255, 248, 225}, {255, 170, 60},
     {255, 255, 255}, {175, 188, 198}, {12, 26, 38},    {255, 45, 45},
-    {80, 240, 150},  {90, 175, 235},  {215, 140, 55},  {18, 58, 92},
+    {80, 240, 150},  {120, 200, 255}, {255, 190, 100}, {8, 40, 92},
 };
 constexpr Rgb kPalette[16] = {
-    {5, 8, 13},      {15, 24, 19},    {29, 44, 33},    {31, 81, 104},
+    {5, 8, 13},      {44, 52, 27},    {76, 89, 43},    {31, 81, 104},
     {42, 112, 144},  {91, 200, 245},  {237, 230, 211}, {255, 159, 67},
     {230, 237, 242}, {125, 139, 150}, {11, 22, 32},    {225, 40, 40},
-    {61, 220, 132},  {46, 110, 158},  {120, 82, 36},   {13, 38, 62},
+    {61, 220, 132},  {90, 170, 225},  {220, 160, 80},  {8, 32, 72},
 };
 
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
@@ -439,7 +439,7 @@ void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
   for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
     uint16_t n;
     memcpy(&n, m + pos + 1, 2);
-    if (m[pos] == want) need += n;
+    if (m[pos] == want) need += static_cast<size_t>(n) * 2;  // clipping can add points
     pos += 3 + static_cast<size_t>(n) * 4;
   }
   if (need == 0) return;
@@ -463,27 +463,53 @@ void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
     }
     const size_t start = set->points;
     int16_t ymin = 32767, ymax = -32768;
-    int16_t lx = 0, ly = 0;
-    for (uint16_t i = 0; i < n; ++i, pos += 4) {
+    // Clip the ring against a plane in front of the camera (Sutherland-Hodgman) so
+    // far-away points behind the viewer do not fold the polygon over the disc.
+    const float near_y = -(c.D - 0.3f * c.R);
+    auto toCam = [&](size_t at, float* xr, float* yr, float* z) {
       int16_t xi, yi;
-      memcpy(&xi, m + pos, 2);
-      memcpy(&yi, m + pos + 2, 2);
+      memcpy(&xi, m + at, 2);
+      memcpy(&yi, m + at + 2, 2);
       const float x = ox + xi * 0.01f, y = oy + yi * 0.01f;
-      float sx, sy;
-      if (project(c, x, y, draped ? groundZ(c, x, y) : 0.0f, &sx, &sy)) {
-        sx = std::max(-2000.0f, std::min(2480.0f, sx));
-        sy = std::max(-2000.0f, std::min(2320.0f, sy));
-        lx = static_cast<int16_t>(ri(sx));
-        ly = static_cast<int16_t>(ri(sy));
-      }
-      set->xy[set->points * 2] = lx;
-      set->xy[set->points * 2 + 1] = ly;
-      ymin = std::min(ymin, ly);
-      ymax = std::max(ymax, ly);
+      *xr = x * c.cyaw - y * c.syaw;
+      *yr = x * c.syaw + y * c.cyaw;
+      *z = draped ? groundZ(c, x, y) : 0.0f;
+    };
+    auto emit = [&](float xr, float yr, float z) {
+      float sx = 0, sy = 0;
+      projectCam(c, xr, yr, z, &sx, &sy);
+      sx = std::max(-2000.0f, std::min(2480.0f, sx));
+      sy = std::max(-2000.0f, std::min(2320.0f, sy));
+      const int16_t ix = static_cast<int16_t>(ri(sx)), iy = static_cast<int16_t>(ri(sy));
+      set->xy[set->points * 2] = ix;
+      set->xy[set->points * 2 + 1] = iy;
+      ymin = std::min(ymin, iy);
+      ymax = std::max(ymax, iy);
       ++set->points;
+    };
+    float pxr, pyr, pz;
+    toCam(pos + static_cast<size_t>(n - 1) * 4, &pxr, &pyr, &pz);
+    for (uint16_t i = 0; i < n; ++i) {
+      float xr, yr, z;
+      toCam(pos + static_cast<size_t>(i) * 4, &xr, &yr, &z);
+      const bool in = yr >= near_y, pin = pyr >= near_y;
+      if (in != pin) {
+        const float t = (near_y - pyr) / (yr - pyr);
+        emit(pxr + t * (xr - pxr), near_y, pz + t * (z - pz));
+      }
+      if (in) emit(xr, yr, z);
+      pxr = xr;
+      pyr = yr;
+      pz = z;
+    }
+    pos += static_cast<size_t>(n) * 4;
+    const size_t got = set->points - start;
+    if (got < 3) {
+      set->points = start;
+      continue;
     }
     set->start[set->count] = static_cast<uint16_t>(start);
-    set->len[set->count] = n;
+    set->len[set->count] = static_cast<uint16_t>(got);
     set->ymin[set->count] = ymin;
     set->ymax[set->count] = ymax;
     ++set->count;
@@ -545,11 +571,81 @@ uint8_t s_rc_color[kReliefN * kReliefN];
 uint16_t s_rc_count = 0;
 const float* s_rc_depth = nullptr;  // only valid while sorting
 
+// Grid vertices that lie in the sea (map type 2 rings, world coordinates). The terrain
+// grid is coarse, so without this the relief cells would spill over the coastline.
+// Depends only on the range, the map and the location, not on the camera angle.
+uint8_t s_sea_vertex[(kReliefN + 1) * (kReliefN + 1)];
+struct MaskKey {
+  uint32_t gen;
+  float R;
+  double lat, lon;
+} s_mask_key = {0xFFFFFFFFu, -1, 0, 0};
+
+void buildSeaMask(float R) {
+  constexpr int N = kReliefN;
+  memset(s_sea_vertex, 0, sizeof(s_sea_vertex));
+  const uint8_t* m = services::map::data();
+  const size_t size = services::map::size();
+  if (m == nullptr || size < services::map::kHeaderBytes) return;
+  int32_t lat_e7, lon_e7;
+  uint16_t count;
+  memcpy(&lat_e7, m + 4, 4);
+  memcpy(&lon_e7, m + 8, 4);
+  memcpy(&count, m + 12, 2);
+  float ox, oy;
+  offsetKm(lat_e7 / 1e7f, lon_e7 / 1e7f, &ox, &oy);
+  const float step = 2.0f * R / N;
+  size_t pos = services::map::kHeaderBytes;
+  for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
+    const uint8_t type = m[pos];
+    uint16_t n;
+    memcpy(&n, m + pos + 1, 2);
+    pos += 3;
+    if (pos + static_cast<size_t>(n) * 4 > size) return;
+    if (type != 2 || n < 3) {
+      pos += static_cast<size_t>(n) * 4;
+      continue;
+    }
+    // Even-odd: every ring edge toggles the vertices to its right on the same row.
+    for (uint16_t e = 0; e < n; ++e) {
+      const size_t pa = pos + static_cast<size_t>(e) * 4;
+      const size_t pb = pos + static_cast<size_t>((e + 1) % n) * 4;
+      int16_t ax, ay, bx, by;
+      memcpy(&ax, m + pa, 2);
+      memcpy(&ay, m + pa + 2, 2);
+      memcpy(&bx, m + pb, 2);
+      memcpy(&by, m + pb + 2, 2);
+      const float x0 = ox + ax * 0.01f, y0 = oy + ay * 0.01f;
+      const float x1 = ox + bx * 0.01f, y1 = oy + by * 0.01f;
+      if (y0 == y1) continue;
+      const float ylo = std::min(y0, y1), yhi = std::max(y0, y1);
+      int j0 = static_cast<int>(ceilf((ylo + R) / step)), j1 = static_cast<int>(floorf((yhi + R) / step));
+      j0 = std::max(j0, 0);
+      j1 = std::min(j1, N);
+      for (int j = j0; j <= j1; ++j) {
+        const float yv = -R + j * step;
+        if (!((y0 <= yv) != (y1 <= yv))) continue;
+        const float xc = x0 + (yv - y0) * (x1 - x0) / (y1 - y0);
+        int i0 = static_cast<int>(ceilf((xc + R) / step));
+        i0 = std::max(i0, 0);
+        for (int i = i0; i <= N; ++i) s_sea_vertex[j * (N + 1) + i] ^= 1;
+      }
+    }
+    pos += static_cast<size_t>(n) * 4;
+  }
+}
+
 void buildRelief(const Cam& c) {
   s_rc_count = 0;
   if (!services::terrain::available()) return;
   constexpr int N = kReliefN;
   const float step = 2.0f * c.R / N;
+  const MaskKey mk{services::map::generation(), c.R, services::location::lat(), services::location::lon()};
+  if (mk.gen != s_mask_key.gen || mk.R != s_mask_key.R || mk.lat != s_mask_key.lat ||
+      mk.lon != s_mask_key.lon) {
+    s_mask_key = mk;
+    buildSeaMask(c.R);
+  }
   // Scratch buffers, only needed while building (kept off the static RAM budget).
   float* hm = static_cast<float*>(malloc(sizeof(float) * (N + 1) * (N + 1)));
   bool* okv = static_cast<bool*>(malloc(sizeof(bool) * (N + 1) * (N + 1)));
@@ -583,6 +679,7 @@ void buildRelief(const Cam& c) {
         continue;  // outside the disc
       }
       if (hm[k00] < 1.0f || hm[k10] < 1.0f || hm[k01] < 1.0f || hm[k11] < 1.0f) continue;  // sea / shore
+      if (s_sea_vertex[k00] | s_sea_vertex[k10] | s_sea_vertex[k01] | s_sea_vertex[k11]) continue;
       if (!okv[k00] || !okv[k10] || !okv[k01] || !okv[k11]) continue;
       // Slope (in drawing units) and Lambert shading.
       const float dzdx = 0.5f * ((hm[k10] - hm[k00]) + (hm[k11] - hm[k01])) * c.tscale / step;
