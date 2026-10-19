@@ -40,6 +40,11 @@ size_t s_aircraft_count = 0;
 unsigned long s_last_update_ms = 0;
 PollFn s_poll_fn = nullptr;
 SemaphoreHandle_t s_mutex = nullptr;
+char s_error[40] = "";  // why the last fetch failed (shown while no data has arrived)
+
+void setError(const char* fmt, int value) {
+  snprintf(s_error, sizeof(s_error), fmt, value);
+}
 
 /** Publish parsed aircraft to the shared buffer atomically. */
 void publish(const Aircraft* src, size_t count) {
@@ -320,6 +325,8 @@ size_t snapshotAircraft(Aircraft* out, size_t max_out,
 
 const char* sourceName() { return kSources[s_source].name; }
 
+const char* lastError() { return s_error; }
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
@@ -348,14 +355,12 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     }
   } next_on_fail;
 
-  // Keep only the fields we render; the rest never reaches RAM.
+  // Only these fields of each aircraft reach RAM.
   JsonDocument filter;
-  JsonObject f = filter["ac"].add<JsonObject>();
   for (const char* key :
-       {"lat", "lon", "true_heading", "mag_heading", "track", "dir", "gs",
-        "tas", "ias", "alt_baro", "alt_geom", "seen_pos", "flight", "hex", "t",
-        "category", "baro_rate", "geom_rate"}) {
-    f[key] = true;
+       {"lat", "lon", "true_heading", "track", "gs", "alt_baro", "alt_geom", "seen_pos",
+        "flight", "hex", "t", "baro_rate", "geom_rate"}) {
+    filter[key] = true;
   }
 
   WiFiClientSecure client;
@@ -364,6 +369,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   HTTPClient http;
   if (!http.begin(client, url)) {
     Serial.println("adsb: http.begin failed");
+    setError("bağlantı kurulamadı", 0);
     return false;
   }
 
@@ -379,6 +385,11 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
                   static_cast<unsigned>(ESP.getFreeHeap()),
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
     http.end();
+    if (code < 0) {
+      setError(ESP.getMaxAllocHeap() < 40000 ? "bellek yetmedi (%d)" : "bağlantı hatası %d", code);
+    } else {
+      setError("sunucu yanıtı %d", code);
+    }
     return false;
   }
 
@@ -399,47 +410,90 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   PollingSocketSource source(http, *stream, millis() + kRequestTimeoutMs);
   BodyReader body(source, framing, http.getSize());
-  JsonDocument doc;
-  const DeserializationError err =
-      deserializeJson(doc, body, DeserializationOption::Filter(filter));
-  // Read off the terminating chunk the parser stopped short of, so the socket
-  // sits at the end of the message. Not needed while every fetch builds its own
-  // connection, but a prerequisite for ever reusing one.
-  body.drain();
-  http.end();
-  if (err) {
-    if (body.framingError()) {
-      Serial.println("adsb: malformed chunked body");
-    } else if (body.bytesRead() == 0) {
-      Serial.println("adsb: empty response");
-    } else {
-      Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
-    }
-    return false;
-  }
 
-  // Parse into a local buffer, then publish atomically so a reader on another
-  // thread never sees a half-updated list.
+  // The response can list well over a hundred aircraft near a busy airport. Instead
+  // of loading the whole "ac" array into one document (20-30 KB on top of the ~40 KB
+  // TLS connection), walk the array and parse one aircraft at a time into a small
+  // document: memory use no longer grows with the traffic.
   //
-  // The feed lists aircraft in no particular order, so near a busy airport it
-  // can hold more than kMaxAircraft: keep the NEAREST ones (a full buffer swaps
-  // its farthest entry for a closer newcomer) instead of whichever came first --
-  // otherwise a plane right overhead could be dropped at random. The USB
-  // bridges already sort by distance before sending.
+  // The feed lists aircraft in no particular order, so keep the NEAREST kMaxAircraft
+  // (a full buffer swaps its farthest entry for a closer newcomer).
   Aircraft parsed[kMaxAircraft];
   float dist2[kMaxAircraft];
   size_t n = 0;
   size_t total = 0;
   const float kx = 111.0f * cosf(static_cast<float>(center_lat) * 0.01745329252f);
-  JsonArray ac = doc["ac"].as<JsonArray>();
-  if (!ac.isNull()) {
-    for (JsonObject plane : ac) {
-      if (!plane["lat"].is<float>() || !plane["lon"].is<float>()) {
-        continue;
+
+  auto nextNonSpace = [&]() {
+    int ch;
+    do {
+      ch = body.read();
+    } while (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t');
+    return ch;
+  };
+  // Find "ac" followed by ':' and '['.
+  bool found = false;
+  {
+    static const char kKey[] = "\"ac\"";
+    size_t matched = 0;
+    int ch;
+    while (!found && (ch = body.read()) >= 0) {
+      matched = (ch == kKey[matched]) ? matched + 1 : (ch == kKey[0] ? 1 : 0);
+      if (matched == sizeof(kKey) - 1) {
+        matched = 0;
+        if (nextNonSpace() == ':' && nextNonSpace() == '[') found = true;
       }
-      if (isOnGround(plane) && !config::kAdsbShowGroundAircraft) {
-        continue;
+    }
+  }
+  bool ok = found;
+  bool reported = false;  // a specific reason was already set for this fetch
+  if (!found) {
+    reported = true;
+    Serial.println(body.bytesRead() == 0 ? "adsb: empty response" : "adsb: no aircraft list");
+    setError(body.bytesRead() == 0 ? "boş yanıt" : "beklenmeyen yanıt", 0);
+  }
+  JsonDocument doc;
+  while (ok) {
+    // Peek: ']' ends the list (empty sky), anything else starts an object.
+    int ch = nextNonSpace();
+    if (ch == ']') break;
+    if (ch != '{') {
+      ok = false;
+      break;
+    }
+    // Re-feed the '{' we consumed, then let ArduinoJson read the rest of the object.
+    struct Prefixed {
+      BodyReader* r;
+      bool sent = false;
+      int read() {
+        if (!sent) {
+          sent = true;
+          return '{';
+        }
+        return r->read();
       }
+      size_t readBytes(char* buf, size_t len) {
+        size_t k = 0;
+        while (k < len) {
+          const int c = read();
+          if (c < 0) break;
+          buf[k++] = static_cast<char>(c);
+        }
+        return k;
+      }
+    } in{&body};
+    const DeserializationError err = deserializeJson(doc, in, DeserializationOption::Filter(filter));
+    if (err) {
+      Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+      setError(err == DeserializationError::NoMemory ? "bellek yetmedi" : "veri okunamadı", 0);
+      reported = true;
+      ok = false;
+      break;
+    }
+    JsonObject plane = doc.as<JsonObject>();
+    do {
+      if (!plane["lat"].is<float>() || !plane["lon"].is<float>()) break;
+      if (isOnGround(plane) && !config::kAdsbShowGroundAircraft) break;
       ++total;
       const float lat = plane["lat"].as<float>();
       const float lon = plane["lon"].as<float>();
@@ -452,20 +506,18 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
         for (size_t k = 1; k < n; ++k) {
           if (dist2[k] > dist2[far]) far = k;
         }
-        if (d2 >= dist2[far]) continue;
+        if (d2 >= dist2[far]) break;
         slot = far;
       } else {
         ++n;
       }
       dist2[slot] = d2;
       Aircraft& a = parsed[slot];
-
       a.lat = lat;
       a.lon = lon;
       a.nose_deg = pickNoseHeading(plane);
       a.track_deg = pickTrackHeading(plane);
       a.gs_knots = pickGroundSpeed(plane);
-
       // seen_pos: seconds since this position was measured. Use it as the
       // dead-reckoning age offset, capped so a very stale fix isn't flung far.
       float seen_pos = 0.0f;
@@ -473,12 +525,10 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       if (seen_pos < 0.0f) seen_pos = 0.0f;
       if (seen_pos > 30.0f) seen_pos = 30.0f;
       a.pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
-
       float alt = 0.0f;
       if (isOnGround(plane)) {
         a.alt_ft = 0;
-      } else if (readJsonFloat(plane, "alt_baro", &alt) ||
-                 readJsonFloat(plane, "alt_geom", &alt)) {
+      } else if (readJsonFloat(plane, "alt_baro", &alt) || readJsonFloat(plane, "alt_geom", &alt)) {
         a.alt_ft = static_cast<int32_t>(lroundf(alt));
       } else {
         a.alt_ft = 0;
@@ -491,10 +541,22 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       } else {
         a.vrate_fpm = 0;
       }
-
       fillTagFields(&a, plane);
-    }
+    } while (false);
+    // Between objects: ',' continues, ']' ends.
+    ch = nextNonSpace();
+    if (ch == ']') break;
+    if (ch != ',') ok = false;
   }
+  // Read off the rest of the message, so the socket sits at its end.
+  body.drain();
+  http.end();
+  if (!ok) {
+    if (body.framingError()) Serial.println("adsb: malformed chunked body");
+    if (!reported) setError("veri yarıda kesildi", 0);
+    return false;
+  }
+  s_error[0] = '\0';
 
   publish(parsed, n);
   if (total > n) {

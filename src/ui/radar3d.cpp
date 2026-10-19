@@ -1494,6 +1494,13 @@ void drawEmptyNote(unsigned long fetched_ms) {
   s_spr.setTextColor(kTextDim);
   s_spr.drawString(fetched_ms == 0 ? "Uçak verisi bekleniyor..." : "Menzilde uçak yok", kW / 2,
                    kTopBarH + 26);
+  const char* err = services::adsb::lastError();
+  if (fetched_ms == 0 && err[0] != '\0' && !services::usb_feed::active()) {
+    char line[64];
+    snprintf(line, sizeof(line), "Son deneme: %s", err);
+    setFont(&ui::font::Sans8);
+    s_spr.drawString(line, kW / 2, kTopBarH + 46);
+  }
 }
 
 void applyPalette() {

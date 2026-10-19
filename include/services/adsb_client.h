@@ -63,4 +63,7 @@ size_t countWithin(double lat0, double lon0, float radius_km);
 /** Name of the data source in use (adsb.fi, or a fallback after a failure). */
 const char* sourceName();
 
+/** Why the last fetch failed (Turkish, for the screen); "" after a success. */
+const char* lastError();
+
 }  // namespace services::adsb

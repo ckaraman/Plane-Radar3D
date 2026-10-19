@@ -93,8 +93,9 @@ const RangePreset& rangeCurrent() { return kRangePresets[s_range_index]; }
 uint8_t rangeIndex() { return s_range_index; }
 
 float fetchRadiusKm() {
-  // A little beyond the outer ring so aircraft flying in are already known.
-  return rangeCurrent().outer_km * 1.15f;
+  // The selected range plus the 5 % margin the renderer still draws: nothing that
+  // would never be shown is downloaded.
+  return rangeCurrent().outer_km * 1.05f;
 }
 
 bool useMiles() { return s_use_miles; }

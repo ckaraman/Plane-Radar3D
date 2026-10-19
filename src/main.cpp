@@ -43,7 +43,7 @@ unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_redraw_ms = 0;
 
 enum class Screen { Radar, Clock, Weather, Water };
-Screen g_screen = Screen::Radar;
+volatile Screen g_screen = Screen::Radar;  // read by the network task too
 unsigned long g_last_aircraft_ms = 0;
 
 // Touch state (polled; the XPT2046 shares the SPI bus with the panel).
@@ -270,10 +270,19 @@ void adsbFetchTask(void*) {
   for (;;) {
     // While a USB update runs, leave the network alone: the update needs the CPU
     // and the heap, and TLS handshakes take ~40 KB at a time.
+    // Aircraft are polled every cycle while the radar or the clock (which needs to
+    // know whether anything is in range) is up; behind the forecast or water screen
+    // every 30 s is enough, which spares the network and the heap.
+    static unsigned long last_adsb = 0;
+    const bool aircraft_visible = g_screen == Screen::Radar || g_screen == Screen::Clock;
+    const bool adsb_due = aircraft_visible || last_adsb == 0 || millis() - last_adsb >= 30000;
     if (WiFi.status() == WL_CONNECTED && !services::serial_ota::active()) {
-      services::adsb::fetchUpdate(services::location::lat(), services::location::lon(),
-                                  ui::radar::fetchRadiusKm());
-      services::route::fetchPending();
+      if (adsb_due) {
+        last_adsb = millis();
+        services::adsb::fetchUpdate(services::location::lat(), services::location::lon(),
+                                    ui::radar::fetchRadiusKm());
+      }
+      if (g_screen == Screen::Radar) services::route::fetchPending();  // only the card shows routes
       services::weather::fetchIfDue(services::location::lat(), services::location::lon());
     }
     vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
