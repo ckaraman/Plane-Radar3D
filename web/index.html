@@ -172,7 +172,7 @@
         <label><input type="checkbox" id="opt-rings" checked> Radar halkalarını ve artı çizgilerini göster (kapatırsanız yalnızca harita, uçaklar ve yön harfleri görünür)</label>
       </div>
 
-      <label for="opt-map">Radarın zeminine harita (deniz, kıyı çizgisi, ana yollar) ve 3B arazi yükseklikleri</label>
+      <label for="opt-map">Radarın zeminine harita (deniz, göller, kıyı çizgisi, ana yollar) ve 3B arazi yükseklikleri</label>
       <select id="opt-map">
         <option value="17">Geniş: yaklaşık 26 km çevre (25 km menzil için)</option>
         <option value="15" selected>Normal: yaklaşık 23 km çevre (15 km menzil için, önerilen)</option>
@@ -796,8 +796,12 @@
     const fetchKm = radiusKm * 1.25;               // a little wider than the circle so its edge is cut exactly
     const dLat = fetchKm / KM_PER_DEG, dLon = fetchKm / (KM_PER_DEG * Math.cos(lat * Math.PI / 180));
     const bbox = [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map((v) => v.toFixed(5)).join(',');
-    const q = '[out:json][timeout:25];(way["natural"="coastline"](' + bbox + ');' +
-      'way["highway"~"^(motorway|trunk)$"](' + bbox + '););out geom(' + bbox + ');';
+    const notRiver = '["water"!~"^(river|riverbank|canal|stream|ditch|drain|wastewater|pool|fountain|moat|basin)$"]';
+    const q = '[out:json][timeout:40];(way["natural"="coastline"](' + bbox + ');' +
+      'way["highway"~"^(motorway|trunk)$"](' + bbox + ');' +
+      'way["natural"="water"]' + notRiver + '(' + bbox + ');' +
+      'relation["natural"="water"]' + notRiver + '(' + bbox + ');' +
+      'way["landuse"="reservoir"](' + bbox + '););out geom(' + bbox + ');';
     const reasons = [];
     for (let round = 0; round < 3; round++) {
       for (const url of OVERPASS) {
@@ -953,12 +957,57 @@
     return rings;
   }
 
+  // Lakes and reservoirs: closed ways, or multipolygon relations whose member ways are
+  // joined end to end into rings. Points outside the downloaded box are skipped (the
+  // device clips the fill to the radar disc anyway).
+  const isWater = (t) => t && (t.natural === 'water' || t.landuse === 'reservoir');
+  function waterRings(elements, toKm) {
+    const rings = [];
+    const geomPts = (geom) => geom.filter((g) => g).map(toKm);
+    const joinRings = (segs) => {
+      const out = [], used = new Array(segs.length).fill(false);
+      const same = (a, b) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+      for (let s = 0; s < segs.length; s++) {
+        if (used[s] || segs[s].length < 2) continue;
+        used[s] = true;
+        let ring = segs[s].slice();
+        for (let guard = 0; guard < segs.length && !same(ring[0], ring[ring.length - 1]); guard++) {
+          const end = ring[ring.length - 1];
+          let found = false;
+          for (let j = 0; j < segs.length; j++) {
+            if (used[j] || segs[j].length < 2) continue;
+            const sj = segs[j];
+            if (same(sj[0], end)) { ring = ring.concat(sj.slice(1)); }
+            else if (same(sj[sj.length - 1], end)) { ring = ring.concat(sj.slice(0, -1).reverse()); }
+            else continue;
+            used[j] = true; found = true; break;
+          }
+          if (!found) break;   // open (cut by the download box): close it straight
+        }
+        out.push(ring);
+      }
+      return out;
+    };
+    for (const el of elements) {
+      if (!isWater(el.tags)) continue;
+      if (el.type === 'way' && Array.isArray(el.geometry)) {
+        const pts = geomPts(el.geometry);
+        if (pts.length >= 4) rings.push(pts);
+      } else if (el.type === 'relation' && Array.isArray(el.members)) {
+        const segs = el.members.filter((m) => m.type === 'way' && Array.isArray(m.geometry))
+          .map((m) => geomPts(m.geometry));
+        for (const r of joinRings(segs)) if (r.length >= 4) rings.push(r);
+      }
+    }
+    return rings;
+  }
+
   function buildMapBlob(elements, lat, lon, withWater, radiusKm) {
     const cosL = Math.cos(lat * Math.PI / 180), R = Math.min(radiusKm, MAP_MAX_KM);
     const roads = [];                    // {type:1, pts}
     const coastParts = [];               // raw ways split at points outside the downloaded box
     for (const el of elements) {
-      if (el.type !== 'way' || !Array.isArray(el.geometry)) continue;
+      if (el.type !== 'way' || !Array.isArray(el.geometry) || isWater(el.tags)) continue;
       const coastline = el.tags && el.tags.natural === 'coastline';
       let cur = [], keys = [];
       const flush = () => {
@@ -1017,7 +1066,29 @@
       coast.pts -= coast.lines.pop().pts.length;
     }
 
-    // 2) Roads: motorways first, then trunk roads, longest first, as many as fit.
+    // 2) Lakes: largest first, as many as fit in their share of the budget.
+    const LAKE_PTS = 900;
+    const lakes = [];
+    let lakePts = 0;
+    if (withWater) {
+      const toKm = (g) => [(g.lon - lon) * KM_PER_DEG * cosL, (g.lat - lat) * KM_PER_DEG];
+      const cand = [];
+      for (const r of waterRings(elements, toKm)) {
+        const area = Math.abs(signedArea(r));
+        if (area < 0.03) continue;                                        // smaller than ~170 x 170 m
+        if (!r.some((p) => Math.hypot(p[0], p[1]) <= R * 1.05)) continue;  // not on the disc
+        cand.push({ area, pts: r });
+      }
+      cand.sort((a, b) => b.area - a.area);
+      for (const c of cand) {
+        let s = simplify(c.pts.concat([c.pts[0]]), Math.max(tol, 0.03)).slice(0, -1);
+        if (s.length < 3) continue;
+        if (lakePts + s.length > LAKE_PTS) continue;
+        lakes.push(s); lakePts += s.length;
+      }
+    }
+
+    // 3) Roads: motorways first, then trunk roads, longest first, as many as fit.
     const roadLines = [];
     for (const r of roads) {
       const s = simplify(r.pts, Math.max(tol, 0.05));
@@ -1026,17 +1097,19 @@
     roadLines.sort((x, y) => x.p - y.p || y.len - x.len);
     const lines = coast.lines.slice();
     let linePts = coast.pts;
-    const bytesFor = (nl, lp) => 14 + (nl + coast.rings.length) * 3 + (lp + coast.ringPts) * 4;
+    const bytesFor = (nl, lp) => 14 + (nl + coast.rings.length + lakes.length) * 3 + (lp + coast.ringPts + lakePts) * 4;
     for (const l of roadLines) {
       if (linePts + l.pts.length > MAP_MAX_POINTS || bytesFor(lines.length + 1, linePts + l.pts.length) > MAP_MAX_BYTES) continue;
       lines.push(l); linePts += l.pts.length;
     }
     const built = { lines, rings: coast.rings, linePts, ringPts: coast.ringPts };
-    if (!built.lines.length) return null;                     // nothing to draw here
+    if (!built.lines.length && !lakes.length) return null;    // nothing to draw here
     // Draw order on the device: roads, then coast lines (on top of the sea fill), rings are masked separately.
     built.lines.sort((a, b) => b.type - a.type);
-    const all = built.lines.map((l) => ({ type: l.type, pts: l.pts })).concat(built.rings.map((r) => ({ type: 2, pts: r })));
-    const bytes = 14 + all.length * 3 + (built.linePts + built.ringPts) * 4;
+    const all = built.lines.map((l) => ({ type: l.type, pts: l.pts }))
+      .concat(built.rings.map((r) => ({ type: 2, pts: r })))
+      .concat(lakes.map((r) => ({ type: 3, pts: r })));   // type 3: lake (filled + outlined, older firmware ignores it)
+    const bytes = 14 + all.length * 3 + (built.linePts + built.ringPts + lakePts) * 4;
     const buf = new ArrayBuffer(bytes), dv = new DataView(buf);
     dv.setUint8(0, 0x50); dv.setUint8(1, 0x4D); dv.setUint8(2, built.rings.length ? 2 : 1); dv.setUint8(3, 0);
     dv.setInt32(4, Math.round(lat * 1e7), true); dv.setInt32(8, Math.round(lon * 1e7), true);

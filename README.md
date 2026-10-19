@@ -107,8 +107,8 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 
 - **Radar 3D:** Perspektif zemin ızgarası, menzil halkaları, harita (deniz, kıyı çizgisi, ana yollar) ve uçaklar. Uçakların altında zemine inen çizgi ve gölge, arkalarında son bir dakikalık iz var. Renkler: turuncu 10K ft altı, krem 10–25K ft, camgöbeği 25K ft üstü. İrtifa diğer radardaki gibi `1.2K ft` biçiminde.
 - **Uçak kartı:** Seçilen (ya da en yakın) uçağın nereden nereye gittiği (adsbdb.com, çağrı koduna göre; bazı uçuşlarda bulunamayabilir), irtifa, hız, mesafe, rota ve tırmanma/alçalma.
-- **3B arazi:** Haritayla birlikte arazi yükseklikleri (Open-Meteo) indirilir; zemin ızgarası tepelere göre kabarır, yollar ve kıyılar araziye oturur, yüksek yerler daha parlak çizilir.
-- **Harita:** Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
+- **3B arazi:** Haritayla birlikte arazi yükseklikleri indirilir. Kara düz bir renkle dolu çizilir; tepeler ızgara çizgisi olmadan kabarır, kuzeybatıdan gelen ışığa göre gölgede kalan yamaçlar koyu tonda görünür. Yollar, kıyılar ve göller araziye oturur.
+- **Harita:** Deniz, göller ve baraj gölleri dolu, kıyı ve ana yollar çizgi olarak. Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
 - **Saat:** Seçili menzilde 15 sn boyunca uçak yoksa açılır (menzil dışındaki uçaklar engellemez). Altında ORTAM SIC. (SHT30) ve DIŞ ORT. SIC. sıcaklık ve nemi gösterilir.
 - **Hava durumu:** Radarın sağ altındaki HAVA düğmesiyle açılır. Dış ortamın şimdiki durumu (sıcaklık, hissedilen, nem, rüzgâr, gün doğumu/batımı), SHT30'dan ortam sıcaklığı ve nemi (rahatlık etiketiyle) ile 5 günlük tahmin (en yüksek/en düşük sıcaklık, yağış olasılığı). Veri Open-Meteo'dan 10 dakikada bir gelir; Wi-Fi yokken USB köprüsü indirip gönderir.
 

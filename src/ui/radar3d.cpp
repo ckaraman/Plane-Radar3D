@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -36,8 +37,8 @@ constexpr int kH = config::kDisplayHeight;
 // --- 16-color palette (index = color number in the 4-bit sprite) ---
 enum Pal : uint8_t {
   kBg = 0,
-  kGround,
-  kGrid,
+  kLandDark,  // shaded slopes of the terrain
+  kLand,      // land fill (flat ground and lit slopes)
   kRingDim,
   kRing,
   kCyan,      // FL250+ and the home marker
@@ -57,13 +58,13 @@ struct Rgb {
   uint8_t r, g, b;
 };
 constexpr Rgb kPaletteHighContrast[16] = {
-    {0, 0, 0},       {6, 12, 20},     {38, 92, 118},   {60, 130, 165},
+    {0, 0, 0},       {20, 33, 26},    {38, 58, 42},    {60, 130, 165},
     {90, 180, 225},  {110, 215, 255}, {255, 248, 225}, {255, 170, 60},
     {255, 255, 255}, {175, 188, 198}, {12, 26, 38},    {255, 45, 45},
     {80, 240, 150},  {90, 175, 235},  {215, 140, 55},  {18, 58, 92},
 };
 constexpr Rgb kPalette[16] = {
-    {5, 8, 13},      {8, 16, 25},     {18, 48, 63},    {31, 81, 104},
+    {5, 8, 13},      {15, 24, 19},    {29, 44, 33},    {31, 81, 104},
     {42, 112, 144},  {91, 200, 245},  {237, 230, 211}, {255, 159, 67},
     {230, 237, 242}, {125, 139, 150}, {11, 22, 32},    {225, 40, 40},
     {61, 220, 132},  {46, 110, 158},  {120, 82, 36},   {13, 38, 62},
@@ -361,61 +362,7 @@ void drawGround(const Cam& c) {
   const float horizon = c.cy - c.f * tanf(c.pitch_deg * kDegToRad);
   const int hy = std::max(kTopBarH, ri(horizon));
   s_spr.fillScreen(kBg);
-  s_spr.fillRect(0, hy, kW, kH - hy, kGround);
   s_spr.drawFastHLine(0, hy, kW, kRingDim);
-}
-
-void drawGrid(const Cam& c) {
-  if (!services::terrain::available()) {
-    // Flat ground: straight grid lines clipped to the outer ring.
-    const float step = c.R / 5.0f;
-    for (int i = -4; i <= 4; ++i) {
-      const float k = step * static_cast<float>(i);
-      const float h = sqrtf(c.R * c.R - k * k);
-      float ax, ay, bx, by;
-      if (project(c, k, -h, 0, &ax, &ay) && project(c, k, h, 0, &bx, &by)) {
-        s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kGrid);
-      }
-      if (project(c, -h, k, 0, &ax, &ay) && project(c, h, k, 0, &bx, &by)) {
-        s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kGrid);
-      }
-    }
-    return;
-  }
-  // Terrain mesh: denser grid lines following the ground height; segments on
-  // higher ground are drawn brighter so ridges stand out.
-  constexpr int kLines = 10;  // each side of the centre
-  constexpr int kSteps = 30;  // samples along a line
-  const float step = c.R / static_cast<float>(kLines);
-  for (int dir = 0; dir < 2; ++dir) {
-    for (int i = -kLines + 1; i <= kLines - 1; ++i) {
-      const float k = step * static_cast<float>(i);
-      const float h = sqrtf(c.R * c.R - k * k);
-      float px = 0, py = 0, ph = 0;
-      bool have = false;
-      for (int sIdx = 0; sIdx <= kSteps; ++sIdx) {
-        const float t = -h + 2.0f * h * static_cast<float>(sIdx) / kSteps;
-        const float x = dir == 0 ? k : t;
-        const float y = dir == 0 ? t : k;
-        const float hm = services::terrain::heightM(x, y);
-        float sx, sy;
-        if (!project(c, x, y, hm * c.tscale, &sx, &sy)) {
-          have = false;
-          continue;
-        }
-        if (have) {
-          // Height bands relative to the highest point: low ground dim, ridges bright.
-          const float rel = 0.5f * (hm + ph) / std::max(60.0f, services::terrain::maxHeightM());
-          const uint8_t col = rel > 0.6f ? kTextDim : (rel > 0.3f ? kRing : (rel > 0.1f ? kRingDim : kGrid));
-          s_spr.drawLine(ri(px), ri(py), ri(sx), ri(sy), col);
-        }
-        px = sx;
-        py = sy;
-        ph = hm;
-        have = true;
-      }
-    }
-  }
 }
 
 // ---------------------------------------------------------------- sea fill
@@ -424,22 +371,26 @@ void drawGrid(const Cam& c) {
 // once per camera change and filled scanline by scanline, clipped to the
 // projected outer ring so the sea stays on the radar disc.
 
-constexpr size_t kMaxSeaRings = 256;
-int16_t* s_sea_xy = nullptr;  // x0,y0,x1,y1,... screen coordinates
-size_t s_sea_cap = 0;         // points the buffer can hold
-size_t s_sea_points = 0;
-uint16_t s_ring_start[kMaxSeaRings];
-uint16_t s_ring_len[kMaxSeaRings];
-int16_t s_ring_ymin[kMaxSeaRings];
-int16_t s_ring_ymax[kMaxSeaRings];
-size_t s_ring_count = 0;
+constexpr size_t kMaxRings = 256;
+struct RingSet {
+  int16_t* xy = nullptr;  // x0,y0,x1,y1,... screen coordinates
+  size_t cap = 0;         // points the buffer can hold
+  size_t points = 0;
+  uint16_t start[kMaxRings];
+  uint16_t len[kMaxRings];
+  int16_t ymin[kMaxRings];
+  int16_t ymax[kMaxRings];
+  size_t count = 0;
+};
+RingSet s_sea;    // map type 2: sea polygons (even-odd), at sea level
+RingSet s_lakes;  // map type 3: lakes and reservoirs, draped on the terrain
 int16_t s_disc_l[kH];
 int16_t s_disc_r[kH];
 struct SeaKey {
-  uint32_t gen;
+  uint32_t gen, tgen;
   float yaw, R, pitch;
   double lat, lon;
-} s_sea_key = {0xFFFFFFFFu, -1, -1, -1, 0, 0};
+} s_sea_key = {0xFFFFFFFFu, 0, -1, -1, -1, 0, 0};
 
 void buildDiscSpans(const Cam& c) {
   constexpr int kSeg = 144;
@@ -468,9 +419,10 @@ void buildDiscSpans(const Cam& c) {
   }
 }
 
-void buildSea(const Cam& c) {
-  s_sea_points = 0;
-  s_ring_count = 0;
+/** Project all map rings of one type (2 sea, 3 lakes) into a ring set. */
+void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
+  set->points = 0;
+  set->count = 0;
   const uint8_t* m = services::map::data();
   const size_t size = services::map::size();
   if (m == nullptr || size < services::map::kHeaderBytes) return;
@@ -482,21 +434,20 @@ void buildSea(const Cam& c) {
   float ox, oy;
   offsetKm(lat_e7 / 1e7f, lon_e7 / 1e7f, &ox, &oy);
 
-  // First pass: how many sea points?
   size_t need = 0;
   size_t pos = services::map::kHeaderBytes;
   for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
     uint16_t n;
     memcpy(&n, m + pos + 1, 2);
-    if (m[pos] == 2) need += n;
+    if (m[pos] == want) need += n;
     pos += 3 + static_cast<size_t>(n) * 4;
   }
   if (need == 0) return;
-  if (need > s_sea_cap) {
-    int16_t* buf = static_cast<int16_t*>(realloc(s_sea_xy, need * 2 * sizeof(int16_t)));
-    if (buf == nullptr) return;  // not enough RAM: no sea fill, lines still draw
-    s_sea_xy = buf;
-    s_sea_cap = need;
+  if (need > set->cap) {
+    int16_t* buf = static_cast<int16_t*>(realloc(set->xy, need * 2 * sizeof(int16_t)));
+    if (buf == nullptr) return;  // not enough RAM: no fill, lines still draw
+    set->xy = buf;
+    set->cap = need;
   }
 
   pos = services::map::kHeaderBytes;
@@ -506,60 +457,52 @@ void buildSea(const Cam& c) {
     memcpy(&n, m + pos + 1, 2);
     pos += 3;
     if (pos + static_cast<size_t>(n) * 4 > size) return;
-    if (type != 2 || n < 3 || s_ring_count >= kMaxSeaRings) {
+    if (type != want || n < 3 || set->count >= kMaxRings) {
       pos += static_cast<size_t>(n) * 4;
       continue;
     }
-    const size_t start = s_sea_points;
+    const size_t start = set->points;
     int16_t ymin = 32767, ymax = -32768;
     int16_t lx = 0, ly = 0;
     for (uint16_t i = 0; i < n; ++i, pos += 4) {
       int16_t xi, yi;
       memcpy(&xi, m + pos, 2);
       memcpy(&yi, m + pos + 2, 2);
+      const float x = ox + xi * 0.01f, y = oy + yi * 0.01f;
       float sx, sy;
-      if (project(c, ox + xi * 0.01f, oy + yi * 0.01f, 0, &sx, &sy)) {
+      if (project(c, x, y, draped ? groundZ(c, x, y) : 0.0f, &sx, &sy)) {
         sx = std::max(-2000.0f, std::min(2480.0f, sx));
         sy = std::max(-2000.0f, std::min(2320.0f, sy));
         lx = static_cast<int16_t>(ri(sx));
         ly = static_cast<int16_t>(ri(sy));
       }
-      s_sea_xy[s_sea_points * 2] = lx;
-      s_sea_xy[s_sea_points * 2 + 1] = ly;
+      set->xy[set->points * 2] = lx;
+      set->xy[set->points * 2 + 1] = ly;
       ymin = std::min(ymin, ly);
       ymax = std::max(ymax, ly);
-      ++s_sea_points;
+      ++set->points;
     }
-    s_ring_start[s_ring_count] = static_cast<uint16_t>(start);
-    s_ring_len[s_ring_count] = n;
-    s_ring_ymin[s_ring_count] = ymin;
-    s_ring_ymax[s_ring_count] = ymax;
-    ++s_ring_count;
+    set->start[set->count] = static_cast<uint16_t>(start);
+    set->len[set->count] = n;
+    set->ymin[set->count] = ymin;
+    set->ymax[set->count] = ymax;
+    ++set->count;
   }
 }
 
-void drawSea(const Cam& c) {
-  const SeaKey key{services::map::generation(), s_yaw_cur, c.R, c.pitch_deg,
-                   services::location::lat(), services::location::lon()};
-  if (key.gen != s_sea_key.gen || key.yaw != s_sea_key.yaw || key.R != s_sea_key.R ||
-      key.pitch != s_sea_key.pitch ||
-      key.lat != s_sea_key.lat || key.lon != s_sea_key.lon) {
-    s_sea_key = key;
-    buildDiscSpans(c);
-    buildSea(c);
-  }
-  if (s_ring_count == 0) return;
-
+/** Scanline even-odd fill of a ring set, clipped to the radar disc. */
+void fillRings(const RingSet& set, uint8_t color) {
+  if (set.count == 0) return;
   constexpr int kMaxCross = 128;
   float xs[kMaxCross];
   for (int y = kTopBarH; y < kH; ++y) {
     if (s_disc_l[y] > s_disc_r[y]) continue;
     const float ys = y + 0.5f;
     int n = 0;
-    for (size_t r = 0; r < s_ring_count && n < kMaxCross; ++r) {
-      if (ys < s_ring_ymin[r] || ys > s_ring_ymax[r]) continue;
-      const int16_t* p = s_sea_xy + s_ring_start[r] * 2;
-      const int len = s_ring_len[r];
+    for (size_t r = 0; r < set.count && n < kMaxCross; ++r) {
+      if (ys < set.ymin[r] || ys > set.ymax[r]) continue;
+      const int16_t* p = set.xy + set.start[r] * 2;
+      const int len = set.len[r];
       for (int i = 0; i < len && n < kMaxCross; ++i) {
         const int j = (i + 1 == len) ? 0 : i + 1;
         const float y0 = p[i * 2 + 1], y1 = p[j * 2 + 1];
@@ -581,9 +524,119 @@ void drawSea(const Cam& c) {
     for (int k = 0; k + 1 < n; k += 2) {
       const int xa = std::max<int>(static_cast<int>(ceilf(xs[k])), s_disc_l[y]);
       const int xb = std::min<int>(static_cast<int>(floorf(xs[k + 1])), s_disc_r[y]);
-      if (xb >= xa) s_spr.drawFastHLine(xa, y, xb - xa + 1, kSea);
+      if (xb >= xa) s_spr.drawFastHLine(xa, y, xb - xa + 1, color);
     }
   }
+}
+
+// ---------------------------------------------------------------- terrain relief
+//
+// The terrain is drawn as filled cells (no grid lines), back to front, each in the
+// land colour or, on slopes facing away from a light in the north-west, the shaded
+// land colour. Only cells fully on land (all corners above sea level) and inside the
+// disc are drawn; flat land and the sea come from the fills underneath. Projection,
+// shading and draw order are cached until the camera or the data changes.
+
+constexpr int kReliefN = 40;  // cells per side over the disc's bounding square
+int16_t s_rv_x[(kReliefN + 1) * (kReliefN + 1)];
+int16_t s_rv_y[(kReliefN + 1) * (kReliefN + 1)];
+uint16_t s_rc_order[kReliefN * kReliefN];
+uint8_t s_rc_color[kReliefN * kReliefN];
+uint16_t s_rc_count = 0;
+const float* s_rc_depth = nullptr;  // only valid while sorting
+
+void buildRelief(const Cam& c) {
+  s_rc_count = 0;
+  if (!services::terrain::available()) return;
+  constexpr int N = kReliefN;
+  const float step = 2.0f * c.R / N;
+  // Scratch buffers, only needed while building (kept off the static RAM budget).
+  float* hm = static_cast<float*>(malloc(sizeof(float) * (N + 1) * (N + 1)));
+  bool* okv = static_cast<bool*>(malloc(sizeof(bool) * (N + 1) * (N + 1)));
+  float* depth = static_cast<float*>(malloc(sizeof(float) * N * N));
+  if (hm == nullptr || okv == nullptr || depth == nullptr) {
+    free(hm);
+    free(okv);
+    free(depth);
+    return;
+  }
+  for (int j = 0; j <= N; ++j) {
+    for (int i = 0; i <= N; ++i) {
+      const float x = -c.R + i * step, y = -c.R + j * step;
+      const int k = j * (N + 1) + i;
+      hm[k] = services::terrain::heightM(x, y);
+      float sx = 0, sy = 0;
+      okv[k] = project(c, x, y, hm[k] * c.tscale, &sx, &sy);
+      s_rv_x[k] = static_cast<int16_t>(std::max(-2000.0f, std::min(2480.0f, sx)));
+      s_rv_y[k] = static_cast<int16_t>(std::max(-2000.0f, std::min(2320.0f, sy)));
+    }
+  }
+  // Light from the north-west, a bit above the horizon (world frame: x east, y north).
+  const float lx = -0.55f, ly = 0.55f, lz = 0.63f;
+  const float r2 = c.R * c.R;
+  for (int j = 0; j < N; ++j) {
+    for (int i = 0; i < N; ++i) {
+      const int k00 = j * (N + 1) + i, k10 = k00 + 1, k01 = k00 + N + 1, k11 = k01 + 1;
+      const float x0 = -c.R + i * step, y0 = -c.R + j * step, x1 = x0 + step, y1 = y0 + step;
+      if (x0 * x0 + y0 * y0 > r2 || x1 * x1 + y0 * y0 > r2 || x0 * x0 + y1 * y1 > r2 ||
+          x1 * x1 + y1 * y1 > r2) {
+        continue;  // outside the disc
+      }
+      if (hm[k00] < 1.0f || hm[k10] < 1.0f || hm[k01] < 1.0f || hm[k11] < 1.0f) continue;  // sea / shore
+      if (!okv[k00] || !okv[k10] || !okv[k01] || !okv[k11]) continue;
+      // Slope (in drawing units) and Lambert shading.
+      const float dzdx = 0.5f * ((hm[k10] - hm[k00]) + (hm[k11] - hm[k01])) * c.tscale / step;
+      const float dzdy = 0.5f * ((hm[k01] - hm[k00]) + (hm[k11] - hm[k10])) * c.tscale / step;
+      const float inv = 1.0f / sqrtf(dzdx * dzdx + dzdy * dzdy + 1.0f);
+      const float lit = (-dzdx * lx - dzdy * ly + lz) * inv;
+      const uint16_t idx = static_cast<uint16_t>(j * N + i);
+      s_rc_color[idx] = lit < lz - 0.06f ? kLandDark : kLand;
+      const float cxw = x0 + 0.5f * step, cyw = y0 + 0.5f * step;
+      depth[idx] = cxw * c.syaw + cyw * c.cyaw;  // forward distance in the camera frame
+      s_rc_order[s_rc_count++] = idx;
+    }
+  }
+  // Far cells first (painter's algorithm).
+  s_rc_depth = depth;
+  std::sort(s_rc_order, s_rc_order + s_rc_count,
+            [](uint16_t a, uint16_t b) { return s_rc_depth[a] > s_rc_depth[b]; });
+  s_rc_depth = nullptr;
+  free(hm);
+  free(okv);
+  free(depth);
+}
+
+void drawRelief() {
+  constexpr int N = kReliefN;
+  for (uint16_t n = 0; n < s_rc_count; ++n) {
+    const uint16_t idx = s_rc_order[n];
+    const int i = idx % N, j = idx / N;
+    const int k00 = j * (N + 1) + i, k10 = k00 + 1, k01 = k00 + N + 1, k11 = k01 + 1;
+    const uint8_t col = s_rc_color[idx];
+    s_spr.fillTriangle(s_rv_x[k00], s_rv_y[k00], s_rv_x[k10], s_rv_y[k10], s_rv_x[k11], s_rv_y[k11], col);
+    s_spr.fillTriangle(s_rv_x[k00], s_rv_y[k00], s_rv_x[k11], s_rv_y[k11], s_rv_x[k01], s_rv_y[k01], col);
+  }
+}
+
+/** Land, sea, terrain and lakes: everything on the ground below the map lines. */
+void drawSurface(const Cam& c) {
+  const SeaKey key{services::map::generation(), services::terrain::generation(), s_yaw_cur, c.R,
+                   c.pitch_deg, services::location::lat(), services::location::lon()};
+  if (key.gen != s_sea_key.gen || key.tgen != s_sea_key.tgen || key.yaw != s_sea_key.yaw ||
+      key.R != s_sea_key.R || key.pitch != s_sea_key.pitch || key.lat != s_sea_key.lat ||
+      key.lon != s_sea_key.lon) {
+    s_sea_key = key;
+    buildDiscSpans(c);
+    buildRings(c, 2, false, &s_sea);
+    buildRings(c, 3, true, &s_lakes);
+    buildRelief(c);
+  }
+  for (int y = kTopBarH; y < kH; ++y) {  // flat land
+    if (s_disc_l[y] <= s_disc_r[y]) s_spr.drawFastHLine(s_disc_l[y], y, s_disc_r[y] - s_disc_l[y] + 1, kLand);
+  }
+  fillRings(s_sea, kSea);
+  drawRelief();
+  fillRings(s_lakes, kSea);
 }
 
 void drawMap(const Cam& c) {
@@ -610,11 +663,14 @@ void drawMap(const Cam& c) {
     if (pos + static_cast<size_t>(n) * 4 > size) {
       return;
     }
-    if (type > 1) {  // type 2 = sea fill rings: the coast lines already outline them
+    if (type == 2 || type > 3) {  // sea fill rings: the coast lines already outline them
       pos += static_cast<size_t>(n) * 4;
       continue;
     }
-    const uint8_t color = type == 0 ? kCoast : kRoad;
+    const uint8_t color = type == 1 ? kRoad : kCoast;  // coast and lake shores
+    const bool closed = type == 3;
+    float fsx = 0, fsy = 0;
+    bool have_first = false;
     bool have_prev = false;
     float psx = 0, psy = 0;
     for (uint16_t i = 0; i < n; ++i, pos += 4) {
@@ -630,11 +686,16 @@ void drawMap(const Cam& c) {
       }
       if (have_prev) {
         s_spr.drawLine(ri(psx), ri(psy), ri(sx), ri(sy), color);
+      } else if (i == 0) {
+        fsx = sx;
+        fsy = sy;
+        have_first = true;
       }
       psx = sx;
       psy = sy;
       have_prev = true;
     }
+    if (closed && have_first && have_prev) s_spr.drawLine(ri(psx), ri(psy), ri(fsx), ri(fsy), color);
   }
 }
 
@@ -1189,8 +1250,7 @@ void drawFrame() {
   static float bearing[services::adsb::kMaxAircraft];
 
   drawGround(c);
-  drawSea(c);
-  drawGrid(c);
+  drawSurface(c);
   drawMap(c);
   drawRings(c);
   int card_idx = -1;
