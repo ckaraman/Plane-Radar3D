@@ -7,6 +7,7 @@
  */
 
 #include <Arduino.h>
+#include <esp_heap_caps.h>
 #include <WiFi.h>
 
 #include <cmath>
@@ -44,6 +45,14 @@ unsigned long g_last_redraw_ms = 0;
 
 enum class Screen { Radar, Clock, Weather, Water };
 volatile Screen g_screen = Screen::Radar;  // read by the network task too
+
+// Frame hand-over for TLS handshakes. The ESP32's heap cannot hold the 76.8 KB frame
+// and a TLS handshake (~50-60 KB at its peak) at the same time, so for the second
+// or two a new HTTPS session takes, the render loop parks and frees the frame (the
+// panel keeps showing the last picture). The connection is then kept open, so this
+// only happens at start-up, after a dropped link, or for a route lookup.
+volatile bool g_frame_req = false;     // network task: please free the frame
+volatile bool g_frame_parked = false;  // render loop: frame freed, waiting
 unsigned long g_last_aircraft_ms = 0;
 
 // Touch state (polled; the XPT2046 shares the SPI bus with the panel).
@@ -264,6 +273,36 @@ void pollTouch() {
   }
 }
 
+/**
+ * Run `fn` (network task) while the render loop has the frame freed. Before handing
+ * the frame back, make sure it fits again; if the open TLS connection took its
+ * place, close it (the screen matters more than one fetch).
+ */
+template <typename Fn>
+void withFrameReleased(Fn fn) {
+  if (ui::radar3d::frame() == nullptr && !g_frame_parked) {
+    fn();  // no frame to free (setup screens)
+    return;
+  }
+  g_frame_req = true;
+  const unsigned long t0 = millis();
+  while (!g_frame_parked && millis() - t0 < 3000) vTaskDelay(pdMS_TO_TICKS(5));
+  if (!g_frame_parked) {  // render loop busy (e.g. USB update): try without
+    g_frame_req = false;
+    fn();
+    return;
+  }
+  fn();
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_DMA) < ui::radar3d::kFrameBytes + 64) {
+    Serial.printf("frame would not fit (largest block %u): closing TLS\n",
+                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)));
+    services::adsb::releaseConnection();
+  }
+  g_frame_req = false;
+  const unsigned long t1 = millis();
+  while (g_frame_parked && millis() - t1 < 3000) vTaskDelay(pdMS_TO_TICKS(5));
+}
+
 // ADS-B and weather fetches block for ~1-2 s each (HTTPS), so they run on their
 // own task on core 0; the render loop keeps dead-reckoning on core 1.
 void adsbFetchTask(void*) {
@@ -278,12 +317,20 @@ void adsbFetchTask(void*) {
     const bool adsb_due = aircraft_visible || last_adsb == 0 || millis() - last_adsb >= 30000;
     if (services::serial_ota::active()) services::adsb::releaseConnection();
     if (WiFi.status() == WL_CONNECTED && !services::serial_ota::active()) {
-      if (adsb_due) {
+      const bool route_wanted = g_screen == Screen::Radar && services::route::hasPending();
+      auto fetchAircraft = [&]() {
         last_adsb = millis();
         services::adsb::fetchUpdate(services::location::lat(), services::location::lon(),
                                     ui::radar::fetchRadiusKm());
+      };
+      if (route_wanted || (adsb_due && services::adsb::needsHandshake())) {
+        withFrameReleased([&]() {
+          if (route_wanted) services::route::fetchPending();  // only the card shows routes
+          fetchAircraft();  // (re)opens the kept TLS connection while the heap is free
+        });
+      } else if (adsb_due) {
+        fetchAircraft();
       }
-      if (g_screen == Screen::Radar) services::route::fetchPending();  // only the card shows routes
       services::weather::fetchIfDue(services::location::lat(), services::location::lon());
     }
     vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
@@ -339,6 +386,18 @@ void loop() {
     // Firmware update over USB: only read the cable, as fast as possible.
     wifiLoop();
     services::serial_ota::tick();
+    return;
+  }
+  if (g_frame_req) {
+    ui::radar3d::releaseFrame();
+    g_frame_parked = true;
+    const unsigned long t0 = millis();
+    while (g_frame_req && millis() - t0 < 20000) delay(5);
+    // The network task checked that the frame fits again before letting go.
+    for (int i = 0; i < 20 && !ui::radar3d::reacquireFrame(); ++i) delay(50);
+    g_frame_parked = false;
+    g_last_redraw_ms = 0;
+    if (g_radar_visible) repaintScreen();
     return;
   }
   handleBootButton();

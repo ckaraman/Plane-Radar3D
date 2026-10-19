@@ -331,6 +331,11 @@ const char* sourceName() { return kSources[s_source].name; }
 
 const char* lastError() { return s_error; }
 
+bool needsHandshake() {
+  if (s_plain_state[s_source] != 2) return false;  // plain HTTP (or still trying it)
+  return s_tls == nullptr || s_tls_source != s_source || !s_tls->connected();
+}
+
 void releaseConnection() {
   if (s_tls_http != nullptr) s_tls_http->end();
   if (s_tls != nullptr) s_tls->stop();

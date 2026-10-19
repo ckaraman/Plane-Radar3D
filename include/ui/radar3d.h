@@ -24,4 +24,11 @@ bool handleTap(int x, int y);
  *  The forecast screen draws into it with its own palette. */
 LGFX_Sprite* frame();
 
+/** Free the 76.8 KB frame for a moment (a TLS handshake needs the heap); the panel
+ *  keeps showing the last picture. reacquireFrame() takes it back. */
+void releaseFrame();
+bool reacquireFrame();
+/** Bytes the frame needs as one block. */
+constexpr unsigned kFrameBytes = 480 * 320 / 2;
+
 }  // namespace ui::radar3d

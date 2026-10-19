@@ -32,6 +32,9 @@ void put(const char* callsign, const Route* route);  // nullptr = no route known
 /** Network task: look up the most recently requested callsign over HTTPS. */
 void fetchPending();
 
+/** A route lookup is waiting (fetchPending() would make a request). */
+bool hasPending();
+
 /** UTF-8 for the display fonts: Turkish letters kept, other accents -> nearest ASCII. */
 void foldAscii(const char* in, char* out, size_t out_len);
 

@@ -1575,6 +1575,23 @@ void drawFrame() {
 
 LGFX_Sprite* frame() { return s_ready ? &s_spr : nullptr; }
 
+void releaseFrame() {
+  s_ready = false;
+  s_spr.deleteSprite();
+}
+
+bool reacquireFrame() {
+  if (s_spr.createSprite(kW, kH) == nullptr) {
+    Serial.println("radar3d: frame re-allocation failed");
+    return false;
+  }
+  s_spr.createPalette();
+  s_palette_set = false;
+  applyPalette();
+  s_ready = true;
+  return true;
+}
+
 #ifdef RADAR3D_HOST_TEST
 bool hostHitPos(const char* callsign, int* x, int* y) {
   for (size_t i = 0; i < s_hit_count; ++i) {

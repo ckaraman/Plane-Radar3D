@@ -172,6 +172,13 @@ void put(const char* callsign, const Route* route) {
   unlock();
 }
 
+bool hasPending() {
+  lock();
+  const bool p = s_pending[0] != '\0';
+  unlock();
+  return p;
+}
+
 void fetchPending() {
   if (WiFi.status() != WL_CONNECTED) return;
   char callsign[9];
