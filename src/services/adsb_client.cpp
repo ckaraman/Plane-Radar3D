@@ -330,11 +330,21 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += String(center_lon, 6);
   url += src.suffix;
   url += String(dist_nm, 1);
-  // Any failure below moves on to the next source for the next cycle.
+  // Any failure below moves on to the next source for the next cycle. A fallback
+  // is only a stand-in: the networks have different receivers, so after about a
+  // minute on one, go back and try adsb.fi (the main source, same as the other
+  // radar) again instead of staying on the fallback for good.
   struct NextOnFail {
     bool ok = false;
     ~NextOnFail() {
-      if (!ok) s_source = (s_source + 1) % kSourceCount;
+      static int fallback_ok = 0;
+      if (!ok) {
+        s_source = (s_source + 1) % kSourceCount;
+        fallback_ok = 0;
+      } else if (s_source != 0 && ++fallback_ok >= 12) {
+        s_source = 0;
+        fallback_ok = 0;
+      }
     }
   } next_on_fail;
 
@@ -410,26 +420,51 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   // Parse into a local buffer, then publish atomically so a reader on another
   // thread never sees a half-updated list.
+  //
+  // The feed lists aircraft in no particular order, so near a busy airport it
+  // can hold more than kMaxAircraft: keep the NEAREST ones (a full buffer swaps
+  // its farthest entry for a closer newcomer) instead of whichever came first --
+  // otherwise a plane right overhead could be dropped at random. The USB
+  // bridges already sort by distance before sending.
   Aircraft parsed[kMaxAircraft];
+  float dist2[kMaxAircraft];
   size_t n = 0;
+  size_t total = 0;
+  const float kx = 111.0f * cosf(static_cast<float>(center_lat) * 0.01745329252f);
   JsonArray ac = doc["ac"].as<JsonArray>();
   if (!ac.isNull()) {
     for (JsonObject plane : ac) {
-      if (n >= kMaxAircraft) {
-        break;
-      }
       if (!plane["lat"].is<float>() || !plane["lon"].is<float>()) {
         continue;
       }
       if (isOnGround(plane) && !config::kAdsbShowGroundAircraft) {
         continue;
       }
+      ++total;
+      const float lat = plane["lat"].as<float>();
+      const float lon = plane["lon"].as<float>();
+      const float dx = (lon - static_cast<float>(center_lon)) * kx;
+      const float dy = (lat - static_cast<float>(center_lat)) * 111.0f;
+      const float d2 = dx * dx + dy * dy;
+      size_t slot = n;
+      if (n >= kMaxAircraft) {
+        size_t far = 0;
+        for (size_t k = 1; k < n; ++k) {
+          if (dist2[k] > dist2[far]) far = k;
+        }
+        if (d2 >= dist2[far]) continue;
+        slot = far;
+      } else {
+        ++n;
+      }
+      dist2[slot] = d2;
+      Aircraft& a = parsed[slot];
 
-      parsed[n].lat = plane["lat"].as<float>();
-      parsed[n].lon = plane["lon"].as<float>();
-      parsed[n].nose_deg = pickNoseHeading(plane);
-      parsed[n].track_deg = pickTrackHeading(plane);
-      parsed[n].gs_knots = pickGroundSpeed(plane);
+      a.lat = lat;
+      a.lon = lon;
+      a.nose_deg = pickNoseHeading(plane);
+      a.track_deg = pickTrackHeading(plane);
+      a.gs_knots = pickGroundSpeed(plane);
 
       // seen_pos: seconds since this position was measured. Use it as the
       // dead-reckoning age offset, capped so a very stale fix isn't flung far.
@@ -437,33 +472,37 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       readJsonFloat(plane, "seen_pos", &seen_pos);
       if (seen_pos < 0.0f) seen_pos = 0.0f;
       if (seen_pos > 30.0f) seen_pos = 30.0f;
-      parsed[n].pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
+      a.pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
 
       float alt = 0.0f;
       if (isOnGround(plane)) {
-        parsed[n].alt_ft = 0;
+        a.alt_ft = 0;
       } else if (readJsonFloat(plane, "alt_baro", &alt) ||
                  readJsonFloat(plane, "alt_geom", &alt)) {
-        parsed[n].alt_ft = static_cast<int32_t>(lroundf(alt));
+        a.alt_ft = static_cast<int32_t>(lroundf(alt));
       } else {
-        parsed[n].alt_ft = 0;
+        a.alt_ft = 0;
       }
       float rate = 0.0f;
       if (readJsonFloat(plane, "baro_rate", &rate) || readJsonFloat(plane, "geom_rate", &rate)) {
         if (rate > 32000.0f) rate = 32000.0f;
         if (rate < -32000.0f) rate = -32000.0f;
-        parsed[n].vrate_fpm = static_cast<int16_t>(lroundf(rate));
+        a.vrate_fpm = static_cast<int16_t>(lroundf(rate));
       } else {
-        parsed[n].vrate_fpm = 0;
+        a.vrate_fpm = 0;
       }
 
-      fillTagFields(&parsed[n], plane);
-      ++n;
+      fillTagFields(&a, plane);
     }
   }
 
   publish(parsed, n);
-  Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  if (total > n) {
+    Serial.printf("adsb: %u aircraft (nearest of %u)\n", static_cast<unsigned>(n),
+                  static_cast<unsigned>(total));
+  } else {
+    Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  }
   next_on_fail.ok = true;
   return true;
 }
