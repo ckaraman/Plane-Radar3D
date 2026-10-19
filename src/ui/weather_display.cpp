@@ -400,6 +400,12 @@ void drawNoData(int y) {
   const char* l2 = services::usb_feed::active()
                        ? "USB köprüsünün yeni sürümü gerekli (kurulum sayfası, adım 4)"
                        : "Wi-Fi bağlanınca birkaç saniye içinde gelir";
+  char err[48];
+  char why[80];
+  if (!services::usb_feed::active() && services::weather::lastError(err, sizeof(err))) {
+    snprintf(why, sizeof(why), "Son deneme: %s, dakikada bir yeniden", err);
+    l2 = why;
+  }
   if (!services::weather::enabled()) {
     l1 = "Hava durumu kapalı";
     l2 = "Kurulum sayfasından açabilirsiniz";

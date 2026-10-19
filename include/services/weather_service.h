@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 #include "services/weather_parse.h"
 
 namespace services::weather {
@@ -24,6 +26,9 @@ bool snapshot(Forecast* out, unsigned long* fetched_ms);
  * task, never from the render loop. Does nothing when the feature is off.
  */
 void fetchIfDue(double lat, double lon);
+
+/** Why the last Wi-Fi fetch failed (Turkish, for the screen); false when it did not. */
+bool lastError(char* out, size_t out_len);
 
 /** USB mode: "PR:W ..." line from the PC bridge (format: weather_parse.h). */
 void handleBridge(const char* args);
