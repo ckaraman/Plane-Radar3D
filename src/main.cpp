@@ -269,7 +269,16 @@ void pollTouch() {
 // ADS-B and weather fetches block for ~1-2 s each (HTTPS), so they run on their
 // own task on core 0; the render loop keeps dead-reckoning on core 1.
 void adsbFetchTask(void*) {
+  unsigned long last_mem_log = 0;
   for (;;) {
+    if (millis() - last_mem_log >= 60000) {
+      last_mem_log = millis();
+      Serial.printf("mem: free %u, largest %u, lowest %u, net stack left %u\n",
+                    static_cast<unsigned>(ESP.getFreeHeap()),
+                    static_cast<unsigned>(ESP.getMaxAllocHeap()),
+                    static_cast<unsigned>(ESP.getMinFreeHeap()),
+                    static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+    }
     // While a USB update runs, leave the network alone: the update needs the CPU
     // and the heap, and TLS handshakes take ~40 KB at a time.
     // Aircraft are polled every cycle while the radar or the clock (which needs to

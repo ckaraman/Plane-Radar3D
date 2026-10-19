@@ -36,20 +36,26 @@ constexpr size_t kMaxScanResults = 20;
 char s_line[kMaxLine];
 size_t s_len = 0;
 bool s_overflow = false;
-char s_reply[kMaxReply];
 
 // One write() per line keeps a reply from being split by the log output of
 // the ADS-B task, which prints from the other core.
 void sendReply(const char* tag, const JsonDocument& doc) {
-  int n = snprintf(s_reply, sizeof(s_reply), "PR:%s ", tag);
+  // Allocated per reply: the setup page talks rarely, so no static 2 KB buffer.
+  const size_t body_len = measureJson(doc);
+  const size_t cap = strlen(tag) + body_len + 8;
+  if (cap > kMaxReply) return;
+  char* reply = static_cast<char*>(malloc(cap));
+  if (reply == nullptr) return;
+  int n = snprintf(reply, cap, "PR:%s ", tag);
   if (n < 0) {
+    free(reply);
     return;
   }
-  const size_t room = sizeof(s_reply) - static_cast<size_t>(n) - 2;
-  const size_t body = serializeJson(doc, s_reply + n, room);
+  const size_t body = serializeJson(doc, reply + n, cap - static_cast<size_t>(n) - 2);
   size_t total = static_cast<size_t>(n) + body;
-  s_reply[total++] = '\n';
-  Serial.write(reinterpret_cast<const uint8_t*>(s_reply), total);
+  reply[total++] = '\n';
+  Serial.write(reinterpret_cast<const uint8_t*>(reply), total);
+  free(reply);
 }
 
 void sendError(const char* code) {

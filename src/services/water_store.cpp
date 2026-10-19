@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 
@@ -13,21 +14,23 @@ namespace services::water {
 namespace {
 
 constexpr char kNs[] = "water";
+constexpr char kKeyHours[] = "h7";   // HourRec[kHourlyDays]
+constexpr char kKeyTotals[] = "t90"; // Totals
 
+// The data lives in NVS (flash); RAM keeps this compact copy so the screen can
+// read it on every redraw without touching flash: ~550 bytes in all.
 struct HourRec {
-  int32_t day;      // -1 = empty slot
+  int32_t day;  // -1 = empty slot
   uint16_t ml[24];
 };
-struct TotalRec {
-  int32_t day;
-  uint16_t ml;
-  uint16_t pad;
+struct Totals {
+  int32_t newest;              // day number of ml[0]; -1 = nothing recorded yet
+  uint16_t ml[kTotalDays];     // ml[i] = total of day (newest - i)
 };
 
 uint16_t s_goal = kDefaultGoalMl;
 HourRec s_hours[kHourlyDays];
-TotalRec s_totals[kTotalDays];
-bool s_loaded = false;
+Totals s_tot;
 
 // Last drink (for undo), RAM only.
 int32_t s_undo_day = -1;
@@ -37,8 +40,8 @@ uint16_t s_undo_ml = 0;
 void save() {
   Preferences p;
   if (!p.begin(kNs, false)) return;
-  p.putBytes("hours", s_hours, sizeof(s_hours));
-  p.putBytes("tot", s_totals, sizeof(s_totals));
+  p.putBytes(kKeyHours, s_hours, sizeof(s_hours));
+  p.putBytes(kKeyTotals, &s_tot, sizeof(s_tot));
   p.end();
 }
 
@@ -51,38 +54,109 @@ HourRec* hourRec(int32_t day, bool create) {
   return &r;
 }
 
-TotalRec* totalRec(int32_t day, bool create) {
-  TotalRec& r = s_totals[((day % kTotalDays) + kTotalDays) % kTotalDays];
-  if (r.day == day) return &r;
-  if (!create) return nullptr;
-  r.day = day;
-  r.ml = 0;
-  return &r;
+/** Slot for `day` in the totals window (moving the window forward for a new day). */
+uint16_t* totalSlot(int32_t day, bool create) {
+  if (s_tot.newest < 0) {
+    if (!create) return nullptr;
+    s_tot.newest = day;
+    memset(s_tot.ml, 0, sizeof(s_tot.ml));
+  }
+  if (day > s_tot.newest) {
+    if (!create) return nullptr;
+    const int32_t shift = day - s_tot.newest;
+    if (shift >= kTotalDays) {
+      memset(s_tot.ml, 0, sizeof(s_tot.ml));
+    } else {
+      memmove(s_tot.ml + shift, s_tot.ml, sizeof(uint16_t) * (kTotalDays - shift));
+      memset(s_tot.ml, 0, sizeof(uint16_t) * shift);
+    }
+    s_tot.newest = day;
+  }
+  const int32_t idx = s_tot.newest - day;
+  if (idx < 0 || idx >= kTotalDays) return nullptr;  // older than the window
+  return &s_tot.ml[idx];
 }
 
 void change(int32_t day, int hour, int delta) {
   HourRec* h = hourRec(day, true);
-  TotalRec* t = totalRec(day, true);
   const int hv = static_cast<int>(h->ml[hour]) + delta;
-  const int tv = static_cast<int>(t->ml) + delta;
   h->ml[hour] = static_cast<uint16_t>(hv < 0 ? 0 : (hv > 65000 ? 65000 : hv));
-  t->ml = static_cast<uint16_t>(tv < 0 ? 0 : (tv > 65000 ? 65000 : tv));
+  if (uint16_t* t = totalSlot(day, true)) {
+    const int tv = static_cast<int>(*t) + delta;
+    *t = static_cast<uint16_t>(tv < 0 ? 0 : (tv > 65000 ? 65000 : tv));
+  }
   save();
+}
+
+/**
+ * One-time move from the first layout (21 days hourly + 366 days of totals, 4 KB
+ * kept in RAM): keep the latest 7 days hourly and 90 days of totals, then drop
+ * the old keys.
+ */
+void migrateOld(Preferences& p) {
+  struct OldTotal {
+    int32_t day;
+    uint16_t ml;
+    uint16_t pad;
+  };
+  constexpr size_t kOldHours = 21, kOldTotals = 366;
+  bool changed = false;
+  if (p.getBytesLength("hours") == sizeof(HourRec) * kOldHours) {
+    auto* old = static_cast<HourRec*>(malloc(sizeof(HourRec) * kOldHours));
+    if (old != nullptr) {
+      p.getBytes("hours", old, sizeof(HourRec) * kOldHours);
+      for (size_t i = 0; i < kOldHours; ++i) {
+        if (old[i].day < 0) continue;
+        HourRec& slot = s_hours[((old[i].day % kHourlyDays) + kHourlyDays) % kHourlyDays];
+        if (old[i].day > slot.day) slot = old[i];  // the newest day wins the slot
+      }
+      free(old);
+      changed = true;
+    }
+  }
+  if (p.getBytesLength("tot") == sizeof(OldTotal) * kOldTotals) {
+    auto* old = static_cast<OldTotal*>(malloc(sizeof(OldTotal) * kOldTotals));
+    if (old != nullptr) {
+      p.getBytes("tot", old, sizeof(OldTotal) * kOldTotals);
+      int32_t newest = -1;
+      for (size_t i = 0; i < kOldTotals; ++i) newest = old[i].day > newest ? old[i].day : newest;
+      if (newest >= 0) {
+        s_tot.newest = newest;
+        memset(s_tot.ml, 0, sizeof(s_tot.ml));
+        for (size_t i = 0; i < kOldTotals; ++i) {
+          const int32_t idx = newest - old[i].day;
+          if (old[i].day >= 0 && idx >= 0 && idx < kTotalDays) s_tot.ml[idx] = old[i].ml;
+        }
+      }
+      free(old);
+      changed = true;
+    }
+  }
+  if (changed) {
+    p.putBytes(kKeyHours, s_hours, sizeof(s_hours));
+    p.putBytes(kKeyTotals, &s_tot, sizeof(s_tot));
+    p.remove("hours");
+    p.remove("tot");
+    Serial.println("water: history moved to the 90-day layout");
+  }
 }
 
 }  // namespace
 
 void init() {
   for (auto& r : s_hours) r.day = -1;
-  for (auto& r : s_totals) r.day = -1;
+  s_tot.newest = -1;
+  memset(s_tot.ml, 0, sizeof(s_tot.ml));
   Preferences p;
-  if (p.begin(kNs, true)) {
-    s_goal = p.getUShort("goal", kDefaultGoalMl);
-    if (p.getBytesLength("hours") == sizeof(s_hours)) p.getBytes("hours", s_hours, sizeof(s_hours));
-    if (p.getBytesLength("tot") == sizeof(s_totals)) p.getBytes("tot", s_totals, sizeof(s_totals));
-    p.end();
+  if (!p.begin(kNs, false)) return;
+  s_goal = p.getUShort("goal", kDefaultGoalMl);
+  if (p.getBytesLength(kKeyHours) == sizeof(s_hours)) p.getBytes(kKeyHours, s_hours, sizeof(s_hours));
+  if (p.getBytesLength(kKeyTotals) == sizeof(s_tot)) {
+    p.getBytes(kKeyTotals, &s_tot, sizeof(s_tot));
+  } else {
+    migrateOld(p);
   }
-  s_loaded = true;
+  p.end();
 }
 
 uint16_t goalMl() { return s_goal; }
@@ -158,8 +232,8 @@ bool hours(int32_t day, uint16_t out[24]) {
 }
 
 uint16_t total(int32_t day) {
-  const TotalRec* r = totalRec(day, false);
-  return r ? r->ml : 0;
+  const uint16_t* t = totalSlot(day, false);
+  return t ? *t : 0;
 }
 
 }  // namespace services::water

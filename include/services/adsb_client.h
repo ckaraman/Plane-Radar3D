@@ -8,7 +8,6 @@ namespace services::adsb {
 struct Aircraft {
   float lat;
   float lon;
-  float nose_deg;
   float track_deg;
   float gs_knots;
   /** Age of the position fix at fetch time (ms), from the feed's seen_pos.
@@ -21,7 +20,6 @@ struct Aircraft {
   int16_t vrate_fpm;
   char callsign[9];
   char type[5];
-  char alt[12];
 };
 
 constexpr size_t kMaxAircraft = 64;

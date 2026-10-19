@@ -5,7 +5,8 @@
 namespace services::water {
 
 /**
- * Water intake log, kept in NVS (survives power loss).
+ * Water intake log, kept in NVS (flash, survives power loss); RAM holds only a
+ * compact copy (~550 bytes).
  *
  *  - goal: daily target in ml, set on the device, kept until changed
  *  - hourly amounts for the last kHourlyDays days (24 values per day)
@@ -13,8 +14,8 @@ namespace services::water {
  *
  * Days are numbered as days since 1970-01-01 in local time (see dayNumber()).
  */
-constexpr int kHourlyDays = 21;
-constexpr int kTotalDays = 366;
+constexpr int kHourlyDays = 7;
+constexpr int kTotalDays = 90;  // ~3 months
 constexpr uint16_t kDefaultGoalMl = 2000;
 
 void init();

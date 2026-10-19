@@ -162,23 +162,6 @@ bool readJsonFloat(const JsonObject& obj, const char* key, float* out) {
   return false;
 }
 
-float pickNoseHeading(const JsonObject& plane) {
-  float v = 0.0f;
-  if (readJsonFloat(plane, "true_heading", &v)) {
-    return v;
-  }
-  if (readJsonFloat(plane, "mag_heading", &v)) {
-    return v;
-  }
-  if (readJsonFloat(plane, "track", &v)) {
-    return v;
-  }
-  if (readJsonFloat(plane, "dir", &v)) {
-    return v;
-  }
-  return 0.0f;
-}
-
 float pickTrackHeading(const JsonObject& plane) {
   float v = 0.0f;
   if (readJsonFloat(plane, "track", &v)) {
@@ -232,41 +215,6 @@ void copyJsonStringTrimmed(const JsonObject& obj, const char* key, char* out,
   out[n] = '\0';
 }
 
-void formatAltitudeTag(const JsonObject& plane, char* out, size_t out_len) {
-  out[0] = '\0';
-  if (out_len == 0) {
-    return;
-  }
-
-  if (plane["alt_baro"].is<const char*>()) {
-    const char* s = plane["alt_baro"].as<const char*>();
-    if (strcmp(s, "ground") == 0) {
-      strncpy(out, "GND", out_len - 1);
-      out[out_len - 1] = '\0';
-      return;
-    }
-  }
-
-  float alt = 0.0f;
-  if (readJsonFloat(plane, "alt_baro", &alt) ||
-      readJsonFloat(plane, "alt_geom", &alt)) {
-    const int ft = static_cast<int>(lroundf(alt));
-    if (ft >= 1000 || ft <= -1000) {
-      // 1.2K ft / 35K ft: keeps the tag short; one decimal only when it is not .0
-      const int tenths = static_cast<int>(lroundf(static_cast<float>(ft) / 100.0f));
-      const int whole = tenths / 10;
-      const int dec = (tenths < 0 ? -tenths : tenths) % 10;
-      if (dec == 0) {
-        snprintf(out, out_len, "%dK ft", whole);
-      } else {
-        snprintf(out, out_len, "%s%d.%dK ft", tenths < 0 && whole == 0 ? "-" : "", whole, dec);
-      }
-    } else {
-      snprintf(out, out_len, "%d ft", ft);
-    }
-  }
-}
-
 void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   copyJsonStringTrimmed(plane, "flight", ac->callsign, sizeof(ac->callsign));
   if (ac->callsign[0] == '\0') {
@@ -274,7 +222,6 @@ void fillTagFields(Aircraft* ac, const JsonObject& plane) {
   }
 
   copyJsonStringTrimmed(plane, "t", ac->type, sizeof(ac->type));
-  formatAltitudeTag(plane, ac->alt, sizeof(ac->alt));
 }
 
 }  // namespace
@@ -570,7 +517,6 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       Aircraft& a = parsed[slot];
       a.lat = lat;
       a.lon = lon;
-      a.nose_deg = pickNoseHeading(plane);
       a.track_deg = pickTrackHeading(plane);
       a.gs_knots = pickGroundSpeed(plane);
       // seen_pos: seconds since this position was measured. Use it as the

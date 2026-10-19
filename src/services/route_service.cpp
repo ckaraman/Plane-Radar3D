@@ -19,7 +19,7 @@ namespace services::route {
 
 namespace {
 
-constexpr size_t kCacheSize = 32;
+constexpr size_t kCacheSize = 12;  // the card shows one aircraft at a time
 constexpr unsigned long kNotFoundRetryMs = 30UL * 60UL * 1000UL;  // ask again after 30 min
 
 struct Entry {

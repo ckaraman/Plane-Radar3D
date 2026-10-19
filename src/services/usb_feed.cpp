@@ -37,18 +37,6 @@ char* nextField(char** cursor) {
   return start;
 }
 
-void formatAlt(int32_t ft, char* out, size_t n) {
-  if (ft <= 0) {
-    snprintf(out, n, "GND");
-  } else if (ft >= 1000) {
-    const long tenths = (ft + 50) / 100;
-    if (tenths % 10 == 0) snprintf(out, n, "%ldK ft", tenths / 10);
-    else snprintf(out, n, "%ld.%ldK ft", tenths / 10, tenths % 10);
-  } else {
-    snprintf(out, n, "%ld ft", static_cast<long>(ft));
-  }
-}
-
 }  // namespace
 
 void begin() {
@@ -73,14 +61,12 @@ void add(const char* args) {
   a.lat = strtof(f[0], nullptr);
   a.lon = strtof(f[1], nullptr);
   a.track_deg = f[2] ? strtof(f[2], nullptr) : 0.0f;
-  a.nose_deg = a.track_deg;
   a.gs_knots = f[3] ? strtof(f[3], nullptr) : 0.0f;
   a.alt_ft = f[4] ? static_cast<int32_t>(strtol(f[4], nullptr, 10)) : 0;
   a.vrate_fpm = f[5] ? static_cast<int16_t>(strtol(f[5], nullptr, 10)) : 0;
   a.pos_age_ms = 0;
   if (f[6]) strlcpy(a.callsign, f[6], sizeof(a.callsign));
   if (f[7]) strlcpy(a.type, f[7], sizeof(a.type));
-  formatAlt(a.alt_ft, a.alt, sizeof(a.alt));
   // Optional route fields from the PC bridge: from_code,from_city,to_code,to_city
   // ("-" = looked up, no route known; missing = not looked up yet).
   if (f[8] != nullptr && a.callsign[0] != '\0') {
