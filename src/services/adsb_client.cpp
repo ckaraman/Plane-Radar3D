@@ -387,6 +387,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   if (s_tls == nullptr) {
     s_tls = new WiFiClientSecure();
     s_tls->setInsecure();
+    s_tls->setHandshakeTimeout(8);  // seconds; the default (120 s) froze the network task
     s_tls_http = new HTTPClient();
     s_tls_http->setReuse(true);
   }

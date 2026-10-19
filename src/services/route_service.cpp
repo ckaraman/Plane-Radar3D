@@ -194,6 +194,7 @@ void fetchPending() {
   services::adsb::releaseConnection();
   WiFiClientSecure client;
   client.setInsecure();
+  client.setHandshakeTimeout(8);
   HTTPClient http;
   if (!http.begin(client, url)) return;
   http.setConnectTimeout(5000);

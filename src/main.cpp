@@ -53,6 +53,8 @@ volatile Screen g_screen = Screen::Radar;  // read by the network task too
 // only happens at start-up, after a dropped link, or for a route lookup.
 volatile bool g_frame_req = false;     // network task: please free the frame
 volatile bool g_frame_parked = false;  // render loop: frame freed, waiting
+volatile bool g_frame_drop_tls = false;
+bool g_frame_released = false;  // render loop only  // render loop: frame does not fit, close TLS
 unsigned long g_last_aircraft_ms = 0;
 
 // Touch state (polled; the XPT2046 shares the SPI bus with the panel).
@@ -281,8 +283,7 @@ void pollTouch() {
 template <typename Fn>
 void withFrameReleased(Fn fn) {
   if (ui::radar3d::frame() == nullptr && !g_frame_parked) {
-    fn();  // no frame to free (setup screens)
-    return;
+    return;  // the frame is still being taken back: skip this cycle
   }
   g_frame_req = true;
   const unsigned long t0 = millis();
@@ -315,7 +316,10 @@ void adsbFetchTask(void*) {
     static unsigned long last_adsb = 0;
     const bool aircraft_visible = g_screen == Screen::Radar || g_screen == Screen::Clock;
     const bool adsb_due = aircraft_visible || last_adsb == 0 || millis() - last_adsb >= 30000;
-    if (services::serial_ota::active()) services::adsb::releaseConnection();
+    if (services::serial_ota::active() || g_frame_drop_tls) {
+      services::adsb::releaseConnection();
+      g_frame_drop_tls = false;
+    }
     if (WiFi.status() == WL_CONNECTED && !services::serial_ota::active()) {
       const bool route_wanted = g_screen == Screen::Radar && services::route::hasPending();
       auto fetchAircraft = [&]() {
@@ -390,15 +394,24 @@ void loop() {
   }
   if (g_frame_req) {
     ui::radar3d::releaseFrame();
+    g_frame_released = true;
     g_frame_parked = true;
     const unsigned long t0 = millis();
     while (g_frame_req && millis() - t0 < 20000) delay(5);
-    // The network task checked that the frame fits again before letting go.
-    for (int i = 0; i < 20 && !ui::radar3d::reacquireFrame(); ++i) delay(50);
     g_frame_parked = false;
+  }
+  if (g_frame_released && !g_frame_req) {
+    // Take the frame back. If the heap cannot give it (a TLS session sits in its
+    // place), ask the network task to close that connection and keep trying, so
+    // the screen never stays frozen.
+    if (!ui::radar3d::reacquireFrame()) {
+      g_frame_drop_tls = true;
+      delay(20);
+      return;
+    }
+    g_frame_released = false;
     g_last_redraw_ms = 0;
     if (g_radar_visible) repaintScreen();
-    return;
   }
   handleBootButton();
   wifiLoop();

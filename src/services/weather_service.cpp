@@ -77,7 +77,10 @@ bool fetchOnce(const char* url, bool secure, Forecast* out) {
   if (secure) services::adsb::releaseConnection();  // one TLS session at a time
   WiFiClient plain;
   WiFiClientSecure tls;
-  if (secure) tls.setInsecure();
+  if (secure) {
+    tls.setInsecure();
+    tls.setHandshakeTimeout(8);
+  }
   HTTPClient http;
   http.useHTTP10(true);  // plain body, no chunked framing
   http.setConnectTimeout(kConnectTimeoutMs);
