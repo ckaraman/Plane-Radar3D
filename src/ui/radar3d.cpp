@@ -48,7 +48,7 @@ enum Pal : uint8_t {
   kTextDim,
   kPanel,
   kRed,       // home marker
-  kGreen,
+  kLandLight,  // sunlit slopes of the terrain
   kCoast,
   kRoad,
   kSea,       // sea fill of the map layer (lighter than the land/ground)
@@ -61,13 +61,13 @@ constexpr Rgb kPaletteHighContrast[16] = {
     {0, 0, 0},       {58, 68, 34},    {96, 112, 54},   {60, 130, 165},
     {90, 180, 225},  {110, 215, 255}, {255, 248, 225}, {255, 170, 60},
     {255, 255, 255}, {175, 188, 198}, {12, 26, 38},    {255, 45, 45},
-    {80, 240, 150},  {120, 200, 255}, {255, 190, 100}, {8, 40, 92},
+    {146, 164, 84},  {120, 200, 255}, {255, 190, 100}, {8, 40, 92},
 };
 constexpr Rgb kPalette[16] = {
     {5, 8, 13},      {44, 52, 27},    {76, 89, 43},    {31, 81, 104},
     {42, 112, 144},  {91, 200, 245},  {237, 230, 211}, {255, 159, 67},
     {230, 237, 242}, {125, 139, 150}, {11, 22, 32},    {225, 40, 40},
-    {61, 220, 132},  {90, 170, 225},  {220, 160, 80},  {8, 32, 72},
+    {112, 128, 64},  {90, 170, 225},  {220, 160, 80},  {8, 32, 72},
 };
 
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
@@ -567,7 +567,7 @@ constexpr int kReliefN = 40;  // cells per side over the disc's bounding square
 int16_t s_rv_x[(kReliefN + 1) * (kReliefN + 1)];
 int16_t s_rv_y[(kReliefN + 1) * (kReliefN + 1)];
 uint16_t s_rc_order[kReliefN * kReliefN];
-uint8_t s_rc_color[kReliefN * kReliefN];
+uint8_t s_rv_shade[(kReliefN + 1) * (kReliefN + 1)];  // 0 dark .. 128 flat .. 255 lit
 uint16_t s_rc_count = 0;
 const float* s_rc_depth = nullptr;  // only valid while sorting
 
@@ -668,7 +668,27 @@ void buildRelief(const Cam& c) {
     }
   }
   // Light from the north-west, a bit above the horizon (world frame: x east, y north).
+  // Shading is computed per vertex (central differences) so it can be blended smoothly
+  // across each cell when drawing.
   const float lx = -0.55f, ly = 0.55f, lz = 0.63f;
+  constexpr float kGain = 2.2f;  // exaggerate the contrast so gentle hills still read
+  for (int j = 0; j <= N; ++j) {
+    for (int i = 0; i <= N; ++i) {
+      const int k = j * (N + 1) + i;
+      const int il = std::max(i - 1, 0), ir = std::min(i + 1, N);
+      const int jd = std::max(j - 1, 0), ju = std::min(j + 1, N);
+      const float dzdx = (hm[j * (N + 1) + ir] - hm[j * (N + 1) + il]) * c.tscale / ((ir - il) * step);
+      const float dzdy = (hm[ju * (N + 1) + i] - hm[jd * (N + 1) + i]) * c.tscale / ((ju - jd) * step);
+      const float inv = 1.0f / sqrtf(dzdx * dzdx + dzdy * dzdy + 1.0f);
+      const float lit = (-dzdx * lx - dzdy * ly + lz) * inv;
+      float v = kGain * (lit - lz) * 255.0f;
+      // Dead zone: nearly flat ground stays the plain land colour (no dither speckle).
+      constexpr float kFlat = 14.0f;
+      v = v > kFlat ? v - kFlat : (v < -kFlat ? v + kFlat : 0.0f);
+      v += 128.0f;
+      s_rv_shade[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, v)));
+    }
+  }
   const float r2 = c.R * c.R;
   for (int j = 0; j < N; ++j) {
     for (int i = 0; i < N; ++i) {
@@ -681,13 +701,7 @@ void buildRelief(const Cam& c) {
       if (hm[k00] < 1.0f || hm[k10] < 1.0f || hm[k01] < 1.0f || hm[k11] < 1.0f) continue;  // sea / shore
       if (s_sea_vertex[k00] | s_sea_vertex[k10] | s_sea_vertex[k01] | s_sea_vertex[k11]) continue;
       if (!okv[k00] || !okv[k10] || !okv[k01] || !okv[k11]) continue;
-      // Slope (in drawing units) and Lambert shading.
-      const float dzdx = 0.5f * ((hm[k10] - hm[k00]) + (hm[k11] - hm[k01])) * c.tscale / step;
-      const float dzdy = 0.5f * ((hm[k01] - hm[k00]) + (hm[k11] - hm[k10])) * c.tscale / step;
-      const float inv = 1.0f / sqrtf(dzdx * dzdx + dzdy * dzdy + 1.0f);
-      const float lit = (-dzdx * lx - dzdy * ly + lz) * inv;
       const uint16_t idx = static_cast<uint16_t>(j * N + i);
-      s_rc_color[idx] = lit < lz - 0.06f ? kLandDark : kLand;
       const float cxw = x0 + 0.5f * step, cyw = y0 + 0.5f * step;
       depth[idx] = cxw * c.syaw + cyw * c.cyaw;  // forward distance in the camera frame
       s_rc_order[s_rc_count++] = idx;
@@ -703,15 +717,72 @@ void buildRelief(const Cam& c) {
   free(depth);
 }
 
+// 4x4 ordered-dither thresholds (0..15).
+constexpr uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+constexpr uint8_t kLandTones[3] = {kLandDark, kLand, kLandLight};
+
+inline void putPixel4(uint8_t* buf, int x, int y, uint8_t c) {
+  uint8_t& b = buf[y * (kW / 2) + (x >> 1)];
+  b = (x & 1) ? static_cast<uint8_t>((b & 0xF0) | c) : static_cast<uint8_t>((b & 0x0F) | (c << 4));
+}
+
+/** Triangle with the shade interpolated across it, dithered between the land tones. */
+void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float x1, float y1, float s1,
+                   float x2, float y2, float s2) {
+  // Sort by y.
+  if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); std::swap(s0, s1); }
+  if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); }
+  if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); }
+  if (y2 - y0 < 0.5f) return;
+  const int ya = std::max(kTopBarH + 1, static_cast<int>(ceilf(y0 - 0.5f)));
+  const int yb = std::min(kH - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
+  for (int y = ya; y <= yb; ++y) {
+    const float yc = y + 0.5f;
+    // Long edge 0-2
+    const float t = (yc - y0) / (y2 - y0);
+    float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0);
+    float xb, sb;
+    if (yc < y1) {
+      const float u = (y1 - y0) > 1e-3f ? (yc - y0) / (y1 - y0) : 1.0f;
+      xb = x0 + u * (x1 - x0);
+      sb = s0 + u * (s1 - s0);
+    } else {
+      const float u = (y2 - y1) > 1e-3f ? (yc - y1) / (y2 - y1) : 0.0f;
+      xb = x1 + u * (x2 - x1);
+      sb = s1 + u * (s2 - s1);
+    }
+    if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); }
+    const int xs = std::max(0, static_cast<int>(ceilf(xa - 0.5f)));
+    const int xe = std::min(kW - 1, static_cast<int>(ceilf(xb - 0.5f)) - 1);
+    if (xe < xs) continue;
+    const float ds = (xb - xa) > 1e-3f ? (sb - sa) / (xb - xa) : 0.0f;
+    float sv = sa + (xs + 0.5f - xa) * ds;
+    const uint8_t* bay = kBayer[y & 3];
+    for (int x = xs; x <= xe; ++x, sv += ds) {
+      // sv: 0..2 (dark .. flat .. lit); the fraction picks the tone through the dither.
+      float tv = sv < 0.0f ? 0.0f : (sv > 1.999f ? 1.999f : sv);
+      const int base = static_cast<int>(tv);
+      const int lvl = (tv - base) * 16.0f > bay[x & 3] + 0.5f ? base + 1 : base;
+      putPixel4(buf, x, y, kLandTones[lvl > 2 ? 2 : lvl]);
+    }
+  }
+}
+
 void drawRelief() {
   constexpr int N = kReliefN;
+  uint8_t* buf = static_cast<uint8_t*>(s_spr.getBuffer());
+  if (buf == nullptr) return;
+  constexpr float kShadeScale = 2.0f / 256.0f;
   for (uint16_t n = 0; n < s_rc_count; ++n) {
     const uint16_t idx = s_rc_order[n];
     const int i = idx % N, j = idx / N;
     const int k00 = j * (N + 1) + i, k10 = k00 + 1, k01 = k00 + N + 1, k11 = k01 + 1;
-    const uint8_t col = s_rc_color[idx];
-    s_spr.fillTriangle(s_rv_x[k00], s_rv_y[k00], s_rv_x[k10], s_rv_y[k10], s_rv_x[k11], s_rv_y[k11], col);
-    s_spr.fillTriangle(s_rv_x[k00], s_rv_y[k00], s_rv_x[k11], s_rv_y[k11], s_rv_x[k01], s_rv_y[k01], col);
+    const float a0 = s_rv_shade[k00] * kShadeScale, a1 = s_rv_shade[k10] * kShadeScale;
+    const float a2 = s_rv_shade[k11] * kShadeScale, a3 = s_rv_shade[k01] * kShadeScale;
+    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, s_rv_x[k10], s_rv_y[k10], a1, s_rv_x[k11],
+                  s_rv_y[k11], a2);
+    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, s_rv_x[k11], s_rv_y[k11], a2, s_rv_x[k01],
+                  s_rv_y[k01], a3);
   }
 }
 
@@ -1030,7 +1101,7 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   s_spr.fillRect(0, 0, kW, kTopBarH, kPanel);
   s_spr.drawFastHLine(0, kTopBarH, kW, kRingDim);
   const bool fresh = fetched_ms != 0 && millis() - fetched_ms < 20000;
-  s_spr.fillCircle(10, 11, 3, fresh ? kGreen : kOrange);
+  s_spr.fillCircle(10, 11, 3, fresh ? kCyan : kOrange);
 
   setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::middle_left);
@@ -1191,7 +1262,7 @@ void drawCardCompact(int idx, const float* dist_km) {
   else if (a.vrate_fpm < -300) snprintf(tr, sizeof(tr), "v%d", -a.vrate_fpm);
   if (tr[0] && used + 6 + s_spr.textWidth(tr) <= x1) {
     s_spr.setTextDatum(textdatum_t::top_right);
-    s_spr.setTextColor(a.vrate_fpm > 0 ? kGreen : kOrange);
+    s_spr.setTextColor(a.vrate_fpm > 0 ? kCyan : kOrange);
     s_spr.drawString(tr, x1, kCardY + 24);
   }
 }
@@ -1281,7 +1352,7 @@ void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
   y += 17;
   if (a.vrate_fpm > 300) {
     snprintf(buf, sizeof(buf), "^ tırmanıyor  +%d fpm", a.vrate_fpm);
-    s_spr.setTextColor(kGreen);
+    s_spr.setTextColor(kCyan);
   } else if (a.vrate_fpm < -300) {
     snprintf(buf, sizeof(buf), "v alçalıyor  %d fpm", a.vrate_fpm);
     s_spr.setTextColor(kOrange);
