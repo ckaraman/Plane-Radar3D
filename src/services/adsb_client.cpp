@@ -31,6 +31,10 @@ constexpr Source kSources[] = {
 };
 constexpr int kSourceCount = sizeof(kSources) / sizeof(kSources[0]);
 int s_source = 0;
+// Per source: does plain HTTP work? 0 = not tried yet, 1 = yes, 2 = no (redirects to
+// HTTPS or refuses). Plain HTTP needs no TLS session (~40 KB of heap), so it is tried
+// first; the answer is remembered until the next restart.
+uint8_t s_plain_state[3] = {0, 0, 0};
 constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectTimeoutMs = 5000;  // TLS handshake needs room
 constexpr unsigned long kRequestTimeoutMs = 6000;
@@ -68,21 +72,12 @@ void pollNetwork() {
 }
 
 int performGetWithPoll(HTTPClient& http) {
+  // One attempt: a failed connection (DNS, TCP or the TLS handshake) comes back as
+  // -1 straight away. Retrying it in a loop only re-ran the expensive handshake and
+  // then reported a misleading timeout (-11).
   http.setConnectTimeout(kConnectTimeoutMs);
-  const unsigned long deadline = millis() + kRequestTimeoutMs;
-  while (millis() < deadline) {
-    pollNetwork();
-    const int code = http.GET();
-    if (code > 0) {
-      return code;
-    }
-    if (code != HTTPC_ERROR_CONNECTION_REFUSED &&
-        code != HTTPC_ERROR_NOT_CONNECTED) {
-      return code;
-    }
-    delay(5);
-  }
-  return HTTPC_ERROR_READ_TIMEOUT;
+  pollNetwork();
+  return http.GET();
 }
 
 /**
@@ -337,6 +332,8 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   url += String(center_lon, 6);
   url += src.suffix;
   url += String(dist_nm, 1);
+  const bool try_plain = s_plain_state[s_source] != 2;
+  if (try_plain) url = String("http") + String(url.c_str() + 5);  // "https://" -> "http://"
   // Any failure below moves on to the next source for the next cycle. A fallback
   // is only a stand-in: the networks have different receivers, so after about a
   // minute on one, go back and try adsb.fi (the main source, same as the other
@@ -363,11 +360,15 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     filter[key] = true;
   }
 
+  const unsigned heap_before = ESP.getFreeHeap();
+  const unsigned block_before = ESP.getMaxAllocHeap();
+  WiFiClient plain;
   WiFiClientSecure client;
-  client.setInsecure();
+  if (!try_plain) client.setInsecure();
 
   HTTPClient http;
-  if (!http.begin(client, url)) {
+  http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+  if (!(try_plain ? http.begin(plain, url) : http.begin(client, url))) {
     Serial.println("adsb: http.begin failed");
     setError("bağlantı kurulamadı", 0);
     return false;
@@ -381,17 +382,33 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   http.setTimeout(kRequestTimeoutMs);
   const int code = performGetWithPoll(http);
   if (code != HTTP_CODE_OK) {
-    Serial.printf("adsb: %s HTTP %d (free heap %u, largest block %u)\n", src.name, code,
-                  static_cast<unsigned>(ESP.getFreeHeap()),
-                  static_cast<unsigned>(ESP.getMaxAllocHeap()));
+    char tls[64] = "";
+    int tls_code = 0;
+    if (!try_plain) tls_code = client.lastError(tls, sizeof(tls));
+    Serial.printf("adsb: %s %s HTTP %d (heap before %u, largest block %u) %s\n", src.name,
+                  try_plain ? "http" : "https", code, heap_before, block_before, tls);
     http.end();
-    if (code < 0) {
-      setError(ESP.getMaxAllocHeap() < 40000 ? "bellek yetmedi (%d)" : "bağlantı hatası %d", code);
-    } else {
-      setError("sunucu yanıtı %d", code);
+    if (try_plain && s_plain_state[s_source] == 0) {
+      // Plain HTTP not offered here (redirect, refusal...): use HTTPS for this source
+      // from now on, and try it right away on the next cycle (no source switch).
+      s_plain_state[s_source] = 2;
+      next_on_fail.ok = true;
+      return false;
     }
+    char msg[40];
+    if (code < 0 && tls_code != 0) {
+      snprintf(msg, sizeof(msg), "TLS %d, bellek %u/%u KB", tls_code, block_before / 1024,
+               heap_before / 1024);
+    } else if (code < 0) {
+      snprintf(msg, sizeof(msg), "bağlantı %d, bellek %u/%u KB", code, block_before / 1024,
+               heap_before / 1024);
+    } else {
+      snprintf(msg, sizeof(msg), "sunucu yanıtı %d", code);
+    }
+    snprintf(s_error, sizeof(s_error), "%s", msg);
     return false;
   }
+  if (try_plain) s_plain_state[s_source] = 1;
 
   WiFiClient* stream = http.getStreamPtr();
   if (stream == nullptr) {
