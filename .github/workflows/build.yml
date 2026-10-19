@@ -76,6 +76,8 @@ jobs:
           cp .pio/build/wroom32u/bootloader.bin site/bootloader.bin
           cp .pio/build/wroom32u/partitions.bin site/partitions.bin
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
+          chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
+          (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
           python3 - "$VERSION" <<'PY'
           import json, sys
           version = sys.argv[1]

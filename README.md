@@ -140,6 +140,10 @@ python3 tools/fonts/make_tr_fonts.py /usr/share/fonts/truetype/freefont
 
 Başka bir harf gerekirse `tools/fonts/make_tr_fonts.py` içindeki `RANGES` listesine eklenir.
 
+## Mac'te USB köprüsü
+
+`tools/usb-kopru-mac/` (kurulum sayfasında “Mac köprüsünü indir”): `Kopru-Baslat.command` ya da `python3 radar_kopru.py [/dev/cu.usbserial-XXXX]`. Yalnızca macOS'teki python3 ve curl'ü kullanır; Windows köprüsüyle aynı veriyi (uçuş, rota, hava durumu) gönderir.
+
 ## Su takibi
 
 - Damla düğmesiyle açılır. Günün toplamı, hedefe göre dolan damla avatar, saatlik çubuklar (önceki günle), son 7 gün; ‹ › ile geçmiş günler.
