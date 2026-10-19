@@ -109,7 +109,7 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 - **Uçak kartı:** Seçilen (ya da en yakın) uçağın nereden nereye gittiği (adsbdb.com, çağrı koduna göre; bazı uçuşlarda bulunamayabilir), irtifa, hız, mesafe, rota ve tırmanma/alçalma.
 - **3B arazi:** Haritayla birlikte arazi yükseklikleri indirilir. Kara düz bir renkle dolu çizilir; tepeler ızgara çizgisi olmadan kabarır, kuzeybatıdan gelen ışığa göre gölgede kalan yamaçlar koyu tonda görünür. Yollar, kıyılar ve göller araziye oturur.
 - **Harita:** Deniz, göller ve baraj gölleri dolu, kıyı ve ana yollar çizgi olarak. Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
-- **Saat:** Seçili menzilde 15 sn boyunca uçak yoksa açılır (menzil dışındaki uçaklar engellemez). Altında ORTAM SIC. (SHT30) ve DIŞ ORT. SIC. sıcaklık ve nemi gösterilir.
+- **Saat:** Seçili menzilde 15 sn boyunca uçak yoksa açılır (menzil dışındaki uçaklar engellemez). Altında İÇ ORTAM (SHT30) ve DIŞ ORTAM sıcaklık ve nemi gösterilir.
 - **Hava durumu:** Radarın sağ altındaki HAVA düğmesiyle açılır. Dış ortamın şimdiki durumu (sıcaklık, hissedilen, nem, rüzgâr, gün doğumu/batımı), SHT30'dan ortam sıcaklığı ve nemi (rahatlık etiketiyle) ile 5 günlük tahmin (en yüksek/en düşük sıcaklık, yağış olasılığı). Veri Open-Meteo'dan 10 dakikada bir gelir; Wi-Fi yokken USB köprüsü indirip gönderir.
 
 ## Teknik notlar

@@ -75,11 +75,11 @@ void drawInfoLine() {
   const int right = indoor ? config::kDisplayWidth * 3 / 4 : kCenterX;
   if (indoor) {
     snprintf(t, sizeof(t), "%.1f", services::sht30::temperatureC());
-    drawInfoBlock(left, "ORTAM SIC.", t, static_cast<int>(lroundf(services::sht30::humidity())));
+    drawInfoBlock(left, "İÇ ORTAM", t, static_cast<int>(lroundf(services::sht30::humidity())));
   }
   if (outdoor) {
     snprintf(t, sizeof(t), "%d", f.now.temp_c);
-    drawInfoBlock(right, "DIŞ ORT. SIC.", t, f.humidity);
+    drawInfoBlock(right, "DIŞ ORTAM", t, f.humidity);
   }
   if (indoor && outdoor) tft.drawFastVLine(kCenterX, kInfoY - 24, 48, tft.color565(50, 58, 78));
   tft.setTextDatum(textdatum_t::top_left);

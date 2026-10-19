@@ -141,7 +141,7 @@ void drawTopBar() {
 
 void drawOutdoor(const Forecast& f, int x, int y, int w, int h) {
   panel(x, y, w, h);
-  text("DIŞ ORT. SIC.", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
+  text("DIŞ ORTAM", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
   if (!f.now.valid) {
     text("--", x + w / 2, y + h / 2, textdatum_t::middle_center, &ui::font::SansBold18,
          wFaint);
@@ -239,7 +239,7 @@ void drawDayDetail(const Day& d, int x, int y, int w, int h) {
 
 void drawIndoor(int x, int y, int w, int h) {
   panel(x, y, w, h);
-  text("ORTAM SIC.", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
+  text("İÇ ORTAM", x + 10, y + 12, textdatum_t::middle_left, &ui::font::Sans8, wDim);
   if (!services::sht30::valid()) {
     text("Sensör", x + w / 2, y + h / 2 - 10, textdatum_t::middle_center,
          &ui::font::SansBold9, wFaint);
