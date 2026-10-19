@@ -4,6 +4,7 @@
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -452,12 +453,12 @@ void buildDiscSpans(const Cam& c) {
  * their ends (a straight edge between them stays beyond that edge, so the filled
  * area on screen is unchanged). Two passes: count, then allocate exactly and fill.
  */
-void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
+bool buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
   set->points = 0;
   set->count = 0;
   const uint8_t* m = services::map::data();
   const size_t size = services::map::size();
-  if (m == nullptr || size < services::map::kHeaderBytes) return;
+  if (m == nullptr || size < services::map::kHeaderBytes) return true;
   int32_t lat_e7, lon_e7;
   uint16_t count;
   memcpy(&lat_e7, m + 4, 4);
@@ -482,7 +483,7 @@ void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
       uint16_t n;
       memcpy(&n, m + pos + 1, 2);
       pos += 3;
-      if (pos + static_cast<size_t>(n) * 4 > size) return;
+      if (pos + static_cast<size_t>(n) * 4 > size) return true;
       if (type != want || n < 3 || set->count >= kMaxRings) {
         pos += static_cast<size_t>(n) * 4;
         continue;
@@ -571,15 +572,20 @@ void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
     }
     if (!write) {
       set->count = 0;
-      if (total == 0) return;
-      if (total > set->cap || total + 256 < set->cap) {  // grow, or give back a lot of slack
+      if (total == 0) return true;
+      // Grow with headroom and keep the buffer: while the view turns, the point count
+      // changes a little every frame, and re-allocating each time fragments the heap
+      // that the Wi-Fi TLS connection needs. Only a lot of slack is given back.
+      if (total > set->cap || total * 3 + 1024 < set->cap) {
         free(set->xy);
-        set->xy = static_cast<int16_t*>(malloc(total * 2 * sizeof(int16_t)));
-        set->cap = set->xy ? total : 0;
-        if (set->xy == nullptr) return;  // not enough RAM: no fill, lines still draw
+        const size_t want_cap = total + total / 4 + 64;
+        set->xy = static_cast<int16_t*>(malloc(want_cap * 2 * sizeof(int16_t)));
+        set->cap = set->xy ? want_cap : 0;
+        if (set->xy == nullptr) return false;  // not enough RAM right now: retry next frame
       }
     }
   }
+  return true;
 }
 
 /** Scanline even-odd fill of a ring set, clipped to the radar disc. */
@@ -635,7 +641,6 @@ int16_t s_rv_y[(kReliefN + 1) * (kReliefN + 1)];
 uint16_t s_rc_order[kReliefN * kReliefN];
 uint8_t s_rv_shade[(kReliefN + 1) * (kReliefN + 1)];  // 0 dark .. 128 flat .. 255 lit
 uint16_t s_rc_count = 0;
-const float* s_rc_depth = nullptr;  // only valid while sorting
 
 // Grid vertices that lie in the sea (map type 2 rings, world coordinates). The terrain
 // grid is coarse, so without this the relief cells would spill over the coastline.
@@ -703,38 +708,28 @@ void buildSeaMask(float R) {
   }
 }
 
-void buildRelief(const Cam& c) {
-  s_rc_count = 0;
-  if (!services::terrain::available()) return;
+// Vertices too low to carry relief (sea level / shore), same grid as the sea mask.
+uint8_t s_low_vertex_bits[((kReliefN + 1) * (kReliefN + 1) + 7) / 8];
+inline bool lowVertex(int k) { return (s_low_vertex_bits[k >> 3] >> (k & 7)) & 1; }
+
+// Heights and shading depend only on the range, the terrain grid and the location --
+// not on the camera -- so they are worked out once per change and kept. Turning the
+// view then only re-projects the vertices: no memory is allocated while rotating
+// (with Wi-Fi up, the network task needs ~40 KB for TLS at the same moment, and a
+// failed allocation here used to leave the relief out until the next camera change).
+struct ShadeKey {
+  uint32_t tgen;
+  float R, tscale;
+  double lat, lon;
+} s_shade_key = {0, -1, -1, 0, 0};
+
+void buildShade(const Cam& c) {
   constexpr int N = kReliefN;
   const float step = 2.0f * c.R / N;
-  const MaskKey mk{services::map::generation(), c.R, services::location::lat(), services::location::lon()};
-  if (mk.gen != s_mask_key.gen || mk.R != s_mask_key.R || mk.lat != s_mask_key.lat ||
-      mk.lon != s_mask_key.lon) {
-    s_mask_key = mk;
-    buildSeaMask(c.R);
-  }
-  // Scratch buffers, only needed while building (kept off the static RAM budget).
-  float* hm = static_cast<float*>(malloc(sizeof(float) * (N + 1) * (N + 1)));
-  bool* okv = static_cast<bool*>(malloc(sizeof(bool) * (N + 1) * (N + 1)));
-  float* depth = static_cast<float*>(malloc(sizeof(float) * N * N));
-  if (hm == nullptr || okv == nullptr || depth == nullptr) {
-    free(hm);
-    free(okv);
-    free(depth);
-    return;
-  }
-  for (int j = 0; j <= N; ++j) {
-    for (int i = 0; i <= N; ++i) {
-      const float x = -c.R + i * step, y = -c.R + j * step;
-      const int k = j * (N + 1) + i;
-      hm[k] = services::terrain::heightM(x, y);
-      float sx = 0, sy = 0;
-      okv[k] = project(c, x, y, hm[k] * c.tscale, &sx, &sy);
-      s_rv_x[k] = static_cast<int16_t>(std::max(-2000.0f, std::min(2480.0f, sx)));
-      s_rv_y[k] = static_cast<int16_t>(std::max(-2000.0f, std::min(2320.0f, sy)));
-    }
-  }
+  memset(s_low_vertex_bits, 0, sizeof(s_low_vertex_bits));
+  auto h = [&](int i, int j) {
+    return services::terrain::heightM(-c.R + i * step, -c.R + j * step);
+  };
   // Light from the north-west, a bit above the horizon (world frame: x east, y north).
   // Shading is computed per vertex (central differences) so it can be blended smoothly
   // across each cell when drawing.
@@ -743,10 +738,11 @@ void buildRelief(const Cam& c) {
   for (int j = 0; j <= N; ++j) {
     for (int i = 0; i <= N; ++i) {
       const int k = j * (N + 1) + i;
+      if (h(i, j) < 1.0f) s_low_vertex_bits[k >> 3] |= static_cast<uint8_t>(1u << (k & 7));
       const int il = std::max(i - 1, 0), ir = std::min(i + 1, N);
       const int jd = std::max(j - 1, 0), ju = std::min(j + 1, N);
-      const float dzdx = (hm[j * (N + 1) + ir] - hm[j * (N + 1) + il]) * c.tscale / ((ir - il) * step);
-      const float dzdy = (hm[ju * (N + 1) + i] - hm[jd * (N + 1) + i]) * c.tscale / ((ju - jd) * step);
+      const float dzdx = (h(ir, j) - h(il, j)) * c.tscale / ((ir - il) * step);
+      const float dzdy = (h(i, ju) - h(i, jd)) * c.tscale / ((ju - jd) * step);
       const float inv = 1.0f / sqrtf(dzdx * dzdx + dzdy * dzdy + 1.0f);
       const float lit = (-dzdx * lx - dzdy * ly + lz) * inv;
       float v = kGain * (lit - lz) * 255.0f;
@@ -755,6 +751,42 @@ void buildRelief(const Cam& c) {
       v = v > kFlat ? v - kFlat : (v < -kFlat ? v + kFlat : 0.0f);
       v += 128.0f;
       s_rv_shade[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, v)));
+    }
+  }
+}
+
+float s_sort_syaw = 0.0f, s_sort_cyaw = 1.0f;  // camera heading, only while sorting
+
+void buildRelief(const Cam& c) {
+  s_rc_count = 0;
+  if (!services::terrain::available()) return;
+  constexpr int N = kReliefN;
+  constexpr int16_t kOff = INT16_MIN;  // s_rv_x marker: vertex behind the camera
+  const float step = 2.0f * c.R / N;
+  const MaskKey mk{services::map::generation(), c.R, services::location::lat(), services::location::lon()};
+  if (mk.gen != s_mask_key.gen || mk.R != s_mask_key.R || mk.lat != s_mask_key.lat ||
+      mk.lon != s_mask_key.lon) {
+    s_mask_key = mk;
+    buildSeaMask(c.R);
+  }
+  const ShadeKey sk{services::terrain::generation(), c.R, c.tscale, services::location::lat(),
+                    services::location::lon()};
+  if (sk.tgen != s_shade_key.tgen || sk.R != s_shade_key.R || sk.tscale != s_shade_key.tscale ||
+      sk.lat != s_shade_key.lat || sk.lon != s_shade_key.lon) {
+    s_shade_key = sk;
+    buildShade(c);
+  }
+  for (int j = 0; j <= N; ++j) {
+    for (int i = 0; i <= N; ++i) {
+      const float x = -c.R + i * step, y = -c.R + j * step;
+      const int k = j * (N + 1) + i;
+      float sx = 0, sy = 0;
+      if (!project(c, x, y, services::terrain::heightM(x, y) * c.tscale, &sx, &sy)) {
+        s_rv_x[k] = kOff;
+        continue;
+      }
+      s_rv_x[k] = static_cast<int16_t>(std::max(-2000.0f, std::min(2480.0f, sx)));
+      s_rv_y[k] = static_cast<int16_t>(std::max(-2000.0f, std::min(2320.0f, sy)));
     }
   }
   const float r2 = c.R * c.R;
@@ -766,23 +798,21 @@ void buildRelief(const Cam& c) {
           x1 * x1 + y1 * y1 > r2) {
         continue;  // outside the disc
       }
-      if (hm[k00] < 1.0f || hm[k10] < 1.0f || hm[k01] < 1.0f || hm[k11] < 1.0f) continue;  // sea / shore
+      if (lowVertex(k00) || lowVertex(k10) || lowVertex(k01) || lowVertex(k11)) continue;  // sea / shore
       if (seaVertex(k00) || seaVertex(k10) || seaVertex(k01) || seaVertex(k11)) continue;
-      if (!okv[k00] || !okv[k10] || !okv[k01] || !okv[k11]) continue;
-      const uint16_t idx = static_cast<uint16_t>(j * N + i);
-      const float cxw = x0 + 0.5f * step, cyw = y0 + 0.5f * step;
-      depth[idx] = cxw * c.syaw + cyw * c.cyaw;  // forward distance in the camera frame
-      s_rc_order[s_rc_count++] = idx;
+      if (s_rv_x[k00] == kOff || s_rv_x[k10] == kOff || s_rv_x[k01] == kOff || s_rv_x[k11] == kOff) continue;
+      s_rc_order[s_rc_count++] = static_cast<uint16_t>(j * N + i);
     }
   }
-  // Far cells first (painter's algorithm).
-  s_rc_depth = depth;
-  std::sort(s_rc_order, s_rc_order + s_rc_count,
-            [](uint16_t a, uint16_t b) { return s_rc_depth[a] > s_rc_depth[b]; });
-  s_rc_depth = nullptr;
-  free(hm);
-  free(okv);
-  free(depth);
+  // Far cells first (painter's algorithm): forward distance of the cell centre in
+  // the camera frame, computed from the cell index (no depth buffer needed).
+  s_sort_syaw = c.syaw;
+  s_sort_cyaw = c.cyaw;
+  std::sort(s_rc_order, s_rc_order + s_rc_count, [](uint16_t a, uint16_t b) {
+    const float da = (a % kReliefN) * s_sort_syaw + (a / kReliefN) * s_sort_cyaw;
+    const float db = (b % kReliefN) * s_sort_syaw + (b / kReliefN) * s_sort_cyaw;
+    return da > db;
+  });
 }
 
 // 4x4 ordered-dither thresholds (0..15).
@@ -863,9 +893,12 @@ void drawSurface(const Cam& c) {
       key.lon != s_sea_key.lon) {
     s_sea_key = key;
     buildDiscSpans(c);
-    buildRings(c, 2, false, &s_sea);
-    buildRings(c, 3, true, &s_lakes);
+    const bool sea_ok = buildRings(c, 2, false, &s_sea);
+    const bool lakes_ok = buildRings(c, 3, true, &s_lakes);
     buildRelief(c);
+    // A fill that could not get its memory is retried on the next frame instead of
+    // staying missing until the camera moves again.
+    if (!sea_ok || !lakes_ok) s_sea_key.gen = 0xFFFFFFFFu;
   }
   for (int y = kTopBarH; y < kH; ++y) {  // flat land
     if (s_disc_l[y] <= s_disc_r[y]) s_spr.drawFastHLine(s_disc_l[y], y, s_disc_r[y] - s_disc_l[y] + 1, kLand);
