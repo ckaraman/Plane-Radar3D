@@ -111,15 +111,34 @@ void drawScreen(int pct) {
 
 }  // namespace
 
+namespace {
+/** Unsigned number after "key": in a flat JSON object; false when missing. Parsed by
+ *  hand (no heap): with Wi-Fi busy the JSON pool allocation could fail. */
+bool jsonUint(const char* json, const char* key, uint32_t* out) {
+  char pat[16];
+  snprintf(pat, sizeof(pat), "\"%s\"", key);
+  const char* p = strstr(json, pat);
+  if (p == nullptr) return false;
+  p += strlen(pat);
+  while (*p == ' ' || *p == ':') ++p;
+  char* end = nullptr;
+  const long long v = strtoll(p, &end, 10);
+  if (end == p) return false;
+  *out = static_cast<uint32_t>(v);  // a negative CRC from an old page wraps correctly
+  return true;
+}
+}  // namespace
+
 void begin(const char* json) {
-  JsonDocument doc;
-  if (deserializeJson(doc, json) != DeserializationError::Ok || !doc["len"].is<uint32_t>()) {
+  uint32_t len = 0, crc = 0;
+  if (!jsonUint(json, "len", &len) || !jsonUint(json, "crc", &crc)) {
+    Serial.printf("ota: bad begin line '%.60s'\n", json);
     replyError("bad_json");
     return;
   }
   if (s_active) Update.abort();
-  s_len = doc["len"].as<uint32_t>();
-  s_expected_crc = doc["crc"].as<uint32_t>();
+  s_len = len;
+  s_expected_crc = crc;
   if (s_len < 4096 || !Update.begin(s_len, U_FLASH)) {
     replyError("ota_no_space");
     s_active = false;

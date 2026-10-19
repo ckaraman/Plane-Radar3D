@@ -479,8 +479,24 @@
       const r = await fetch('firmware.bin?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
       if (!r.ok) throw new Error('indirme ' + r.status);
       const fw = new Uint8Array(await r.arrayBuffer());
-      const begin = await request('PR:OTABEGIN ' + JSON.stringify({ len: fw.length, crc: crc32(fw) }), ['OTAACK', 'ERR'], 20000);
-      if (begin.tag === 'ERR') throw new Error(begin.data.msg || 'ota');
+      // The start line is retried a few times: on a device busy with Wi-Fi (TLS takes
+      // most of the free memory for a moment) an older firmware can fail to read it.
+      const fwCrc = crc32(fw);
+      let begin = null;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          begin = await request('PR:OTABEGIN ' + JSON.stringify({ len: fw.length, crc: fwCrc }), ['OTAACK', 'ERR'], 20000);
+        } catch (e) {
+          if (String(e && e.message) !== 'timeout' || attempt === 5) throw e;
+          begin = null;
+        }
+        if (begin && begin.tag === 'OTAACK') break;
+        const why = begin ? (begin.data.msg || 'ota') : 'timeout';
+        if (!/bad_json|timeout/.test(why) || attempt === 5) throw new Error(why);
+        note('OTABEGIN tekrar deneniyor (' + why + ', deneme ' + (attempt + 1) + '/5)');
+        setMsg(msg, 'info', 'Cihaz meşgul, yeniden deneniyor (' + (attempt + 1) + '/5)…');
+        await sleep(1500 * attempt);
+      }
       // One chunk at a time: while the chip writes flash it cannot take in more bytes,
       // so the next line goes out only after the answer to the previous one.
       const v2 = ((state.device && state.device.otav) | 0) >= 2;

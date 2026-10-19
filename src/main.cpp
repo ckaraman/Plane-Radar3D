@@ -268,7 +268,9 @@ void pollTouch() {
 // own task on core 0; the render loop keeps dead-reckoning on core 1.
 void adsbFetchTask(void*) {
   for (;;) {
-    if (WiFi.status() == WL_CONNECTED) {
+    // While a USB update runs, leave the network alone: the update needs the CPU
+    // and the heap, and TLS handshakes take ~40 KB at a time.
+    if (WiFi.status() == WL_CONNECTED && !services::serial_ota::active()) {
       services::adsb::fetchUpdate(services::location::lat(), services::location::lon(),
                                   ui::radar::fetchRadiusKm());
       services::route::fetchPending();
