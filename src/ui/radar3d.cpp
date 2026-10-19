@@ -61,13 +61,13 @@ constexpr Rgb kPaletteHighContrast[16] = {
     {0, 0, 0},       {58, 68, 34},    {96, 112, 54},   {60, 130, 165},
     {90, 180, 225},  {110, 215, 255}, {255, 248, 225}, {255, 170, 60},
     {255, 255, 255}, {175, 188, 198}, {12, 26, 38},    {255, 45, 45},
-    {146, 164, 84},  {120, 200, 255}, {255, 190, 100}, {8, 40, 92},
+    {146, 164, 84},  {40, 96, 150},   {178, 176, 160}, {8, 40, 92},
 };
 constexpr Rgb kPalette[16] = {
     {5, 8, 13},      {44, 52, 27},    {76, 89, 43},    {31, 81, 104},
     {42, 112, 144},  {91, 200, 245},  {237, 230, 211}, {255, 159, 67},
     {230, 237, 242}, {125, 139, 150}, {11, 22, 32},    {225, 40, 40},
-    {112, 128, 64},  {90, 170, 225},  {220, 160, 80},  {8, 32, 72},
+    {112, 128, 64},  {34, 80, 126},   {146, 144, 130}, {8, 32, 72},
 };
 
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
@@ -275,7 +275,18 @@ void thickLine(int x0, int y0, int x1, int y1, uint8_t color) {
 }
 
 /** Top-down airplane silhouette, rotated to the on-screen heading. */
+void drawPlaneShape(int cx, int cy, float heading_deg, float scale, uint8_t color);
+
+/** Aircraft icon with a 1 px dark outline so it stands out on land, sea and map lines. */
 void drawPlaneIcon(int cx, int cy, float heading_deg, float scale, uint8_t color) {
+  drawPlaneShape(cx - 1, cy, heading_deg, scale, kBg);
+  drawPlaneShape(cx + 1, cy, heading_deg, scale, kBg);
+  drawPlaneShape(cx, cy - 1, heading_deg, scale, kBg);
+  drawPlaneShape(cx, cy + 1, heading_deg, scale, kBg);
+  drawPlaneShape(cx, cy, heading_deg, scale, color);
+}
+
+void drawPlaneShape(int cx, int cy, float heading_deg, float scale, uint8_t color) {
   const float rad = heading_deg * kDegToRad;
   const float fx = sinf(rad) * scale, fy = -cosf(rad) * scale;
   const float rx = cosf(rad) * scale, ry = sinf(rad) * scale;
@@ -301,6 +312,18 @@ void drawPlaneIcon(int cx, int cy, float heading_deg, float scale, uint8_t color
 void setFont(const lgfx::IFont* f) {
   s_spr.setFont(f);
   s_spr.setTextSize(1);
+}
+
+/** Text with a dark halo (top-left datum), readable over any background. */
+void haloText(const char* t, int x, int y, uint8_t color) {
+  s_spr.setTextDatum(textdatum_t::top_left);
+  s_spr.setTextColor(kBg);
+  s_spr.drawString(t, x - 1, y);
+  s_spr.drawString(t, x + 1, y);
+  s_spr.drawString(t, x, y - 1);
+  s_spr.drawString(t, x, y + 1);
+  s_spr.setTextColor(color);
+  s_spr.drawString(t, x, y);
 }
 
 /** Bytes taking up the first `chars` letters of a UTF-8 string. */
@@ -1067,7 +1090,10 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
 
   if (!labels) return;
   // Labels last, nearest aircraft first (the one in the card before all), each
-  // to the right of its icon, else to the left, else left out.
+  // to the right of its icon, else to the left, else left out. Callsign in bold
+  // with a dark halo; the altitude line is dropped when the sky is busy (the card
+  // still shows it), so many aircraft do not turn into a wall of text.
+  const bool busy = n_items > 6;
   s_label_box_count = 0;
   for (int pass = 0; pass < 2; ++pass) {
     for (size_t k = n_items; k-- > 0;) {
@@ -1077,22 +1103,27 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       const LabelPos& lp = s_label_pos[k];
       char alt[12];
       formatAltitude(a.alt_ft, alt, sizeof(alt));
-      setFont(&ui::font::Sans8);
-      const int w = std::max<int>(s_spr.textWidth(a.callsign), 6 * static_cast<int>(strlen(alt))) + 2;
-      const int h = 24;
+      const bool two_lines = !busy || is_card;
+      setFont(&ui::font::SansBold8);
+      int w = s_spr.textWidth(a.callsign);
+      if (two_lines) {
+        setFont(&ui::font::Sans8);
+        w = std::max<int>(w, s_spr.textWidth(alt));
+      }
+      w += 3;
+      const int h = two_lines ? 30 : 16;
       const int off = ri(lp.size * 0.6f) + 5;
-      Box box{lp.x + off, lp.y - 10, w, h};
+      Box box{lp.x + off, lp.y - 9, w, h};
       if (!claimLabel(box)) {
         box.x = lp.x - off - w;
         if (!claimLabel(box)) continue;
       }
-      const uint8_t col = altitudeColor(a.alt_ft);
-      s_spr.setTextDatum(textdatum_t::top_left);
-      s_spr.setTextColor(col);
-      s_spr.drawString(a.callsign, box.x, box.y);
-      setFont(&fonts::Font0);
-      s_spr.setTextColor(kTextDim);
-      s_spr.drawString(alt, box.x, box.y + 15);
+      setFont(&ui::font::SansBold8);
+      haloText(a.callsign, box.x + 1, box.y, altitudeColor(a.alt_ft));
+      if (two_lines) {
+        setFont(&ui::font::Sans8);
+        haloText(alt, box.x + 1, box.y + 14, kText);
+      }
     }
   }
 }

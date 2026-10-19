@@ -1120,7 +1120,9 @@
       dv.setUint8(o, l.type); dv.setUint16(o + 1, l.pts.length, true); o += 3;
       for (const [x, y] of l.pts) { dv.setInt16(o, q(x), true); dv.setInt16(o + 2, q(y), true); o += 4; }
     }
-    return new Uint8Array(buf);
+    const out = new Uint8Array(buf);
+    out.lakes = lakes.length;
+    return out;
   }
 
   async function uploadMap(blob, onProgress) {
@@ -1168,7 +1170,8 @@
       if (!blob) return ' Bu konumda çizilecek kıyı ya da ana yol bulunamadı, harita eklenmedi.';
       await uploadMap(blob, (p) => setMsg(msg, 'info', 'Harita cihaza yazılıyor… %' + p));
       dev.map = blob.length;
-      return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB).' +
+      const lakeNote = !water ? '' : (blob.lakes ? ', ' + blob.lakes + ' göl' : ', bu alanda göl yok');
+      return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB' + lakeNote + ').' +
         (water ? '' : ' Deniz dolgusu için önce 3. adımdan yazılımı güncelleyin.');
     } catch (e) {
       const m = e && e.message ? e.message : '';
