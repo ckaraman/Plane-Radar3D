@@ -57,4 +57,7 @@ void publishExternal(const Aircraft* src, size_t count);
 /** Fetch aircraft within fetch_radius_km of center_lat/lon from adsb.fi. */
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
 
+/** Name of the data source in use (adsb.fi, or a fallback after a failure). */
+const char* sourceName();
+
 }  // namespace services::adsb

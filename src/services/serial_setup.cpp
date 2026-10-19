@@ -99,6 +99,8 @@ void sendHello() {
   doc["rings"] = ui::radar::showRings();
   doc["weather"] = services::weather::enabled();
   doc["wxv"] = 1;  // accepts PR:W forecast lines from the USB bridge
+  doc["heap"] = ESP.getFreeHeap();
+  doc["maxblk"] = ESP.getMaxAllocHeap();
   doc["map"] = static_cast<uint32_t>(services::map::size());
   doc["mapv"] = services::map::kBlobVersion;
   doc["elevv"] = services::terrain::kProtocolVersion;

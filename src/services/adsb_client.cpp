@@ -17,7 +17,20 @@ namespace services::adsb {
 
 namespace {
 
-constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
+// Data sources, tried in turn when one fails (same readsb JSON, "ac" array).
+struct Source {
+  const char* name;
+  const char* prefix;   // + lat
+  const char* mid;      // + lon
+  const char* suffix;   // + radius (nm)
+};
+constexpr Source kSources[] = {
+    {"adsb.fi", "https://opendata.adsb.fi/api/v3/lat/", "/lon/", "/dist/"},
+    {"airplanes.live", "https://api.airplanes.live/v2/point/", "/", "/"},
+    {"adsb.lol", "https://api.adsb.lol/v2/point/", "/", "/"},
+};
+constexpr int kSourceCount = sizeof(kSources) / sizeof(kSources[0]);
+int s_source = 0;
 constexpr float kKmPerNm = 1.852f;
 constexpr int kConnectTimeoutMs = 5000;  // TLS handshake needs room
 constexpr unsigned long kRequestTimeoutMs = 6000;
@@ -293,15 +306,25 @@ size_t snapshotAircraft(Aircraft* out, size_t max_out,
   return count;
 }
 
+const char* sourceName() { return kSources[s_source].name; }
+
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   const float dist_nm = kmToNauticalMiles(fetch_radius_km);
 
-  String url = kApiBase;
+  const Source& src = kSources[s_source];
+  String url = src.prefix;
   url += String(center_lat, 6);
-  url += "/lon/";
+  url += src.mid;
   url += String(center_lon, 6);
-  url += "/dist/";
+  url += src.suffix;
   url += String(dist_nm, 1);
+  // Any failure below moves on to the next source for the next cycle.
+  struct NextOnFail {
+    bool ok = false;
+    ~NextOnFail() {
+      if (!ok) s_source = (s_source + 1) % kSourceCount;
+    }
+  } next_on_fail;
 
   // Keep only the fields we render; the rest never reaches RAM.
   JsonDocument filter;
@@ -330,7 +353,9 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   http.setTimeout(kRequestTimeoutMs);
   const int code = performGetWithPoll(http);
   if (code != HTTP_CODE_OK) {
-    Serial.printf("adsb: HTTP %d\n", code);
+    Serial.printf("adsb: %s HTTP %d (free heap %u, largest block %u)\n", src.name, code,
+                  static_cast<unsigned>(ESP.getFreeHeap()),
+                  static_cast<unsigned>(ESP.getMaxAllocHeap()));
     http.end();
     return false;
   }
@@ -427,6 +452,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   publish(parsed, n);
   Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+  next_on_fail.ok = true;
   return true;
 }
 

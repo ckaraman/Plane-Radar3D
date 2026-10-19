@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <esp_partition.h>
+#include <esp_spi_flash.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -19,8 +20,13 @@ struct FlashHeader {
   uint32_t crc;
 };
 
-uint8_t* s_active = nullptr;
+// The active map is read straight from flash through the cache (memory-mapped), so it
+// costs no RAM: with Wi-Fi on, the HTTPS client needs every free kilobyte.
+const uint8_t* s_active = nullptr;
 size_t s_active_len = 0;
+spi_flash_mmap_handle_t s_mmap = 0;
+bool s_mapped = false;
+uint8_t* s_active_ram = nullptr;  // fallback copy if mapping fails
 uint32_t s_generation = 1;
 
 uint8_t* s_stage = nullptr;
@@ -31,6 +37,18 @@ uint32_t s_stage_crc = 0;
 const esp_partition_t* partition() {
   return esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
                                   ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
+}
+
+void releaseActive() {
+  if (s_mapped) {
+    spi_flash_munmap(s_mmap);
+    s_mapped = false;
+  }
+  free(s_active_ram);
+  s_active_ram = nullptr;
+  s_active = nullptr;
+  s_active_len = 0;
+  ++s_generation;
 }
 
 uint16_t rd16(const uint8_t* p) {
@@ -80,31 +98,52 @@ uint32_t crc32(const uint8_t* bytes, size_t n) {
   return ~crc;
 }
 
-void init() {
+
+/** Map (or, failing that, copy) the stored map; checks magic, CRC and structure. */
+bool activateStored() {
   const esp_partition_t* part = partition();
-  if (part == nullptr) {
-    return;
-  }
+  if (part == nullptr) return false;
   FlashHeader h;
   if (esp_partition_read(part, 0, &h, sizeof(h)) != ESP_OK || h.magic != kMagic ||
       h.length < kHeaderBytes || h.length > kMaxBytes) {
-    return;
+    return false;
   }
-  uint8_t* buf = static_cast<uint8_t*>(malloc(h.length));
-  if (buf == nullptr) {
-    Serial.println("map: no RAM for stored map");
-    return;
+  const void* ptr = nullptr;
+  spi_flash_mmap_handle_t handle;
+  if (esp_partition_mmap(part, 0, sizeof(h) + h.length, SPI_FLASH_MMAP_DATA, &ptr, &handle) ==
+      ESP_OK) {
+    const uint8_t* blob = static_cast<const uint8_t*>(ptr) + sizeof(h);
+    if (crc32(blob, h.length) != h.crc || !validBlob(blob, h.length)) {
+      spi_flash_munmap(handle);
+      Serial.println("map: stored map is damaged, ignoring it");
+      return false;
+    }
+    s_mmap = handle;
+    s_mapped = true;
+    s_active = blob;
+  } else {
+    uint8_t* buf = static_cast<uint8_t*>(malloc(h.length));
+    if (buf == nullptr) {
+      Serial.println("map: no RAM for stored map");
+      return false;
+    }
+    if (esp_partition_read(part, sizeof(h), buf, h.length) != ESP_OK ||
+        crc32(buf, h.length) != h.crc || !validBlob(buf, h.length)) {
+      free(buf);
+      Serial.println("map: stored map is damaged, ignoring it");
+      return false;
+    }
+    s_active_ram = buf;
+    s_active = buf;
   }
-  if (esp_partition_read(part, sizeof(h), buf, h.length) != ESP_OK ||
-      crc32(buf, h.length) != h.crc || !validBlob(buf, h.length)) {
-    free(buf);
-    Serial.println("map: stored map is damaged, ignoring it");
-    return;
-  }
-  s_active = buf;
   s_active_len = h.length;
-  Serial.printf("map: loaded %u bytes\n", static_cast<unsigned>(h.length));
+  ++s_generation;
+  Serial.printf("map: %u bytes (%s)\n", static_cast<unsigned>(h.length),
+                s_mapped ? "read from flash" : "copied to RAM");
+  return true;
 }
+
+void init() { activateStored(); }
 
 const uint8_t* data() { return s_active; }
 size_t size() { return s_active_len; }
@@ -116,12 +155,9 @@ bool beginStaging(size_t length, uint32_t crc) {
     return false;
   }
   s_stage = static_cast<uint8_t*>(malloc(length));
-  if (s_stage == nullptr && s_active != nullptr) {
-    // Low on RAM: give up the old map (it is replaced anyway) and try again.
-    free(s_active);
-    ++s_generation;
-    s_active = nullptr;
-    s_active_len = 0;
+  if (s_stage == nullptr && s_active_ram != nullptr) {
+    // Low on RAM: give up the old map copy (it is replaced anyway) and try again.
+    releaseActive();
     s_stage = static_cast<uint8_t*>(malloc(length));
   }
   if (s_stage == nullptr) {
@@ -156,29 +192,20 @@ bool commit() {
   const FlashHeader h = {kMagic, static_cast<uint32_t>(s_stage_len), s_stage_crc};
   const size_t total = sizeof(h) + s_stage_len;
   const size_t erase_len = ((total + kSector - 1) / kSector) * kSector;
-  if (esp_partition_erase_range(part, 0, erase_len) != ESP_OK ||
-      esp_partition_write(part, 0, &h, sizeof(h)) != ESP_OK ||
-      esp_partition_write(part, sizeof(h), s_stage, s_stage_len) != ESP_OK) {
-    freeStage();
-    return false;
-  }
-  free(s_active);
-  ++s_generation;
-  s_active = s_stage;
-  s_active_len = s_stage_len;
-  s_stage = nullptr;
-  s_stage_len = s_stage_got = 0;
-  return true;
+  releaseActive();  // the mapped flash is about to be erased
+  const bool ok = esp_partition_erase_range(part, 0, erase_len) == ESP_OK &&
+                  esp_partition_write(part, 0, &h, sizeof(h)) == ESP_OK &&
+                  esp_partition_write(part, sizeof(h), s_stage, s_stage_len) == ESP_OK;
+  freeStage();
+  if (!ok) return false;
+  return activateStored();
 }
 
 void abortStaging() { freeStage(); }
 
 void clear() {
   freeStage();
-  free(s_active);
-  ++s_generation;
-  s_active = nullptr;
-  s_active_len = 0;
+  releaseActive();
   const esp_partition_t* part = partition();
   if (part != nullptr) {
     esp_partition_erase_range(part, 0, kSector);  // header sector only

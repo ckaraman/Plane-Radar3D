@@ -462,7 +462,7 @@ void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
   for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
     uint16_t n;
     memcpy(&n, m + pos + 1, 2);
-    if (m[pos] == want) need += static_cast<size_t>(n) * 2;  // clipping can add points
+    if (m[pos] == want) need += static_cast<size_t>(n) + n / 4 + 8;  // clipping can add points
     pos += 3 + static_cast<size_t>(n) * 4;
   }
   if (need == 0) return;
@@ -499,6 +499,7 @@ void buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
       *z = draped ? groundZ(c, x, y) : 0.0f;
     };
     auto emit = [&](float xr, float yr, float z) {
+      if (set->points >= set->cap) return;  // (only on pathological rings)
       float sx = 0, sy = 0;
       projectCam(c, xr, yr, z, &sx, &sy);
       sx = std::max(-2000.0f, std::min(2480.0f, sx));
@@ -1140,7 +1141,7 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   s_spr.drawString("RADAR 3B", 19, 11);
   const int src_x = 19 + s_spr.textWidth("RADAR 3B") + 10;
   s_spr.setTextColor(kTextDim);
-  s_spr.drawString(services::usb_feed::active() ? "USB" : "adsb.fi", src_x, 11);
+  s_spr.drawString(services::usb_feed::active() ? "USB" : services::adsb::sourceName(), src_x, 11);
 
   char buf[40];
   char range[12];
