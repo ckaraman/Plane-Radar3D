@@ -91,17 +91,20 @@ constexpr int kPadTop = kH - 4 - kBtnSize - kPadStep;
 constexpr int kPadW = 2 * kPadStep + kBtnSize;
 constexpr int kPadH = kPadStep + kBtnSize;
 constexpr int kPitchStepDeg = 8;
-constexpr int kCardW = 196;
-constexpr int kCardHFull = 116;
-constexpr int kCardHCompact = 44;
-constexpr int kCardX = kW - kCardW - 4;
-constexpr int kCardY = 22 + 4;  // under the top bar, in the sky area
+// Altitude legend: a thin strip under the top bar, hidden while an aircraft is selected.
+constexpr int kStripH = 18;
+// Selected aircraft, "corners" style: who / where to on the left, flight values on the right.
+constexpr int kInfoY = kTopBarH + 4;
+constexpr int kInfoH = 62;
+constexpr int kInfoLW = 168;
+constexpr int kInfoRW = 150;
+constexpr int kInfoRX = kW - kInfoRW - 4;
 constexpr int kTapRadiusPx = 38;
 constexpr float kYawStepDeg = 30.0f;
 
 LGFX_Sprite s_spr(&tft);
-bool s_card_expanded = false;  // tap the card to switch between 2 lines and full details
-int cardH() { return s_card_expanded ? kCardHFull : kCardHCompact; }
+/** How the selected aircraft's details are shown (display_prefs info_style). */
+bool infoInLabel() { return services::display_prefs::get().info_style == 1; }
 bool s_ready = false;
 
 float s_yaw_cur = 20.0f;  // animated camera heading
@@ -361,9 +364,10 @@ bool overlapsUi(int x, int y, int w, int h) {
   const Box me{x, y, w, h};
   const Box fixed[] = {
       {0, 0, kW, kTopBarH + 2},
-      {0, kTopBarH, 112, 58},                                  // legend
+      {0, kTopBarH, s_selected[0] ? 0 : kW, kStripH + 2},       // legend strip
       {kPadLeft - 2, kPadTop - 2, kPadW + 4, kPadH + 4},        // arrow keys
-      {kCardX - 2, kCardY - 2, kCardW + 4, cardH() + 4},       // card
+      {2, kInfoY - 2, (s_selected[0] && !infoInLabel()) ? kInfoLW + 4 : 0, kInfoH + 4},  // info
+      {kInfoRX - 2, kInfoY - 2, (s_selected[0] && !infoInLabel()) ? kInfoRW + 4 : 0, kInfoH + 4},
       {ui::kSwitchX - 2, ui::kSwitchY - 2, ui::kSwitchW + 4, ui::kSwitchH + 4},  // HAVA
       {ui::kWaterBtnX - 2, ui::kWaterBtnY - 2, ui::kWaterBtnW + 4, ui::kWaterBtnH + 4},  // SU
   };
@@ -1118,7 +1122,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       float sx, sy;
       if (project(c, s_items[k].x_km, s_items[k].y_km, s_items[k].z, &sx, &sy)) min_y = std::min(min_y, sy);
     }
-    constexpr float kTopLimit = kTopBarH + 18.0f;
+    constexpr float kTopLimit = kTopBarH + kStripH + 14.0f;
     if (min_y < kTopLimit) {
       s_zfit = std::max(0.12f, s_zfit * 0.82f);
     } else if (min_y > kTopLimit + 30.0f && s_zfit < 1.0f) {
@@ -1200,6 +1204,53 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       const LabelPos& lp = s_label_pos[k];
       char alt[12];
       formatAltitude(a.alt_ft, alt, sizeof(alt));
+      if (is_card && s_selected[0] && infoInLabel()) {
+        // "Label" style: the selected aircraft's details in a small black card at its tag.
+        services::route::Route rt;
+        const services::route::Status rs = services::route::get(a.callsign, &rt);
+        char l1[12], l2[32], l3[40];
+        snprintf(l1, sizeof(l1), "%s", a.type);
+        char tr[12] = "";
+        if (a.vrate_fpm > 300) snprintf(tr, sizeof(tr), "  ^%d", a.vrate_fpm);
+        else if (a.vrate_fpm < -300) snprintf(tr, sizeof(tr), "  v%d", -a.vrate_fpm);
+        snprintf(l2, sizeof(l2), "%s  %dkt%s", alt, static_cast<int>(lroundf(a.gs_knots)), tr);
+        const float dk = dist_km[s_items[k].idx];
+        if (rs == services::route::Status::Found) {
+          snprintf(l3, sizeof(l3), "%.1fkm  %s > %s", dk, rt.from_code[0] ? rt.from_code : "?",
+                   rt.to_code[0] ? rt.to_code : "?");
+        } else {
+          snprintf(l3, sizeof(l3), "%.1fkm", dk);
+        }
+        setFont(&ui::font::SansBold8);
+        const int wc = s_spr.textWidth(a.callsign);
+        setFont(&ui::font::Sans8);
+        const int w = std::max({wc + 8 + static_cast<int>(s_spr.textWidth(l1)),
+                                static_cast<int>(s_spr.textWidth(l2)),
+                                static_cast<int>(s_spr.textWidth(l3))}) + 12;
+        constexpr int h = 48;
+        const int off = ri(lp.size * 0.6f) + 6;
+        Box box{lp.x + off, lp.y - 12, w, h};
+        if (!claimLabel(box)) {
+          box.x = lp.x - off - w;
+          claimLabel(box);  // drawn anyway: the selected aircraft always gets its card
+        }
+        box.x = std::max(2, std::min(kW - 2 - w, box.x));
+        box.y = std::max(kTopBarH + 3, std::min(kH - 2 - h, box.y));
+        s_spr.fillRoundRect(box.x, box.y, w, h, 5, kBg);
+        s_spr.drawRoundRect(box.x, box.y, w, h, 5, kRingDim);
+        const uint8_t col = altitudeColor(a.alt_ft);
+        setFont(&ui::font::SansBold8);
+        s_spr.setTextDatum(textdatum_t::top_left);
+        s_spr.setTextColor(col);
+        s_spr.drawString(a.callsign, box.x + 6, box.y + 3);
+        setFont(&ui::font::Sans8);
+        s_spr.setTextColor(kTextDim);
+        s_spr.drawString(l1, box.x + 6 + wc + 8, box.y + 4);
+        s_spr.setTextColor(kText);
+        s_spr.drawString(l2, box.x + 6, box.y + 18);
+        s_spr.drawString(l3, box.x + 6, box.y + 32);
+        continue;
+      }
       const bool two_lines = !busy || is_card;
       setFont(&ui::font::SansBold8);
       int w = s_spr.textWidth(a.callsign);
@@ -1268,18 +1319,23 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   }
 }
 
-void drawLegend() {
+void drawLegendStrip() {
+  const int y0 = kTopBarH + 1;
+  s_spr.fillRect(0, y0, kW, kStripH, kPanel);
+  s_spr.drawFastHLine(0, y0 + kStripH, kW, kRingDim);
   setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::middle_left);
+  s_spr.setTextColor(kText);
   const struct {
     uint8_t col;
     const char* text;
   } rows[3] = {{kCyan, "25K ft +"}, {kCream, "10-25K ft"}, {kOrange, "10K ft altı"}};
-  for (int i = 0; i < 3; ++i) {
-    const int y = kTopBarH + 13 + i * 17;
-    s_spr.fillCircle(12, y, 5, rows[i].col);
-    s_spr.setTextColor(kText);
-    s_spr.drawString(rows[i].text, 23, y + 1);
+  int x = 10;
+  const int yc = y0 + kStripH / 2;
+  for (const auto& r : rows) {
+    s_spr.fillCircle(x + 4, yc, 4, r.col);
+    s_spr.drawString(r.text, x + 13, yc + 1);
+    x += 13 + s_spr.textWidth(r.text) + 22;
   }
 }
 
@@ -1352,143 +1408,75 @@ void drawControls() {
 }
 
 /** Two-line card: callsign + route codes, then altitude / speed / distance / climb. */
-void drawCardCompact(int idx, const float* dist_km) {
+/** "Corners" style: left panel who / where to, right panel the flight values. */
+void drawInfoPanels(int idx, const float* dist_km, const float* bearing_deg) {
+  if (idx < 0) return;
   const auto& a = s_planes[idx];
   const uint8_t col = altitudeColor(a.alt_ft);
-  s_spr.fillRoundRect(kCardX, kCardY, kCardW, kCardHCompact, 6, kPanel);
-  s_spr.drawRoundRect(kCardX, kCardY, kCardW, kCardHCompact, 6, kRingDim);
-  const int x0 = kCardX + 8, x1 = kCardX + kCardW - 8;
+  char buf[48];
 
+  // Left: callsign, type, route codes, cities.
+  int x0 = 4;
+  s_spr.fillRoundRect(x0, kInfoY, kInfoLW, kInfoH, 6, kPanel);
+  s_spr.drawRoundRect(x0, kInfoY, kInfoLW, kInfoH, 6, kRingDim);
   setFont(&ui::font::SansBold9);
   s_spr.setTextDatum(textdatum_t::top_left);
   s_spr.setTextColor(col);
-  s_spr.drawString(a.callsign, x0, kCardY + 4);
-
+  s_spr.drawString(a.callsign, x0 + 8, kInfoY + 4);
   setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::top_right);
+  s_spr.setTextColor(kTextDim);
+  s_spr.drawString(a.type, x0 + kInfoLW - 8, kInfoY + 6);
+  s_spr.setTextDatum(textdatum_t::top_left);
   services::route::Route rt;
   const services::route::Status rs = services::route::get(a.callsign, &rt);
-  char buf[40];
   if (rs == services::route::Status::Found) {
-    snprintf(buf, sizeof(buf), "%s > %s", rt.from_code[0] ? rt.from_code : "?", rt.to_code[0] ? rt.to_code : "?");
+    snprintf(buf, sizeof(buf), "%s > %s", rt.from_code[0] ? rt.from_code : "?",
+             rt.to_code[0] ? rt.to_code : "?");
     s_spr.setTextColor(kText);
+    s_spr.drawString(buf, x0 + 8, kInfoY + 24);
+    if (rt.from_city[0] || rt.to_city[0]) {
+      buf[0] = '\0';
+      for (int cut = 19; cut >= 3; cut -= 2) {
+        // Cut by letters, not bytes: Turkish letters are two bytes in UTF-8.
+        snprintf(buf, sizeof(buf), "%.*s > %.*s", utf8Bytes(rt.from_city, cut), rt.from_city,
+                 utf8Bytes(rt.to_city, cut), rt.to_city);
+        if (static_cast<int>(s_spr.textWidth(buf)) <= kInfoLW - 16) break;
+        buf[0] = '\0';
+      }
+      s_spr.setTextColor(kTextDim);
+      s_spr.drawString(buf, x0 + 8, kInfoY + 41);
+    }
   } else {
-    snprintf(buf, sizeof(buf), "%s", a.type[0] ? a.type : (s_selected[0] ? "" : "en yakin"));
     s_spr.setTextColor(kTextDim);
+    s_spr.drawString(rs == services::route::Status::Pending ? "Rota aranıyor..." : "Rota bilinmiyor",
+                     x0 + 8, kInfoY + 24);
   }
-  s_spr.drawString(buf, x1, kCardY + 6);
 
+  // Right: altitude (+ climb / descent), speed, distance and direction.
+  x0 = kInfoRX;
+  s_spr.fillRoundRect(x0, kInfoY, kInfoRW, kInfoH, 6, kPanel);
+  s_spr.drawRoundRect(x0, kInfoY, kInfoRW, kInfoH, 6, kRingDim);
   char alt[12];
   formatAltitude(a.alt_ft, alt, sizeof(alt));
-  snprintf(buf, sizeof(buf), "%s  %dkt  %.1fkm", alt, static_cast<int>(lroundf(a.gs_knots)), dist_km[idx]);
-  s_spr.setTextDatum(textdatum_t::top_left);
-  s_spr.setTextColor(kText);
-  s_spr.drawString(buf, x0, kCardY + 24);
-  const int used = x0 + s_spr.textWidth(buf);
+  setFont(&ui::font::SansBold9);
+  s_spr.setTextColor(col);
+  s_spr.drawString(alt, x0 + 8, kInfoY + 4);
+  setFont(&ui::font::Sans8);
   char tr[12] = "";
   if (a.vrate_fpm > 300) snprintf(tr, sizeof(tr), "^%d", a.vrate_fpm);
   else if (a.vrate_fpm < -300) snprintf(tr, sizeof(tr), "v%d", -a.vrate_fpm);
-  if (tr[0] && used + 6 + s_spr.textWidth(tr) <= x1) {
+  if (tr[0]) {
     s_spr.setTextDatum(textdatum_t::top_right);
     s_spr.setTextColor(a.vrate_fpm > 0 ? kCyan : kOrange);
-    s_spr.drawString(tr, x1, kCardY + 24);
+    s_spr.drawString(tr, x0 + kInfoRW - 8, kInfoY + 6);
+    s_spr.setTextDatum(textdatum_t::top_left);
   }
-}
-
-void drawCard(int idx, const float* dist_km, const float* bearing_deg) {
-  if (idx < 0) return;
-  if (!s_card_expanded) {
-    drawCardCompact(idx, dist_km);
-    return;
-  }
-  const auto& a = s_planes[idx];
-  const uint8_t col = altitudeColor(a.alt_ft);
-  s_spr.fillRoundRect(kCardX, kCardY, kCardW, kCardHFull, 6, kPanel);
-  s_spr.drawRoundRect(kCardX, kCardY, kCardW, kCardHFull, 6, kRingDim);
-
-  const int x0 = kCardX + 9;
-  int y = kCardY + 6;
-  setFont(&ui::font::SansBold9);
-  s_spr.setTextDatum(textdatum_t::top_left);
-  s_spr.setTextColor(col);
-  s_spr.drawString(a.callsign, x0, y);
-  setFont(&ui::font::Sans8);
-  s_spr.setTextDatum(textdatum_t::top_right);
-  s_spr.setTextColor(kTextDim);
-  // Tapped aircraft: its type here. Otherwise the card follows the nearest one
-  // and says so (the type moves to the direction line below).
-  s_spr.drawString(s_selected[0] ? a.type : "EN YAKIN", kCardX + kCardW - 9, y + 2);
-
-  // Route (from adsbdb, by callsign): "IST > ESB  Istanbul > Ankara"
-  y += 22;
-  s_spr.setTextDatum(textdatum_t::top_left);
-  services::route::Route rt;
-  const services::route::Status rs = services::route::get(a.callsign, &rt);
-  const int avail = kCardW - 18;
-  if (rs == services::route::Status::Found) {
-    char codes[16];
-    snprintf(codes, sizeof(codes), "%s > %s", rt.from_code[0] ? rt.from_code : "?",
-             rt.to_code[0] ? rt.to_code : "?");
-    s_spr.setTextColor(kText);
-    s_spr.drawString(codes, x0, y);
-    int cx = x0 + s_spr.textWidth(codes) + 8;
-    char cities[48];
-    for (int cut = 19; cut >= 4; cut -= 3) {
-      // Cut by letters, not bytes: Turkish letters are two bytes in UTF-8.
-      snprintf(cities, sizeof(cities), "%.*s > %.*s", utf8Bytes(rt.from_city, cut), rt.from_city,
-               utf8Bytes(rt.to_city, cut), rt.to_city);
-      if (cx + s_spr.textWidth(cities) <= x0 + avail) break;
-      cities[0] = '\0';
-    }
-    if (cities[0] && (rt.from_city[0] || rt.to_city[0])) {
-      s_spr.setTextColor(kTextDim);
-      s_spr.drawString(cities, cx, y);
-    }
-  } else {
-    s_spr.setTextColor(kTextDim);
-    s_spr.drawString(rs == services::route::Status::Pending ? "Rota aranıyor..." : "Rota bilinmiyor", x0, y);
-  }
-
-  y += 17;
-  char buf[32];
-  char alt[12];
-  formatAltitude(a.alt_ft, alt, sizeof(alt));
-  s_spr.setTextDatum(textdatum_t::top_left);
-  const int col2 = x0 + 100;
-  auto field = [&](int x, int yy, const char* key, const char* val) {
-    s_spr.setTextColor(kTextDim);
-    s_spr.drawString(key, x, yy);
-    s_spr.setTextColor(kText);
-    s_spr.drawString(val, x + s_spr.textWidth(key) + 5, yy);
-  };
-  field(x0, y, "İRT", alt);
+  s_spr.setTextColor(kText);
   snprintf(buf, sizeof(buf), "%d kt", static_cast<int>(lroundf(a.gs_knots)));
-  field(col2, y, "HIZ", buf);
-  y += 17;
-  snprintf(buf, sizeof(buf), "%.1f km", dist_km[idx]);
-  field(x0, y, "MSF", buf);
-  snprintf(buf, sizeof(buf), "%03d", static_cast<int>(lroundf(a.track_deg)) % 360);
-  field(col2, y, "RTA", buf);
-  y += 17;
-  if (s_selected[0] == '\0' && a.type[0]) {
-    snprintf(buf, sizeof(buf), "%s  -  %s yönünde", a.type, compass8(bearing_deg[idx]));
-  } else {
-    snprintf(buf, sizeof(buf), "%s yönünde", compass8(bearing_deg[idx]));
-  }
-  s_spr.setTextColor(kTextDim);
-  s_spr.drawString(buf, x0, y);
-  y += 17;
-  if (a.vrate_fpm > 300) {
-    snprintf(buf, sizeof(buf), "^ tırmanıyor  +%d fpm", a.vrate_fpm);
-    s_spr.setTextColor(kCyan);
-  } else if (a.vrate_fpm < -300) {
-    snprintf(buf, sizeof(buf), "v alçalıyor  %d fpm", a.vrate_fpm);
-    s_spr.setTextColor(kOrange);
-  } else {
-    snprintf(buf, sizeof(buf), "- seyir irtifasında");
-    s_spr.setTextColor(kTextDim);
-  }
-  s_spr.drawString(buf, x0, y);
+  s_spr.drawString(buf, x0 + 8, kInfoY + 24);
+  snprintf(buf, sizeof(buf), "%.1f km  %s", dist_km[idx], compass8(bearing_deg[idx]));
+  s_spr.drawString(buf, x0 + 8, kInfoY + 41);
 }
 
 void drawEmptyNote(unsigned long fetched_ms) {
@@ -1496,13 +1484,13 @@ void drawEmptyNote(unsigned long fetched_ms) {
   s_spr.setTextDatum(textdatum_t::middle_center);
   s_spr.setTextColor(kTextDim);
   s_spr.drawString(fetched_ms == 0 ? "Uçak verisi bekleniyor..." : "Menzilde uçak yok", kW / 2,
-                   kTopBarH + 26);
+                   kTopBarH + kStripH + 24);
   const char* err = services::adsb::lastError();
   if (fetched_ms == 0 && err[0] != '\0' && !services::usb_feed::active()) {
     char line[64];
     snprintf(line, sizeof(line), "Son deneme: %s", err);
     setFont(&ui::font::Sans8);
-    s_spr.drawString(line, kW / 2, kTopBarH + 46);
+    s_spr.drawString(line, kW / 2, kTopBarH + kStripH + 44);
   }
 }
 
@@ -1591,10 +1579,13 @@ void drawFrame() {
     if (dist_km[i] <= c.R) ++in_range;
   }
   drawTopBar(in_range, fetched_ms);
-  drawLegend();
   if (in_range == 0) drawEmptyNote(fetched_ms);
   drawControls();
-  if (in_range > 0) drawCard(card_idx, dist_km, bearing);
+  if (s_selected[0] == '\0') {
+    drawLegendStrip();  // nothing selected: legend strip, no card
+  } else if (!infoInLabel()) {
+    drawInfoPanels(card_idx, dist_km, bearing);
+  }
 
 #ifdef RADAR3D_HOST_TEST
   extern void hostCaptureFrame(LGFX_Sprite & spr);  // desktop preview harness
@@ -1675,12 +1666,10 @@ bool handleTap(int x, int y) {
     s_follow = true;
     return true;
   }
-  const bool on_card = x >= kCardX && y >= kCardY && y < kCardY + cardH();
-  if (on_card) {
-    s_card_expanded = !s_card_expanded;
-    return true;
-  }
-  if (!on_card && s_selected[0] != '\0') {
+  const bool on_info = s_selected[0] != '\0' && !infoInLabel() && y >= kInfoY &&
+                       y < kInfoY + kInfoH && (x < 4 + kInfoLW || x >= kInfoRX);
+  if (on_info) return true;  // the panels themselves do nothing
+  if (s_selected[0] != '\0') {
     s_selected[0] = '\0';  // tap on empty sky: back to "nearest"
     return true;
   }

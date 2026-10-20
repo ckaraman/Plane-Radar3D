@@ -30,6 +30,7 @@ void init() {
   s_prefs.pitch_deg = p.getUChar("pitch", 22);
   if (s_prefs.pitch_deg < 10 || s_prefs.pitch_deg > 62) s_prefs.pitch_deg = 22;
   s_prefs.high_contrast = p.getBool("hicon", true);
+  s_prefs.info_style = p.getUChar("info", 0) == 1 ? 1 : 0;
   if (s_prefs.brightness < 20) s_prefs.brightness = 20;
   p.end();
 }
@@ -51,6 +52,7 @@ void save(const Prefs& np) {
   p.putUChar("bright", np.brightness);
   p.putUChar("pitch", np.pitch_deg);
   p.putBool("hicon", np.high_contrast);
+  p.putUChar("info", np.info_style);
   p.end();
 }
 

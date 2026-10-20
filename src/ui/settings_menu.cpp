@@ -39,6 +39,7 @@ enum Item {
   kRange,
   kBrightness,
   kContrast,
+  kInfo,
   kItemCount
 };
 
@@ -81,6 +82,10 @@ void itemText(int item, char* title, char* value, size_t n) {
     case kContrast:
       snprintf(title, n, "Renkler");
       snprintf(value, n, p.high_contrast ? "Yüksek kontrast" : "Normal");
+      break;
+    case kInfo:
+      snprintf(title, n, "Uçak bilgisi");
+      snprintf(value, n, p.info_style == 1 ? "Etikette" : "Köşelerde");
       break;
     case kBrightness:
       snprintf(title, n, "Parlaklık");
@@ -229,6 +234,9 @@ void settingsMenuRun() {
         break;
       case kContrast:
         p.high_contrast = !p.high_contrast;
+        break;
+      case kInfo:
+        p.info_style = p.info_style == 1 ? 0 : 1;
         break;
       case kBrightness:
         p.brightness = p.brightness >= 250 ? 60 : static_cast<uint8_t>(std::min(255, p.brightness + 65));
