@@ -109,6 +109,9 @@ float s_yaw_cur = 20.0f;  // animated camera heading
 // would rise above the top of the view, and relaxes back when there is room.
 float s_zfit = 1.0f;
 float s_yaw_target = 20.0f;
+// While an aircraft the user tapped is selected, the camera turns to keep it on the
+// screen's centre line (behind home). Deselecting returns to the saved heading.
+bool s_follow = false;
 char s_selected[9] = "";  // callsign of the tapped aircraft ("" = nearest)
 
 struct Cam {
@@ -1537,15 +1540,41 @@ bool init() {
   return true;
 }
 
+/** Turn the camera towards the selected aircraft (see s_follow). */
+void followSelected(size_t count, unsigned long fetched_ms) {
+  if (!s_follow) return;
+  if (s_selected[0] == '\0') {  // deselected, or it left the area
+    s_follow = false;
+    s_yaw_target = static_cast<float>(services::display_prefs::get().yaw_deg);
+    return;
+  }
+  const float R = ui::radar::rangeCurrent().outer_km;
+  for (size_t i = 0; i < count; ++i) {
+    if (strcmp(s_planes[i].callsign, s_selected) != 0) continue;
+    float x, y;
+    currentPositionKm(s_planes[i], fetched_ms, &x, &y);
+    // Right over home the bearing is meaningless: leave the view as it is.
+    if (x * x + y * y < (0.12f * R) * (0.12f * R)) return;
+    float b = atan2f(x, y) / kDegToRad;  // yaw = bearing puts it straight ahead
+    if (b < 0) b += 360.0f;
+    // Move in steps of a few degrees, so the cached ground is not rebuilt every frame
+    // while the aircraft creeps across the sky.
+    const float diff = fmodf(b - s_yaw_target + 540.0f, 360.0f) - 180.0f;
+    if (fabsf(diff) >= 2.0f) s_yaw_target = b;
+    return;
+  }
+}
+
 void drawFrame() {
   if (!s_ready) return;
   applyPalette();
-  animateYaw();
-  const Cam c = makeCam();
-
   unsigned long fetched_ms = 0;
   const size_t count =
       services::adsb::snapshotAircraft(s_planes, services::adsb::kMaxAircraft, &fetched_ms);
+  followSelected(count, fetched_ms);
+  animateYaw();
+  const Cam c = makeCam();
+
   static float dist_km[services::adsb::kMaxAircraft];
   static float bearing[services::adsb::kMaxAircraft];
 
@@ -1612,6 +1641,7 @@ bool handleTap(int x, int y) {
       auto p = services::display_prefs::get();
       if (i == 0 || i == 1) {
         // Right arrow turns the view to the right (the map swings left), left to the left.
+        s_follow = false;  // turning by hand ends following the selected aircraft
         s_yaw_target += i == 0 ? kYawStepDeg : -kYawStepDeg;
         s_yaw_target = fmodf(s_yaw_target + 360.0f, 360.0f);
         p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_target)) % 360;
@@ -1640,6 +1670,7 @@ bool handleTap(int x, int y) {
   }
   if (best >= 0) {
     memcpy(s_selected, s_hits[best].callsign, sizeof(s_selected));
+    s_follow = true;
     return true;
   }
   const bool on_card = x >= kCardX && y >= kCardY && y < kCardY + cardH();
