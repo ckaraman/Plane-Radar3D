@@ -1453,30 +1453,39 @@ void drawInfoPanels(int idx, const float* dist_km, const float* bearing_deg) {
                      x0 + 8, kInfoY + 24);
   }
 
-  // Right: altitude (+ climb / descent), speed, distance and direction.
+  // Right: the flight values, each with its name ("Hız: 233 kt"). No distance to home.
   x0 = kInfoRX;
   s_spr.fillRoundRect(x0, kInfoY, kInfoRW, kInfoH, 6, kPanel);
   s_spr.drawRoundRect(x0, kInfoY, kInfoRW, kInfoH, 6, kRingDim);
   char alt[12];
   formatAltitude(a.alt_ft, alt, sizeof(alt));
-  setFont(&ui::font::SansBold9);
-  s_spr.setTextColor(col);
-  s_spr.drawString(alt, x0 + 8, kInfoY + 4);
-  setFont(&ui::font::Sans8);
-  char tr[12] = "";
-  if (a.vrate_fpm > 300) snprintf(tr, sizeof(tr), "^%d", a.vrate_fpm);
-  else if (a.vrate_fpm < -300) snprintf(tr, sizeof(tr), "v%d", -a.vrate_fpm);
-  if (tr[0]) {
-    s_spr.setTextDatum(textdatum_t::top_right);
-    s_spr.setTextColor(a.vrate_fpm > 0 ? kCyan : kOrange);
-    s_spr.drawString(tr, x0 + kInfoRW - 8, kInfoY + 6);
-    s_spr.setTextDatum(textdatum_t::top_left);
+  char spd[16];
+  snprintf(spd, sizeof(spd), "%d kt", static_cast<int>(lroundf(a.gs_knots)));
+  char vs[20];
+  uint8_t vs_col = kText;
+  if (a.vrate_fpm > 300) {
+    snprintf(vs, sizeof(vs), "+%d fpm", a.vrate_fpm);
+    vs_col = kCyan;
+  } else if (a.vrate_fpm < -300) {
+    snprintf(vs, sizeof(vs), "%d fpm", a.vrate_fpm);
+    vs_col = kOrange;
+  } else {
+    snprintf(vs, sizeof(vs), "seyirde");
   }
-  s_spr.setTextColor(kText);
-  snprintf(buf, sizeof(buf), "%d kt", static_cast<int>(lroundf(a.gs_knots)));
-  s_spr.drawString(buf, x0 + 8, kInfoY + 24);
-  snprintf(buf, sizeof(buf), "%.1f km  %s", dist_km[idx], compass8(bearing_deg[idx]));
-  s_spr.drawString(buf, x0 + 8, kInfoY + 41);
+  const struct {
+    const char* name;
+    const char* value;
+    uint8_t col;
+  } rows[3] = {{"Yükseklik:", alt, col}, {"Hız:", spd, kText}, {"Dikey:", vs, vs_col}};
+  setFont(&ui::font::Sans8);
+  s_spr.setTextDatum(textdatum_t::top_left);
+  for (int r = 0; r < 3; ++r) {
+    const int y = kInfoY + 6 + r * 18;
+    s_spr.setTextColor(kTextDim);
+    s_spr.drawString(rows[r].name, x0 + 8, y);
+    s_spr.setTextColor(rows[r].col);
+    s_spr.drawString(rows[r].value, x0 + 8 + s_spr.textWidth(rows[r].name) + 5, y);
+  }
 }
 
 void drawEmptyNote(unsigned long fetched_ms) {
