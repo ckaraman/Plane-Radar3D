@@ -18,7 +18,7 @@ Aynı yazılımın 5" sürümü (`ws5` derlemesi). Ekran, dokunmatik (GT911) ve 
 - Kapasitif ekran: kalibrasyon, renk ters çevirme ve kırmızı/mavi seçenekleri bu kartta yok. Arka ışık CH422G üzerinden yalnızca açık/kapalı.
 - Kartta BOOT tuşu kısayolu yok (GPIO0 ekran veri hattı).
 - Kartın iki ekran sürümü var: **ESP32-S3-Touch-LCD-5** (800×480, `ws5`) ve **ESP32-S3-Touch-LCD-5B** (1024×600, `ws5b`). Yanlış sürüm yüklenirse görüntü karışık yatay çizgiler halinde gelir; kurulum sayfasının Gelişmiş bölümünde 5B için ayrı tam kurulum düğmesi var.
-- Bu kart Arduino çekirdeği 3.x (pioarduino, ESP-IDF 5) ile derlenir: ekran sürücüsü "bounce buffer" kullanır, böylece işlemci PSRAM'de çalışırken görüntü kaymaz/kaybolmaz (4" kart 2.0.14'te kalır). Yerelde ayrı çekirdek klasörü kullanın: `PLATFORMIO_CORE_DIR=~/.pio-ws5 pio run -e ws5` (esptool 5 için `click<8.2`).
+- Bu kart Arduino çekirdeği 3.x (pioarduino 55.03.30, ESP-IDF 5.5) ile derlenir. Ekran sürücüsü "bounce buffer" kullanır ve Arduino kütüphaneleri RGB ekran için önerilen ayarlarla (64 bayt önbellek satırı, kod PSRAM'den çalışır, Wi-Fi tamponları iç bellekte; `custom_sdkconfig`) yeniden derlenir. Derleme: PlatformIO 6.1.18 + `click<8.2` + `uv`, her ortam (ws5 / ws5b) ayrı `PLATFORMIO_CORE_DIR` ile (bkz. main dalındaki iş akışı).
 - Panel zamanlaması: 800×480 için Waveshare'in kendi değerleri (16 MHz), 1024×600 için LovyanGFX ile bu kartta çalıştığı bilinen değerler (14 MHz). Ayar: `include/hardware/lgfx_config.hpp`.
 
 ## Malzeme
