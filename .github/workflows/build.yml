@@ -1,180 +1,21 @@
-# Builds the firmware on every push. On main it also publishes the setup / update
-# page (web/) together with the fresh firmware and the USB bridge to GitHub Pages.
+# 5" branch: the firmware and the setup page are built and published by the workflow
+# on main (it builds both branches into one site). A push here just starts that run.
 name: Build
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
+    branches: [ws5]
   workflow_dispatch:
 
-concurrency:
-  group: build-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
+  actions: write
   contents: read
 
 jobs:
-  firmware:
+  start-main-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cache PlatformIO
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            ~/.platformio/.cache
-            .pio/libdeps
-            .pio-core-s3
-          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-pio-
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install PlatformIO
-        run: pip install --upgrade platformio
-
-      - name: Write setup page address (shown on the device screen)
-        run: |
-          OWNER=$(echo "${GITHUB_REPOSITORY%%/*}" | tr 'A-Z' 'a-z')
-          REPO="${GITHUB_REPOSITORY#*/}"
-          printf '#pragma once\n#define SETUP_PAGE_URL "%s.github.io/%s"\n' "$OWNER" "$REPO" > include/setup_url.h
-          cat include/setup_url.h
-
-      - name: Build (4" ESP32 board)
-        run: pio run -e wroom32u
-
-      - name: Merge web-flash image (4")
-        run: pio run -e wroom32u -t merge
-
-      # The 5" boards build on Arduino core 3 (pioarduino platform; its RGB LCD driver has
-      # bounce buffers). Separate PlatformIO core dir so its packages do not replace the
-      # core 2.0.14 ones the 4" build uses; click < 8.2 for its esptool 5.0.0.
-      - name: Set up PlatformIO for the 5" boards
-        run: |
-          python -m venv "$HOME/pio-s3"
-          "$HOME/pio-s3/bin/pip" install --upgrade platformio "click<8.2"
-
-      - name: Build + merge (Waveshare ESP32-S3-Touch-LCD-5, 800x480)
+      - name: Run the main build (4" + 5" firmware, setup page)
         env:
-          PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio-core-s3
-        run: '"$HOME/pio-s3/bin/pio" run -e ws5 -t merge'
-
-      - name: Build + merge (Waveshare ESP32-S3-Touch-LCD-5B, 1024x600)
-        env:
-          PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio-core-s3
-        run: '"$HOME/pio-s3/bin/pio" run -e ws5b -t merge'
-
-      - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: plane-radar-3d-wroom32u
-          if-no-files-found: error
-          path: |
-            .pio/build/wroom32u/firmware-merged.bin
-            .pio/build/wroom32u/firmware.bin
-            .pio/build/wroom32u/bootloader.bin
-            .pio/build/wroom32u/partitions.bin
-            .pio/build/ws5/firmware-merged.bin
-            .pio/build/ws5/firmware.bin
-            .pio/build/ws5/bootloader.bin
-            .pio/build/ws5/partitions.bin
-            .pio/build/ws5b/firmware-merged.bin
-            .pio/build/ws5b/firmware.bin
-
-      - name: Assemble web site
-        run: |
-          VERSION=$(sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' include/config.h | head -n 1)
-          test -n "$VERSION"
-          mkdir -p site
-          cp web/index.html web/tz.json web/tz-LICENSE.txt site/
-          cp .pio/build/wroom32u/firmware.bin site/firmware.bin
-          cp .pio/build/wroom32u/firmware-merged.bin site/firmware-merged.bin
-          cp .pio/build/wroom32u/bootloader.bin site/bootloader.bin
-          cp .pio/build/wroom32u/partitions.bin site/partitions.bin
-          cp .pio/build/ws5/firmware.bin site/firmware-ws5.bin
-          cp .pio/build/ws5/firmware-merged.bin site/firmware-merged-ws5.bin
-          cp .pio/build/ws5/bootloader.bin site/bootloader-ws5.bin
-          cp .pio/build/ws5/partitions.bin site/partitions-ws5.bin
-          cp .pio/build/ws5b/firmware.bin site/firmware-ws5b.bin
-          cp .pio/build/ws5b/firmware-merged.bin site/firmware-merged-ws5b.bin
-          (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
-          chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
-          (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
-          python3 - "$VERSION" <<'PY'
-          import json, sys
-          version = sys.argv[1]
-
-          # One entry per board; the installer picks the one matching the connected chip
-          # (ESP32 = 4" board, ESP32-S3 = Waveshare 5" board).
-          def manifest(name, parts, parts_s3):
-              return {
-                  "name": name,
-                  "version": version,
-                  "new_install_prompt_erase": True,
-                  "builds": [{"chipFamily": "ESP32", "parts": parts},
-                             {"chipFamily": "ESP32-S3", "parts": parts_s3}],
-              }
-
-          def write(path, data):
-              with open(path, "w", encoding="utf-8") as f:
-                  json.dump(data, f, indent=2)
-
-          # Update: bootloader + partition table + application; settings (NVS at 0x9000) stay.
-          # The classic ESP32 boots from 0x1000 (C3/S3 from 0x0).
-          write("site/manifest-update.json",
-                manifest("Plane Radar 3D update", [
-                    {"path": "bootloader.bin", "offset": 4096},
-                    {"path": "partitions.bin", "offset": 32768},
-                    {"path": "firmware.bin", "offset": 65536},
-                ], [
-                    {"path": "bootloader-ws5.bin", "offset": 0},
-                    {"path": "partitions-ws5.bin", "offset": 32768},
-                    {"path": "firmware-ws5.bin", "offset": 65536},
-                ]))
-          # Full install: one merged image at 0x0. Wipes settings.
-          write("site/manifest-full.json",
-                manifest("Plane Radar 3D full install",
-                         [{"path": "firmware-merged.bin", "offset": 0}],
-                         [{"path": "firmware-merged-ws5.bin", "offset": 0}]))
-          # 1024x600 "5B" board: same chip family as the 800x480 one, so its own manifest.
-          write("site/manifest-full-ws5b.json", {
-              "name": "Plane Radar 3D full install (5B 1024x600)",
-              "version": version,
-              "new_install_prompt_erase": True,
-              "builds": [{"chipFamily": "ESP32-S3",
-                          "parts": [{"path": "firmware-merged-ws5b.bin", "offset": 0}]}],
-          })
-          write("site/version.json", {"version": version})
-          PY
-          ls -l site
-
-      - name: Upload site for GitHub Pages
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy:
-    # Needs: repository Settings -> Pages -> Source = "GitHub Actions".
-    if: github.event_name != 'pull_request'
-    needs: firmware
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build.yml --repo "$GITHUB_REPOSITORY" --ref main

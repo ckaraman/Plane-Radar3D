@@ -1,5 +1,8 @@
 # Plane Radar 3D
 
+> **Bu dal (`ws5`) 5" Waveshare ESP32-S3-Touch-LCD-5 sürümüdür.** 4" ESP32-WROOM sürümü `main` dalında. Kurulum sayfası (`web/`) ve yayın `main` dalından yapılır; bu dala gönderim, `main`'deki derlemeyi başlatır ve iki modelin yazılımı birlikte yayınlanır.
+
+
 Bu proje **ESP32-WROOM-32U**, **4.0" ST7796S dokunmatik SPI ekran** (480×320, XPT2046) ve **SHT30** sensörüyle çalışan perspektif (3D) uçuş radarıdır. Uçuş verisi [adsb.fi](https://opendata.adsb.fi/) üzerinden alınır.
 
 Yazılım, yuvarlak ekranlı `plane-radar-clock` projesindeki servisleri kullanır: USB kurulum sayfası, adsb.fi istemcisi, saat, hava durumu ve harita katmanı. Değişen kısım ekran tarafıdır.
