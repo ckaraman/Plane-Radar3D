@@ -8,6 +8,9 @@
 
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_rgb.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 
 /**
  * RGB panel bus for LovyanGFX's Panel_RGB that uses ESP-IDF 5's esp_lcd RGB driver
@@ -20,6 +23,10 @@
  * buffer, which is what Waveshare's own demos for this board do.
  *
  * Takes the same config as lgfx::Bus_RGB, so the board setup code stays the same.
+ *
+ * Two frame buffers: full-screen frames are drawn into the hidden one and shown at the
+ * next frame boundary (present()), so a moving picture never shows half old, half new
+ * (tearing). Direct drawing always goes to the visible buffer.
  */
 class Bus_RGB_Bounce : public lgfx::IBus {
  public:
@@ -55,7 +62,7 @@ class Bus_RGB_Bounce : public lgfx::IBus {
     pc.timings.flags.pclk_idle_high = _cfg.pclk_idle_high;
     pc.data_width = 16;
     pc.bits_per_pixel = 16;
-    pc.num_fbs = 1;
+    pc.num_fbs = 2;
     pc.bounce_buffer_size_px = static_cast<size_t>(w) * kBounceLines;
     pc.dma_burst_size = 64;
     pc.hsync_gpio_num = _cfg.pin_hsync;
@@ -67,18 +74,48 @@ class Bus_RGB_Bounce : public lgfx::IBus {
                              _cfg.pin_d4,  _cfg.pin_d5,  _cfg.pin_d6,  _cfg.pin_d7,
                              _cfg.pin_d8,  _cfg.pin_d9,  _cfg.pin_d10, _cfg.pin_d11,
                              _cfg.pin_d12, _cfg.pin_d13, _cfg.pin_d14, _cfg.pin_d15};
-    for (int i = 0; i < 16; ++i) pc.data_gpio_nums[i] = pins[i];
+    // LovyanGFX keeps RGB565 pixels byte-swapped in memory and its Bus_RGB routes pin i
+    // to LCD data signal i ^ 8 to undo that. Do the same here, or colours come out wrong.
+    for (int i = 0; i < 16; ++i) pc.data_gpio_nums[i ^ 8] = pins[i];
     pc.flags.fb_in_psram = 1;
 
     if (esp_lcd_new_rgb_panel(&pc, &_handle) != ESP_OK) return false;
     esp_lcd_panel_reset(_handle);
     esp_lcd_panel_init(_handle);
-    void* fb = nullptr;
-    if (esp_lcd_rgb_panel_get_frame_buffer(_handle, 1, &fb) != ESP_OK || fb == nullptr) {
+    void* fb0 = nullptr;
+    void* fb1 = nullptr;
+    if (esp_lcd_rgb_panel_get_frame_buffer(_handle, 2, &fb0, &fb1) != ESP_OK || fb0 == nullptr ||
+        fb1 == nullptr) {
       return false;
     }
-    _fb = static_cast<uint8_t*>(fb);
+    _fbs[0] = static_cast<uint8_t*>(fb0);
+    _fbs[1] = static_cast<uint8_t*>(fb1);
+    _fb = _fbs[0];
+    _fb_bytes = static_cast<size_t>(w) * h * 2;
+    memset(_fbs[1], 0, _fb_bytes);
+    _swapped = xSemaphoreCreateBinary();
+    esp_lcd_rgb_panel_event_callbacks_t cbs = {};
+    cbs.on_frame_buf_complete = onFrameDone;
+    esp_lcd_rgb_panel_register_event_callbacks(_handle, &cbs, this);
     return true;
+  }
+
+  /** The buffer not on screen. */
+  uint8_t* hidden() const { return _fb == _fbs[0] ? _fbs[1] : _fbs[0]; }
+  uint8_t* visible() const { return _fb; }
+  /**
+   * Show the hidden buffer from the next frame on. Returns once the panel has
+   * switched to it, so the old one can be drawn into.
+   */
+  void present() {
+    uint8_t* next = hidden();
+    xSemaphoreTake(_swapped, 0);  // drop a stale signal
+    esp_lcd_panel_draw_bitmap(_handle, 0, 0, _cfg.panel->config().panel_width,
+                              _cfg.panel->config().panel_height, next);
+    _fb = next;
+    // The driver switches buffers when it starts reading a new frame, right where it
+    // reports the previous frame as complete.
+    xSemaphoreTake(_swapped, pdMS_TO_TICKS(100));
   }
   void release() override {}
 
@@ -103,9 +140,30 @@ class Bus_RGB_Bounce : public lgfx::IBus {
   void readPixels(void*, lgfx::pixelcopy_t*, uint32_t) override {}
 
  private:
+  static bool IRAM_ATTR onFrameDone(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*,
+                                    void* ctx) {
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(static_cast<Bus_RGB_Bounce*>(ctx)->_swapped, &woken);
+    return woken == pdTRUE;
+  }
+
   config_t _cfg;
   esp_lcd_panel_handle_t _handle = nullptr;
   uint8_t* _fb = nullptr;
+  uint8_t* _fbs[2] = {nullptr, nullptr};
+  size_t _fb_bytes = 0;
+  SemaphoreHandle_t _swapped = nullptr;
+};
+
+/** Panel_RGB whose drawing target can be moved between the two frame buffers. */
+class Panel_RGB_DB : public lgfx::Panel_RGB {
+ public:
+  void setTarget(uint8_t* fb) {
+    if (_lines_buffer == nullptr || fb == nullptr) return;
+    const int w = (_cfg.panel_width + 3) & ~3;
+    const size_t stride = static_cast<size_t>(w) * 2;
+    for (int i = 0; i < _cfg.panel_height; ++i) _lines_buffer[i] = fb + stride * i;
+  }
 };
 
 #endif  // BOARD_WS5

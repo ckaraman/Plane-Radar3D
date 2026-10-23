@@ -31,11 +31,19 @@ class Light_CH422G : public lgfx::ILight {
  */
 class LGFX : public lgfx::LGFX_Device {
   Bus_RGB_Bounce _bus;  // esp_lcd with bounce buffers (see bus_rgb_bounce.hpp)
-  lgfx::Panel_RGB _panel;
+  Panel_RGB_DB _panel;
   lgfx::Touch_GT911 _touch;
   Light_CH422G _light;
 
  public:
+  /** Full-screen frame: draw into the hidden buffer between these two calls. */
+  void beginHiddenFrame() { _panel.setTarget(_bus.hidden()); }
+  /** Show it at the next refresh; afterwards drawing goes to the visible buffer. */
+  void presentHiddenFrame() {
+    _bus.present();
+    _panel.setTarget(_bus.visible());
+  }
+
   LGFX() {
     {
       auto cfg = _panel.config();
