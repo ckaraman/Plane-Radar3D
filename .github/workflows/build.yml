@@ -75,9 +75,13 @@ jobs:
         working-directory: ws5
         run: |
           export PATH="$HOME/pio-s3/bin:$PATH"
+          # The library rebuild wipes .pio/build, so each env's images are copied out at once.
           PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio run -e ws5 -t merge
+          mkdir -p ../out/ws5 ../out/ws5b
+          cp .pio/build/ws5/*.bin ../out/ws5/
           PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5b" pio run -e ws5b -t merge
-          echo "::notice title=ws5 files::$(ls -1 .pio/build/ws5/*.bin .pio/build/ws5b/*.bin .pio/build/ws5/bootloader/*.bin 2>&1 | tr '\n' ' ')"
+          cp .pio/build/ws5b/*.bin ../out/ws5b/
+          ls -l ../out/ws5 ../out/ws5b
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -87,10 +91,10 @@ jobs:
           path: |
             .pio/build/wroom32u/firmware-merged.bin
             .pio/build/wroom32u/firmware.bin
-            ws5/.pio/build/ws5/firmware-merged.bin
-            ws5/.pio/build/ws5/firmware.bin
-            ws5/.pio/build/ws5b/firmware-merged.bin
-            ws5/.pio/build/ws5b/firmware.bin
+            out/ws5/firmware-merged.bin
+            out/ws5/firmware.bin
+            out/ws5b/firmware-merged.bin
+            out/ws5b/firmware.bin
 
       - name: Assemble web site
         run: |
@@ -104,13 +108,13 @@ jobs:
           cp web/index.html web/tz.json web/tz-LICENSE.txt site/
           B=.pio/build/wroom32u
           cp $B/firmware.bin $B/firmware-merged.bin $B/bootloader.bin $B/partitions.bin site/
-          W=ws5/.pio/build/ws5
+          W=out/ws5
           cp $W/firmware.bin site/firmware-ws5.bin
           cp $W/firmware-merged.bin site/firmware-merged-ws5.bin
           cp $W/bootloader.bin site/bootloader-ws5.bin
           cp $W/partitions.bin site/partitions-ws5.bin
-          cp ws5/.pio/build/ws5b/firmware.bin site/firmware-ws5b.bin
-          cp ws5/.pio/build/ws5b/firmware-merged.bin site/firmware-merged-ws5b.bin
+          cp out/ws5b/firmware.bin site/firmware-ws5b.bin
+          cp out/ws5b/firmware-merged.bin site/firmware-merged-ws5b.bin
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
