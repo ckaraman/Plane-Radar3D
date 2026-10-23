@@ -77,6 +77,7 @@ jobs:
           export PATH="$HOME/pio-s3/bin:$PATH"
           PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio run -e ws5 -t merge
           PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5b" pio run -e ws5b -t merge
+          echo "::notice title=ws5 files::$(ls -1 .pio/build/ws5/*.bin .pio/build/ws5b/*.bin .pio/build/ws5/bootloader/*.bin 2>&1 | tr '\n' ' ')"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -93,6 +94,8 @@ jobs:
 
       - name: Assemble web site
         run: |
+          set -x
+          trap 'echo "::error title=assemble::failed at line $LINENO: $BASH_COMMAND"' ERR
           ver() { sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' "$1" | head -n 1; }
           VERSION=$(ver include/config.h)
           VERSION_WS5=$(ver ws5/include/config.h)
