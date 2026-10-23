@@ -10,6 +10,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "hardware/frame_push.h"
 #include "hardware/display.h"
 #include "services/adsb_client.h"
 #include "services/clock_service.h"
@@ -1612,7 +1613,7 @@ void drawFrame() {
   extern void hostCaptureFrame(LGFX_Sprite & spr);  // desktop preview harness
   hostCaptureFrame(s_spr);
 #else
-  s_spr.pushSprite(0, 0);
+  pushFrame(s_spr);
 #endif
 }
 

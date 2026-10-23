@@ -9,6 +9,7 @@
 #include <ctime>
 
 #include "config.h"
+#include "hardware/frame_push.h"
 #include "hardware/display.h"
 #include "services/clock_service.h"
 #include "services/display_prefs.h"
@@ -177,7 +178,7 @@ void push() {
 #ifdef RADAR3D_HOST_TEST
   ui::radar3d::hostCaptureFrame(*s_spr->raw());
 #else
-  s_spr->pushSprite(0, 0);
+  pushFrame(*s_spr->raw());
 #endif
 }
 

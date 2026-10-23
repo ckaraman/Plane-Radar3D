@@ -94,9 +94,10 @@ class LGFX : public lgfx::LGFX_Device {
       // 800x480 panel: porches from Waveshare's own values for ESP32-S3-Touch-LCD-5
       // (ESP32_Display_Panel, BOARD_WAVESHARE_ESP32_S3_TOUCH_LCD_5). Their 16 MHz relies
       // on bounce buffers that LovyanGFX does not have: the panel reads the frame buffer
-      // straight from PSRAM, and at 16 MHz the picture dropped out while the CPU was busy
-      // with PSRAM too. 12 MHz (~29 Hz refresh) leaves that headroom.
-      cfg.freq_write = 12000000;
+      // straight from PSRAM, so frames are copied into it in bands to leave the panel
+      // enough bandwidth (hardware/frame_push.h). 12 MHz was too slow for this panel
+      // (white screen).
+      cfg.freq_write = 16000000;
       cfg.hsync_polarity = 0;
       cfg.hsync_front_porch = 8;
       cfg.hsync_pulse_width = 4;
