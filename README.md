@@ -4,19 +4,9 @@ Bu proje **ESP32-WROOM-32U**, **4.0" ST7796S dokunmatik SPI ekran** (480×320, X
 
 Yazılım, yuvarlak ekranlı `plane-radar-clock` projesindeki servisleri kullanır: USB kurulum sayfası, adsb.fi istemcisi, saat, hava durumu ve harita katmanı. Değişen kısım ekran tarafıdır.
 
-## İkinci kart: Waveshare ESP32-S3-Touch-LCD-5 (5", 800×480)
+## 5" sürüm (Waveshare ESP32-S3-Touch-LCD-5)
 
-Aynı yazılımın 5" sürümü (`ws5` derlemesi). Ekran, dokunmatik (GT911) ve ESP32-S3 tek kartta; kablo bağlantısı gerekmez.
-
-- **İlk yükleme:** Kurulum sayfasında kartı USB-C ile bağlayıp **Tam kurulum**. Sayfa bağlanan çipe göre (ESP32 / ESP32-S3) doğru dosyayı seçer. BOOT tuşu gerekmez.
-- **Sonraki güncellemeler:** USB güncellemesi (cihaz `hw: ws5` bildirir, sayfa `firmware-ws5.bin` gönderir).
-- **SHT30:** Kartın I2C konnektörüne (SDA GPIO8, SCL GPIO9, 3V3, GND). Dokunmatik ve CH422G ile aynı hat, adres 0x44.
-- Ekran ölçekli çizilir: radar tüm 800 px genişliği kullanır; hava ve su ekranları 1,5× büyütülüp ortalanır. Fontlar 1,5× ayrı üretildi (`src/ui/fonts_tr_ws5.cpp`).
-- Kapasitif ekran: kalibrasyon, renk ters çevirme ve kırmızı/mavi seçenekleri bu kartta yok. Arka ışık CH422G üzerinden yalnızca açık/kapalı.
-- Kartta BOOT tuşu kısayolu yok (GPIO0 ekran veri hattı).
-- Kartın iki ekran sürümü var: **ESP32-S3-Touch-LCD-5** (800×480, `ws5`) ve **ESP32-S3-Touch-LCD-5B** (1024×600, `ws5b`). Yanlış sürüm yüklenirse görüntü karışık yatay çizgiler halinde gelir; kurulum sayfasının Gelişmiş bölümünde 5B için ayrı tam kurulum düğmesi var.
-- Bu kart Arduino çekirdeği 3.x (pioarduino, ESP-IDF 5) ile derlenir: ekran sürücüsü "bounce buffer" kullanır, böylece işlemci PSRAM'de çalışırken görüntü kaymaz/kaybolmaz (4" kart 2.0.14'te kalır). Yerelde ayrı çekirdek klasörü kullanın: `PLATFORMIO_CORE_DIR=~/.pio-ws5 pio run -e ws5` (esptool 5 için `click<8.2`).
-- Panel zamanlaması: 800×480 için Waveshare'in kendi değerleri (16 MHz), 1024×600 için LovyanGFX ile bu kartta çalıştığı bilinen değerler (14 MHz). Ayar: `include/hardware/lgfx_config.hpp`.
+5" Waveshare kartın yazılımı ayrı bir dalda: **`ws5`**. Bu dal (`main`) yalnızca 4" ESP32-WROOM sürümünü içerir. Kurulum sayfası iki modeli de yayınlar: sayfa açılınca hangi cihazı kurduğunuzu sorar ve yalnızca o modelle ilgili adımları gösterir (`?model=4` / `?model=5` ile doğrudan açılabilir). `ws5` dalına gönderim bu daldaki derlemeyi başlatır; derleme iki dalı da derleyip tek sitede yayınlar.
 
 ## Malzeme
 
@@ -137,9 +127,6 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 ```
 pio run -e wroom32u
 pio run -e wroom32u -t merge    # firmware-merged.bin (0x0'a yazılır)
-pio run -e ws5                  # Waveshare 5" (ESP32-S3)
-pio run -e ws5 -t merge
-pio run -e ws5b -t merge          # Waveshare 5B (1024×600)
 ```
 
 Projeyi GitHub'a koyarsanız `.github/workflows/build.yml` her gönderimde derleme yapar ve `.bin` dosyalarını Actions sekmesinde hazır eder.

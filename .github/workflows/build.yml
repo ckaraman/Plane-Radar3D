@@ -1,5 +1,8 @@
-# Builds the firmware on every push. On main it also publishes the setup / update
-# page (web/) together with the fresh firmware and the USB bridge to GitHub Pages.
+# Builds both device models and publishes the setup / update page with their firmware:
+#   main branch -> 4" ESP32-WROOM-32U + ST7796 (Arduino core 2.0.14)
+#   ws5 branch  -> 5" Waveshare ESP32-S3-Touch-LCD-5 / -5B (Arduino core 3, pioarduino)
+# A push to ws5 starts this workflow on main (see the workflow on that branch), so the
+# site always carries the latest firmware of both.
 name: Build
 
 on:
@@ -19,8 +22,14 @@ jobs:
   firmware:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout (4", this branch)
         uses: actions/checkout@v4
+
+      - name: Checkout ws5 branch (5")
+        uses: actions/checkout@v4
+        with:
+          ref: ws5
+          path: ws5
 
       - name: Cache PlatformIO
         uses: actions/cache@v4
@@ -28,11 +37,12 @@ jobs:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
+            ~/.pio-core-s3
             .pio/libdeps
-            .pio-core-s3
-          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+            ws5/.pio/libdeps
+          key: ${{ runner.os }}-pio2-${{ hashFiles('platformio.ini', 'ws5/platformio.ini') }}
           restore-keys: |
-            ${{ runner.os }}-pio-
+            ${{ runner.os }}-pio2-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -47,113 +57,86 @@ jobs:
           OWNER=$(echo "${GITHUB_REPOSITORY%%/*}" | tr 'A-Z' 'a-z')
           REPO="${GITHUB_REPOSITORY#*/}"
           printf '#pragma once\n#define SETUP_PAGE_URL "%s.github.io/%s"\n' "$OWNER" "$REPO" > include/setup_url.h
+          cp include/setup_url.h ws5/include/setup_url.h
           cat include/setup_url.h
 
-      - name: Build (4" ESP32 board)
-        run: pio run -e wroom32u
-
-      - name: Merge web-flash image (4")
+      - name: Build + merge (4")
         run: pio run -e wroom32u -t merge
 
-      # The 5" boards build on Arduino core 3 (pioarduino platform; its RGB LCD driver has
-      # bounce buffers). Separate PlatformIO core dir so its packages do not replace the
-      # core 2.0.14 ones the 4" build uses; click < 8.2 for its esptool 5.0.0.
+      # The 5" boards build on Arduino core 3 (pioarduino). Separate PlatformIO core dir so
+      # its packages do not replace the core 2.0.14 ones; click < 8.2 for its esptool 5.0.0.
       - name: Set up PlatformIO for the 5" boards
         run: |
           python -m venv "$HOME/pio-s3"
           "$HOME/pio-s3/bin/pip" install --upgrade platformio "click<8.2"
 
-      - name: Build + merge (Waveshare ESP32-S3-Touch-LCD-5, 800x480)
-        env:
-          PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio-core-s3
-        run: '"$HOME/pio-s3/bin/pio" run -e ws5 -t merge'
-
-      - name: Build + merge (Waveshare ESP32-S3-Touch-LCD-5B, 1024x600)
-        env:
-          PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio-core-s3
-        run: '"$HOME/pio-s3/bin/pio" run -e ws5b -t merge'
+      - name: Build + merge (5" 800x480 and 5B 1024x600)
+        working-directory: ws5
+        run: |
+          export PLATFORMIO_CORE_DIR="$HOME/.pio-core-s3"
+          "$HOME/pio-s3/bin/pio" run -e ws5 -t merge
+          "$HOME/pio-s3/bin/pio" run -e ws5b -t merge
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: plane-radar-3d-wroom32u
+          name: plane-radar-3d-firmware
           if-no-files-found: error
           path: |
             .pio/build/wroom32u/firmware-merged.bin
             .pio/build/wroom32u/firmware.bin
-            .pio/build/wroom32u/bootloader.bin
-            .pio/build/wroom32u/partitions.bin
-            .pio/build/ws5/firmware-merged.bin
-            .pio/build/ws5/firmware.bin
-            .pio/build/ws5/bootloader.bin
-            .pio/build/ws5/partitions.bin
-            .pio/build/ws5b/firmware-merged.bin
-            .pio/build/ws5b/firmware.bin
+            ws5/.pio/build/ws5/firmware-merged.bin
+            ws5/.pio/build/ws5/firmware.bin
+            ws5/.pio/build/ws5b/firmware-merged.bin
+            ws5/.pio/build/ws5b/firmware.bin
 
       - name: Assemble web site
         run: |
-          VERSION=$(sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' include/config.h | head -n 1)
-          test -n "$VERSION"
+          ver() { sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' "$1" | head -n 1; }
+          VERSION=$(ver include/config.h)
+          VERSION_WS5=$(ver ws5/include/config.h)
+          test -n "$VERSION" && test -n "$VERSION_WS5"
           mkdir -p site
           cp web/index.html web/tz.json web/tz-LICENSE.txt site/
-          cp .pio/build/wroom32u/firmware.bin site/firmware.bin
-          cp .pio/build/wroom32u/firmware-merged.bin site/firmware-merged.bin
-          cp .pio/build/wroom32u/bootloader.bin site/bootloader.bin
-          cp .pio/build/wroom32u/partitions.bin site/partitions.bin
-          cp .pio/build/ws5/firmware.bin site/firmware-ws5.bin
-          cp .pio/build/ws5/firmware-merged.bin site/firmware-merged-ws5.bin
-          cp .pio/build/ws5/bootloader.bin site/bootloader-ws5.bin
-          cp .pio/build/ws5/partitions.bin site/partitions-ws5.bin
-          cp .pio/build/ws5b/firmware.bin site/firmware-ws5b.bin
-          cp .pio/build/ws5b/firmware-merged.bin site/firmware-merged-ws5b.bin
+          B=.pio/build/wroom32u
+          cp $B/firmware.bin $B/firmware-merged.bin $B/bootloader.bin $B/partitions.bin site/
+          W=ws5/.pio/build/ws5
+          cp $W/firmware.bin site/firmware-ws5.bin
+          cp $W/firmware-merged.bin site/firmware-merged-ws5.bin
+          cp $W/bootloader.bin site/bootloader-ws5.bin
+          cp $W/partitions.bin site/partitions-ws5.bin
+          cp ws5/.pio/build/ws5b/firmware.bin site/firmware-ws5b.bin
+          cp ws5/.pio/build/ws5b/firmware-merged.bin site/firmware-merged-ws5b.bin
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
-          python3 - "$VERSION" <<'PY'
+          python3 - "$VERSION" "$VERSION_WS5" <<'PY'
           import json, sys
-          version = sys.argv[1]
+          version, version_ws5 = sys.argv[1], sys.argv[2]
 
-          # One entry per board; the installer picks the one matching the connected chip
-          # (ESP32 = 4" board, ESP32-S3 = Waveshare 5" board).
-          def manifest(name, parts, parts_s3):
-              return {
-                  "name": name,
-                  "version": version,
-                  "new_install_prompt_erase": True,
-                  "builds": [{"chipFamily": "ESP32", "parts": parts},
-                             {"chipFamily": "ESP32-S3", "parts": parts_s3}],
-              }
-
-          def write(path, data):
+          def write(path, name, ver, chip, parts):
               with open(path, "w", encoding="utf-8") as f:
-                  json.dump(data, f, indent=2)
+                  json.dump({"name": name, "version": ver, "new_install_prompt_erase": True,
+                             "builds": [{"chipFamily": chip, "parts": parts}]}, f, indent=2)
 
-          # Update: bootloader + partition table + application; settings (NVS at 0x9000) stay.
-          # The classic ESP32 boots from 0x1000 (C3/S3 from 0x0).
-          write("site/manifest-update.json",
-                manifest("Plane Radar 3D update", [
-                    {"path": "bootloader.bin", "offset": 4096},
-                    {"path": "partitions.bin", "offset": 32768},
-                    {"path": "firmware.bin", "offset": 65536},
-                ], [
-                    {"path": "bootloader-ws5.bin", "offset": 0},
-                    {"path": "partitions-ws5.bin", "offset": 32768},
-                    {"path": "firmware-ws5.bin", "offset": 65536},
-                ]))
-          # Full install: one merged image at 0x0. Wipes settings.
-          write("site/manifest-full.json",
-                manifest("Plane Radar 3D full install",
-                         [{"path": "firmware-merged.bin", "offset": 0}],
-                         [{"path": "firmware-merged-ws5.bin", "offset": 0}]))
-          # 1024x600 "5B" board: same chip family as the 800x480 one, so its own manifest.
-          write("site/manifest-full-ws5b.json", {
-              "name": "Plane Radar 3D full install (5B 1024x600)",
-              "version": version,
-              "new_install_prompt_erase": True,
-              "builds": [{"chipFamily": "ESP32-S3",
-                          "parts": [{"path": "firmware-merged-ws5b.bin", "offset": 0}]}],
-          })
-          write("site/version.json", {"version": version})
+          # 4": update keeps the settings (NVS at 0x9000); the classic ESP32 boots from 0x1000.
+          write("site/manifest-update.json", "Plane Radar 3D 4in update", version, "ESP32", [
+              {"path": "bootloader.bin", "offset": 4096},
+              {"path": "partitions.bin", "offset": 32768},
+              {"path": "firmware.bin", "offset": 65536}])
+          write("site/manifest-full.json", "Plane Radar 3D 4in full install", version, "ESP32",
+                [{"path": "firmware-merged.bin", "offset": 0}])
+          # 5": the S3 boots from 0x0.
+          write("site/manifest-update-ws5.json", "Plane Radar 3D 5in update", version_ws5, "ESP32-S3", [
+              {"path": "bootloader-ws5.bin", "offset": 0},
+              {"path": "partitions-ws5.bin", "offset": 32768},
+              {"path": "firmware-ws5.bin", "offset": 65536}])
+          write("site/manifest-full-ws5.json", "Plane Radar 3D 5in full install", version_ws5, "ESP32-S3",
+                [{"path": "firmware-merged-ws5.bin", "offset": 0}])
+          write("site/manifest-full-ws5b.json", "Plane Radar 3D 5in (5B 1024x600) full install", version_ws5,
+                "ESP32-S3", [{"path": "firmware-merged-ws5b.bin", "offset": 0}])
+          with open("site/version.json", "w", encoding="utf-8") as f:
+              json.dump({"version": version, "version_ws5": version_ws5}, f)
           PY
           ls -l site
 
