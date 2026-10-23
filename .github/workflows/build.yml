@@ -37,7 +37,6 @@ jobs:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
-            ~/.pio-core-s3
             .pio/libdeps
             ws5/.pio/libdeps
           key: ${{ runner.os }}-pio2-${{ hashFiles('platformio.ini', 'ws5/platformio.ini') }}
@@ -63,19 +62,21 @@ jobs:
       - name: Build + merge (4")
         run: pio run -e wroom32u -t merge
 
-      # The 5" boards build on Arduino core 3 (pioarduino). Separate PlatformIO core dir so
-      # its packages do not replace the core 2.0.14 ones; click < 8.2 for its esptool 5.0.0.
+      # The 5" boards build on Arduino core 3 (pioarduino), whose Arduino libraries are
+      # rebuilt with custom_sdkconfig. Own venv: PlatformIO 6.1.18 (its SCons works with
+      # the lib rebuild), click < 8.2 (esptool 5), uv (ESP-IDF Python deps). Each env gets
+      # its own PlatformIO core dir: the rebuild replaces the libs in the packages folder.
       - name: Set up PlatformIO for the 5" boards
         run: |
           python -m venv "$HOME/pio-s3"
-          "$HOME/pio-s3/bin/pip" install --upgrade platformio "click<8.2"
+          "$HOME/pio-s3/bin/pip" install "platformio==6.1.18" "click<8.2" uv
 
       - name: Build + merge (5" 800x480 and 5B 1024x600)
         working-directory: ws5
         run: |
-          export PLATFORMIO_CORE_DIR="$HOME/.pio-core-s3"
-          "$HOME/pio-s3/bin/pio" run -e ws5 -t merge
-          "$HOME/pio-s3/bin/pio" run -e ws5b -t merge
+          export PATH="$HOME/pio-s3/bin:$PATH"
+          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio run -e ws5 -t merge
+          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5b" pio run -e ws5b -t merge
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
