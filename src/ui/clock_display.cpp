@@ -15,6 +15,7 @@
 #include "services/weather_service.h"
 #include "ui/fonts_tr.h"
 #include "ui/screen_switch.h"
+#include "ui/ui_scale.h"
 
 namespace ui {
 
@@ -23,10 +24,10 @@ namespace {
 constexpr uint16_t kBackground = 0x0000;
 constexpr uint16_t kTimeColor = 0xFFFF;
 constexpr int kCenterX = config::kDisplayWidth / 2;
-constexpr int kTimeY = 120;
-constexpr int kDateY = 210;
-constexpr int kInfoY = 280;
-constexpr int kBtnY = 4;
+constexpr int kTimeY = S(120);
+constexpr int kDateY = S(210);
+constexpr int kInfoY = S(280);
+constexpr int kBtnY = S(4);
 constexpr int kWeatherX = ui::kSwitchX;
 constexpr int kWaterX = ui::kWaterBtnX;
 
@@ -51,7 +52,7 @@ void drawInfoBlock(int cx, const char* label, const char* temp, int humidity) {
   displayFontSetBitmap(tft, &ui::font::Sans9);
   tft.setTextDatum(textdatum_t::middle_center);
   tft.setTextColor(dimColor(), kBackground);
-  tft.drawString(label, cx, kInfoY - 16);
+  tft.drawString(label, cx, kInfoY - S(16));
   char buf[24];
   if (humidity >= 0) {
     snprintf(buf, sizeof(buf), "%s°C   %%%d", temp, humidity);
@@ -60,12 +61,12 @@ void drawInfoBlock(int cx, const char* label, const char* temp, int humidity) {
   }
   displayFontSetBitmap(tft, &ui::font::SansBold12);
   tft.setTextColor(softColor(), kBackground);
-  tft.drawString(buf, cx, kInfoY + 10);
+  tft.drawString(buf, cx, kInfoY + S(10));
 }
 
 /** Bottom: room (SHT30) and outdoor (Open-Meteo) temperature and humidity. */
 void drawInfoLine() {
-  tft.fillRect(0, kInfoY - 30, config::kDisplayWidth, 60, kBackground);
+  tft.fillRect(0, kInfoY - S(30), config::kDisplayWidth, S(60), kBackground);
   const bool indoor = services::sht30::valid();
   services::weather::Forecast f;
   const bool outdoor = services::weather::enabled() &&
@@ -81,7 +82,7 @@ void drawInfoLine() {
     snprintf(t, sizeof(t), "%d", f.now.temp_c);
     drawInfoBlock(right, "DIŞ ORTAM", t, f.humidity);
   }
-  if (indoor && outdoor) tft.drawFastVLine(kCenterX, kInfoY - 24, 48, tft.color565(50, 58, 78));
+  if (indoor && outdoor) tft.fillRect(kCenterX, kInfoY - S(24), S(1), S(48), tft.color565(50, 58, 78));
   tft.setTextDatum(textdatum_t::top_left);
 }
 
@@ -92,18 +93,18 @@ void drawButtons() {
   ui::drawWaterButton(tft, kWaterX, kBtnY, ui::kWaterBtnW, ui::kWaterBtnH, panel, cyan,
                       tft.color565(60, 160, 255), static_cast<uint16_t>(0xFFFF),
                       static_cast<uint16_t>(0x0000));
-  tft.fillRoundRect(kWeatherX, kBtnY, ui::kSwitchW, ui::kSwitchH, 8, panel);
-  tft.drawRoundRect(kWeatherX, kBtnY, ui::kSwitchW, ui::kSwitchH, 8, edge);
+  tft.fillRoundRect(kWeatherX, kBtnY, ui::kSwitchW, ui::kSwitchH, S(8), panel);
+  tft.drawRoundRect(kWeatherX, kBtnY, ui::kSwitchW, ui::kSwitchH, S(8), edge);
   // sun + cloud
-  const int cx = kWeatherX + 22, cy = kBtnY + ui::kSwitchH / 2;
-  tft.fillCircle(cx + 4, cy - 4, 7, tft.color565(255, 170, 60));
-  tft.fillCircle(cx - 4, cy + 4, 6, tft.color565(237, 230, 211));
-  tft.fillCircle(cx + 4, cy + 2, 7, tft.color565(237, 230, 211));
-  tft.fillRect(cx - 4, cy + 4, 14, 6, tft.color565(237, 230, 211));
+  const int cx = kWeatherX + S(22), cy = kBtnY + ui::kSwitchH / 2;
+  tft.fillCircle(cx + S(4), cy - S(4), S(7), tft.color565(255, 170, 60));
+  tft.fillCircle(cx - S(4), cy + S(4), S(6), tft.color565(237, 230, 211));
+  tft.fillCircle(cx + S(4), cy + S(2), S(7), tft.color565(237, 230, 211));
+  tft.fillRect(cx - S(4), cy + S(4), S(14), S(6), tft.color565(237, 230, 211));
   displayFontSetBitmap(tft, &ui::font::SansBold8);
   tft.setTextDatum(textdatum_t::middle_center);
   tft.setTextColor(0xFFFF, panel);
-  tft.drawString("HAVA", kWeatherX + 40 + (ui::kSwitchW - 40) / 2, cy + 1);
+  tft.drawString("HAVA", kWeatherX + S(40) + (ui::kSwitchW - S(40)) / 2, cy + 1);
   tft.setTextDatum(textdatum_t::top_left);
 }
 
@@ -163,13 +164,13 @@ void clockDisplayTick() {
 
   tft.setTextDatum(textdatum_t::middle_center);
   tft.setFont(&fonts::Font7);  // 7-segment digits
-  tft.setTextSize(2.4f);
-  tft.setTextPadding(440);
+  tft.setTextSize(ui::Sf(2.4f));
+  tft.setTextPadding(S(440));
   tft.setTextColor(kTimeColor, kBackground);
   tft.drawString(time_text, kCenterX, kTimeY);
 
   displayFontSetBitmap(tft, &ui::font::SansBold18);
-  tft.setTextPadding(460);
+  tft.setTextPadding(S(460));
   tft.setTextColor(dimColor(), kBackground);
   tft.drawString(date_text, kCenterX, kDateY);
 

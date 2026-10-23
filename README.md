@@ -4,6 +4,18 @@ Bu proje **ESP32-WROOM-32U**, **4.0" ST7796S dokunmatik SPI ekran** (480×320, X
 
 Yazılım, yuvarlak ekranlı `plane-radar-clock` projesindeki servisleri kullanır: USB kurulum sayfası, adsb.fi istemcisi, saat, hava durumu ve harita katmanı. Değişen kısım ekran tarafıdır.
 
+## İkinci kart: Waveshare ESP32-S3-Touch-LCD-5 (5", 800×480)
+
+Aynı yazılımın 5" sürümü (`ws5` derlemesi). Ekran, dokunmatik (GT911) ve ESP32-S3 tek kartta; kablo bağlantısı gerekmez.
+
+- **İlk yükleme:** Kurulum sayfasında kartı USB-C ile bağlayıp **Tam kurulum**. Sayfa bağlanan çipe göre (ESP32 / ESP32-S3) doğru dosyayı seçer. BOOT tuşu gerekmez.
+- **Sonraki güncellemeler:** USB güncellemesi (cihaz `hw: ws5` bildirir, sayfa `firmware-ws5.bin` gönderir).
+- **SHT30:** Kartın I2C konnektörüne (SDA GPIO8, SCL GPIO9, 3V3, GND). Dokunmatik ve CH422G ile aynı hat, adres 0x44.
+- Ekran ölçekli çizilir: radar tüm 800 px genişliği kullanır; hava ve su ekranları 1,5× büyütülüp ortalanır. Fontlar 1,5× ayrı üretildi (`src/ui/fonts_tr_ws5.cpp`).
+- Kapasitif ekran: kalibrasyon, renk ters çevirme ve kırmızı/mavi seçenekleri bu kartta yok. Arka ışık CH422G üzerinden yalnızca açık/kapalı.
+- Kartta BOOT tuşu kısayolu yok (GPIO0 ekran veri hattı).
+- Panel zamanlaması Waveshare 4.3" 800×480 değerlerinden alındı (16 MHz). Görüntü kayık ya da titrekse `include/hardware/lgfx_config.hpp` içindeki porch değerleri ayarlanır.
+
 ## Malzeme
 
 | Parça | Not |
@@ -123,6 +135,8 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 ```
 pio run -e wroom32u
 pio run -e wroom32u -t merge    # firmware-merged.bin (0x0'a yazılır)
+pio run -e ws5                  # Waveshare 5" (ESP32-S3)
+pio run -e ws5 -t merge
 ```
 
 Projeyi GitHub'a koyarsanız `.github/workflows/build.yml` her gönderimde derleme yapar ve `.bin` dosyalarını Actions sekmesinde hazır eder.

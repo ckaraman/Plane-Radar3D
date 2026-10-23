@@ -1,6 +1,9 @@
 #include "hardware/display.h"
 
 #include "hardware/display_font.h"
+#if defined(BOARD_WS5)
+#include "hardware/ch422g.h"
+#endif
 #include "services/display_prefs.h"
 #include "ui/fonts_tr.h"
 
@@ -8,22 +11,31 @@ LGFX tft;
 
 namespace {
 
+#if defined(BOARD_WS5)
+uint8_t rotationFor(bool flip) { return flip ? 2 : 0; }  // RGB panel is landscape-native
+#else
 uint8_t rotationFor(bool flip) { return flip ? 3 : 1; }  // landscape, 480x320
+#endif
 
 }  // namespace
 
 void displayInit() {
   const auto& p = services::display_prefs::get();
+#if defined(BOARD_WS5)
+  hw::ch422g::resetPanelAndTouch(config::kTouchPinInt);
+#endif
   tft.applyPanelColorOptions(p.invert, p.bgr);
   tft.init();
   tft.setRotation(rotationFor(p.flip));
   tft.setBrightness(p.brightness);
   tft.setTextWrap(false);
   tft.fillScreen(0);
+#if !defined(BOARD_WS5)  // capacitive touch is factory calibrated
   uint16_t cal[8];
   if (services::display_prefs::touchCalibration(cal)) {
     tft.setTouchCalibrate(cal);
   }
+#endif
   displayFontInit();
 }
 
@@ -35,11 +47,17 @@ void displayApplyPrefs() {
 }
 
 bool displayHasTouchCalibration() {
+#if defined(BOARD_WS5)
+  return true;
+#endif
   uint16_t cal[8];
   return services::display_prefs::touchCalibration(cal);
 }
 
 void displayRunTouchCalibration() {
+#if defined(BOARD_WS5)
+  return;  // capacitive panel: nothing to calibrate
+#endif
   tft.fillScreen(TFT_BLACK);
   tft.setFont(&ui::font::SansBold12);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);

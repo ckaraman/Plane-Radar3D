@@ -14,6 +14,8 @@
 #include "services/display_prefs.h"
 #include "services/water_store.h"
 #include "ui/fonts_tr.h"
+#include "ui/scaled_gfx.h"
+#include "ui/ui_scale.h"
 #include "ui/radar3d.h"
 #include "ui/screen_switch.h"
 
@@ -29,8 +31,12 @@ namespace {
 
 namespace store = services::water;
 
-constexpr int kW = config::kDisplayWidth;
-constexpr int kH = config::kDisplayHeight;
+// Laid out on the 480x320 design grid; ScaledGfx maps it to the panel (identity on
+// the 4" board, 1.5x and centred on the 5" one). The top bar and the RADAR button use
+// panel coordinates so they line up with the other screens.
+using Canvas = ScaledGfx<LGFX_Sprite>;
+constexpr int kW = Canvas::kDesignW;
+constexpr int kH = Canvas::kDesignH;
 constexpr int kTopBarH = 22;
 constexpr int kFirstHour = 9;   // reminders 09:00 ...
 constexpr int kLastHour = 18;   // ... 18:00
@@ -75,7 +81,20 @@ const char* const kDayLong[7] = {"Pazar",    "Pazartesi", "Salı",     "Çarşam
 const char* const kMonth[12] = {"Ocak",   "Şubat",   "Mart",  "Nisan", "Mayıs", "Haziran",
                                 "Temmuz", "Ağustos", "Eylül", "Ekim",  "Kasım", "Aralık"};
 
-LGFX_Sprite* s_spr = nullptr;
+Canvas s_canvas;
+Canvas* s_spr = nullptr;
+
+/** Bind the drawing front end to the shared frame; false when there is none. */
+bool bindFrame() {
+  LGFX_Sprite* f = ui::radar3d::frame();
+  if (f == nullptr) {
+    s_spr = nullptr;
+    return false;
+  }
+  s_canvas.bind(f);
+  s_spr = &s_canvas;
+  return true;
+}
 
 // Main screen state
 int s_offset = 0;  // 0 = today, 1 = yesterday, ...
@@ -87,8 +106,8 @@ struct Rect {
     return px >= x - 3 && px < x + w + 3 && py >= y - 3 && py < y + h + 3;
   }
 };
-constexpr int kBtnY = kSwitchY;
-constexpr int kBtnH = kSwitchH;
+constexpr int kBtnH = 42;           // same row as the RADAR button (design grid)
+constexpr int kBtnY = kH - 4 - kBtnH;
 constexpr Rect kBtnPrev{6, kBtnY, 44, kBtnH};
 constexpr Rect kBtnNext{54, kBtnY, 44, kBtnH};
 constexpr Rect kBtnAdd{102, kBtnY, 86, kBtnH};
@@ -156,7 +175,7 @@ void applyPalette() {
 
 void push() {
 #ifdef RADAR3D_HOST_TEST
-  ui::radar3d::hostCaptureFrame(*s_spr);
+  ui::radar3d::hostCaptureFrame(*s_spr->raw());
 #else
   s_spr->pushSprite(0, 0);
 #endif
@@ -284,31 +303,45 @@ void animState(bool* blink, float* look) {
   *look = phase == 1 ? -0.8f : (phase == 3 ? 0.8f : 0.0f);
 }
 
+/** Text in panel coordinates (top bar, RADAR button). */
+void rawText(const char* t, int x, int y, textdatum_t d, const lgfx::IFont* f, uint8_t c) {
+  LGFX_Sprite* g = s_spr->raw();
+  g->setFont(f);
+  g->setTextSize(1);
+  g->setTextDatum(d);
+  g->setTextColor(c);
+  g->drawString(t, x, y);
+}
+
 void drawTopBar(const char* title, const char* center) {
-  s_spr->fillRect(0, 0, kW, kTopBarH, cPanel);
-  s_spr->drawFastHLine(0, kTopBarH, kW, cEdge);
-  text(title, 10, 11, textdatum_t::middle_left, &ui::font::Sans8, cText);
-  if (center) text(center, kW / 2, 11, textdatum_t::middle_center, &ui::font::Sans8, cDim);
+  LGFX_Sprite* g = s_spr->raw();
+  const int pw = config::kDisplayWidth, bh = S(kTopBarH), ty = bh / 2;
+  g->fillRect(0, 0, pw, bh, cPanel);
+  g->drawFastHLine(0, bh, pw, cEdge);
+  rawText(title, S(10), ty, textdatum_t::middle_left, &ui::font::Sans8, cText);
+  if (center) rawText(center, pw / 2, ty, textdatum_t::middle_center, &ui::font::Sans8, cDim);
   tm t;
   if (services::clock::now(&t)) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
-    text(buf, kW - 8, 11, textdatum_t::middle_right, &ui::font::Sans8, cText);
+    rawText(buf, pw - S(8), ty, textdatum_t::middle_right, &ui::font::Sans8, cText);
   }
 }
 
 void drawSwitchButton() {
-  s_spr->fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, cPanel);
-  s_spr->drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, cCyan);
-  const int cx = kSwitchX + 21, cy = kSwitchY + kSwitchH / 2;
-  s_spr->drawCircle(cx, cy, 13, cCyan);
-  s_spr->drawCircle(cx, cy, 7, cEdge);
-  s_spr->drawFastHLine(cx - 13, cy, 27, cEdge);
-  s_spr->drawFastVLine(cx, cy - 13, 27, cEdge);
-  s_spr->drawLine(cx, cy, cx + 9, cy - 9, cCyan);
-  s_spr->fillCircle(cx + 5, cy - 2, 2, cOrange);
-  text("RADAR", (kSwitchX + 38 + kSwitchX + kSwitchW) / 2, cy + 1, textdatum_t::middle_center,
-       &ui::font::SansBold8, cText);
+  // Panel coordinates: exactly where the radar screen has its switch button.
+  LGFX_Sprite* g = s_spr->raw();
+  g->fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, S(8), cPanel);
+  g->drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, S(8), cCyan);
+  const int cx = kSwitchX + S(21), cy = kSwitchY + kSwitchH / 2;
+  g->drawCircle(cx, cy, S(13), cCyan);
+  g->drawCircle(cx, cy, S(7), cEdge);
+  g->drawFastHLine(cx - S(13), cy, 2 * S(13) + 1, cEdge);
+  g->drawFastVLine(cx, cy - S(13), 2 * S(13) + 1, cEdge);
+  g->drawLine(cx, cy, cx + S(9), cy - S(9), cCyan);
+  g->fillCircle(cx + S(5), cy - S(2), S(2), cOrange);
+  rawText("RADAR", (kSwitchX + S(38) + kSwitchX + kSwitchW) / 2, cy + 1,
+          textdatum_t::middle_center, &ui::font::SansBold8, cText);
 }
 
 void dayTitle(int32_t day, int offset, char* buf, size_t n) {
@@ -588,8 +621,7 @@ void startMode(Mode m) {
   s_mode = m;
   s_mode_since = millis();
   s_last_anim = 0;
-  s_spr = ui::radar3d::frame();
-  if (s_spr) drawOverlay();
+  if (bindFrame()) drawOverlay();
 }
 
 }  // namespace
@@ -597,9 +629,8 @@ void startMode(Mode m) {
 // ------------------------------------------------------------------ public
 
 void enter() {
-  s_spr = ui::radar3d::frame();
   s_offset = 0;
-  if (s_spr == nullptr) return;
+  if (!bindFrame()) return;
   drawMain();
   s_drawn_key = mainKey();
 }
@@ -615,7 +646,8 @@ void tick() {
   s_drawn_key = key;
 }
 
-bool tap(int x, int y) {
+bool tap(int px, int py) {
+  const int x = Canvas::toDesignX(px), y = Canvas::toDesignY(py);  // layout is in design units
   int32_t today;
   const bool have_clock = store::today(&today, nullptr);
   bool changed = false;
@@ -708,7 +740,8 @@ bool overlayTick() {
   return true;
 }
 
-void overlayTap(int x, int y) {
+void overlayTap(int px, int py) {
+  const int x = Canvas::toDesignX(px), y = Canvas::toDesignY(py);
   if (s_mode == Mode::Ask || s_mode == Mode::Add) {
     for (int i = 0; i < 4; ++i) {
       if (s_amount_rects[i].hit(x, y)) {

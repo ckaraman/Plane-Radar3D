@@ -11,6 +11,7 @@
 
 #include "hardware/display.h"
 #include "ui/fonts_tr.h"
+#include "ui/ui_scale.h"
 
 namespace services::serial_ota {
 
@@ -90,21 +91,21 @@ void drawScreen(int pct) {
     tft.setTextSize(1);
     tft.setTextDatum(textdatum_t::middle_center);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.drawString("Yazılım güncelleniyor", w / 2, h / 2 - 50);
+    tft.drawString("Yazılım güncelleniyor", w / 2, h / 2 - ui::S(50));
     tft.setFont(&ui::font::Sans9);
     tft.setTextColor(tft.color565(125, 139, 150), TFT_BLACK);
-    tft.drawString("USB kablosunu çıkarmayın", w / 2, h / 2 + 60);
-    tft.drawRect(60, h / 2 - 12, w - 120, 24, tft.color565(35, 72, 92));
+    tft.drawString("USB kablosunu çıkarmayın", w / 2, h / 2 + ui::S(60));
+    tft.drawRect(ui::S(60), h / 2 - ui::S(12), w - ui::S(120), ui::S(24), tft.color565(35, 72, 92));
   }
-  const int bw = (w - 124) * pct / 100;
-  tft.fillRect(62, h / 2 - 10, bw, 20, tft.color565(91, 200, 245));
+  const int bw = (w - ui::S(120) - 4) * pct / 100;
+  tft.fillRect(ui::S(60) + 2, h / 2 - ui::S(12) + 2, bw, ui::S(24) - 4, tft.color565(91, 200, 245));
   char t[8];
   snprintf(t, sizeof(t), "%%%d", pct);
   tft.setFont(&ui::font::SansBold12);
   tft.setTextDatum(textdatum_t::middle_center);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextPadding(90);
-  tft.drawString(t, w / 2, h / 2 + 30);
+  tft.setTextPadding(ui::S(90));
+  tft.drawString(t, w / 2, h / 2 + ui::S(30));
   tft.setTextPadding(0);
   tft.setTextDatum(textdatum_t::top_left);
 }

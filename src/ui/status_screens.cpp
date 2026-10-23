@@ -11,17 +11,19 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "ui/fonts_tr.h"
+#include "ui/ui_scale.h"
 
 namespace {
 
-constexpr int kLineGap = 6;
+using ui::S;
+constexpr int kLineGap = S(6);
 const int kCenterX = config::kDisplayWidth / 2;
 const int kCenterY = config::kDisplayHeight / 2;
 
 constexpr int kSpinnerDotCount = 10;
-constexpr int kSpinnerRadius = 130;
-constexpr int kSpinnerDotRadius = 2;
-constexpr int kSpinnerEraseRadius = 4;
+constexpr int kSpinnerRadius = S(130);
+constexpr int kSpinnerDotRadius = S(2);
+constexpr int kSpinnerEraseRadius = S(4);
 constexpr float kSpinnerStepDeg = 6.0f;
 
 struct SpinnerDot {
@@ -32,7 +34,7 @@ struct SpinnerDot {
 
 char s_connecting_ssid[33];
 char s_ssid_line[33];
-constexpr int kConnectingTextMaxWidthPx = 380;
+constexpr int kConnectingTextMaxWidthPx = S(380);
 float s_spinner_angle_deg = -90.0f;
 SpinnerDot s_spinner_dots[kSpinnerDotCount];
 bool s_connecting_text_drawn = false;
@@ -152,7 +154,7 @@ void drawConnectingText() {
   const int detail_h = tft.fontHeight();
   const int total_h = detail_h * 2 + kLineGap;
   const int block_top = (config::kDisplayHeight - total_h) / 2;
-  constexpr int kPanelPadY = 8;
+  constexpr int kPanelPadY = S(8);
   tft.fillRect(kCenterX - kConnectingTextMaxWidthPx / 2, block_top - kPanelPadY,
                kConnectingTextMaxWidthPx, total_h + kPanelPadY * 2, config::kColorBlack);
 
@@ -237,8 +239,8 @@ void statusScreenPortal() {
       snprintf(host, sizeof(host), "%s", config::kSetupPageUrl);
       path[0] = '\0';
     }
-    const float host_size = displayFontIsSmooth() ? fitVlwSize(host, 1.4f, 440) : 1.0f;
-    const float path_size = displayFontIsSmooth() ? fitVlwSize(path, 1.4f, 440) : 1.0f;
+    const float host_size = displayFontIsSmooth() ? fitVlwSize(host, 1.4f, S(440)) : 1.0f;
+    const float path_size = displayFontIsSmooth() ? fitVlwSize(path, 1.4f, S(440)) : 1.0f;
     const TextLine with_path[] = {
         {"Kurulum", 1.65f, &kPortalGfxTitle},
         {"Bilgisayarda açın:", 1.27f, &kPortalGfxBody},
@@ -277,8 +279,12 @@ void statusScreenConnectFailed() {
       {"Bağlanılamadı", 1.72f, &kGfxTitle},
       {"Yeniden deneniyor...", 1.50f, &kGfxBody},
       {"Wi-Fi'yi kurulum sayfasından", 1.50f, &kGfxBody},
+#if defined(BOARD_WS5)  // no BOOT button on the 5" board
+      {"düzeltin", 1.50f, &kGfxBody},
+#else
       {"düzeltin ya da BOOT'a", 1.50f, &kGfxBody},
       {"3 sn basılı tutun", 1.50f, &kGfxBody},
+#endif
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,
                 sizeof(lines) / sizeof(lines[0]));

@@ -23,6 +23,7 @@
 #include "services/usb_feed.h"
 #include "ui/radar_range.h"
 #include "ui/screen_switch.h"
+#include "ui/ui_scale.h"
 #include "ui/weather_icons.h"
 #include "ui/fonts_tr.h"
 
@@ -74,32 +75,33 @@ constexpr Rgb kPalette[16] = {
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
 constexpr float kTerrainRelief = 0.15f;  // highest terrain point = 15 % of the radius
 // The disc is scaled to fill this box (any tilt); aircraft rise into the space above it.
-constexpr float kFitLeft = 6.0f;
-constexpr float kFitRight = 474.0f;
-constexpr float kFitBottom = 304.0f;
-constexpr float kFitTop = 84.0f;
+constexpr float kFitLeft = ui::Sf(6.0f);
+constexpr float kFitRight = kW - ui::Sf(6.0f);
+constexpr float kFitBottom = kH - ui::Sf(16.0f);
+constexpr float kFitTop = ui::Sf(84.0f);
 constexpr float kCamDistOverR = 2.1f;  // camera ground distance / outer radius
 
 // --- Layout ---
-constexpr int kTopBarH = 22;
+using ui::S;
+constexpr int kTopBarH = S(22);
 // Arrow keys like a keyboard, bottom left: up above down, left/down/right in a row.
 // Big enough for the resistive panel; the 4 px gap keeps neighbouring keys apart.
-constexpr int kBtnSize = 42;
-constexpr int kPadStep = kBtnSize + 4;
-constexpr int kPadLeft = 6;
-constexpr int kPadTop = kH - 4 - kBtnSize - kPadStep;
+constexpr int kBtnSize = S(42);
+constexpr int kPadStep = kBtnSize + S(4);
+constexpr int kPadLeft = S(6);
+constexpr int kPadTop = kH - S(4) - kBtnSize - kPadStep;
 constexpr int kPadW = 2 * kPadStep + kBtnSize;
 constexpr int kPadH = kPadStep + kBtnSize;
 constexpr int kPitchStepDeg = 8;
 // Altitude legend: a thin strip under the top bar, hidden while an aircraft is selected.
-constexpr int kStripH = 18;
+constexpr int kStripH = S(18);
 // Selected aircraft, "corners" style: who / where to on the left, flight values on the right.
-constexpr int kInfoY = kTopBarH + 4;
-constexpr int kInfoH = 62;
-constexpr int kInfoLW = 168;
-constexpr int kInfoRW = 150;
-constexpr int kInfoRX = kW - kInfoRW - 4;
-constexpr int kTapRadiusPx = 38;
+constexpr int kInfoY = kTopBarH + S(4);
+constexpr int kInfoH = S(62);
+constexpr int kInfoLW = S(168);
+constexpr int kInfoRW = S(150);
+constexpr int kInfoRX = kW - kInfoRW - S(4);
+constexpr int kTapRadiusPx = S(38);
 constexpr float kYawStepDeg = 30.0f;
 
 LGFX_Sprite s_spr(&tft);
@@ -363,13 +365,13 @@ bool intersects(const Box& a, const Box& b) {
 bool overlapsUi(int x, int y, int w, int h) {
   const Box me{x, y, w, h};
   const Box fixed[] = {
-      {0, 0, kW, kTopBarH + 2},
-      {0, kTopBarH, s_selected[0] ? 0 : kW, kStripH + 2},       // legend strip
-      {kPadLeft - 2, kPadTop - 2, kPadW + 4, kPadH + 4},        // arrow keys
-      {2, kInfoY - 2, (s_selected[0] && !infoInLabel()) ? kInfoLW + 4 : 0, kInfoH + 4},  // info
-      {kInfoRX - 2, kInfoY - 2, (s_selected[0] && !infoInLabel()) ? kInfoRW + 4 : 0, kInfoH + 4},
-      {ui::kSwitchX - 2, ui::kSwitchY - 2, ui::kSwitchW + 4, ui::kSwitchH + 4},  // HAVA
-      {ui::kWaterBtnX - 2, ui::kWaterBtnY - 2, ui::kWaterBtnW + 4, ui::kWaterBtnH + 4},  // SU
+      {0, 0, kW, kTopBarH + S(2)},
+      {0, kTopBarH, s_selected[0] ? 0 : kW, kStripH + S(2)},       // legend strip
+      {kPadLeft - S(2), kPadTop - S(2), kPadW + S(4), kPadH + S(4)},        // arrow keys
+      {S(2), kInfoY - S(2), (s_selected[0] && !infoInLabel()) ? kInfoLW + S(4) : 0, kInfoH + S(4)},  // info
+      {kInfoRX - S(2), kInfoY - S(2), (s_selected[0] && !infoInLabel()) ? kInfoRW + S(4) : 0, kInfoH + S(4)},
+      {ui::kSwitchX - S(2), ui::kSwitchY - S(2), ui::kSwitchW + S(4), ui::kSwitchH + S(4)},  // HAVA
+      {ui::kWaterBtnX - S(2), ui::kWaterBtnY - S(2), ui::kWaterBtnW + S(4), ui::kWaterBtnH + S(4)},  // SU
   };
   for (const Box& b : fixed) {
     if (intersects(me, b)) return true;
@@ -1019,7 +1021,11 @@ void drawRings(const Cam& c) {
   }
   ringPath(c, c.R, kRing, false);
 
+#if defined(BOARD_WS5)
+  setFont(&ui::font::Sans8);  // the built-in 6x8 font is too small on the 800x480 panel
+#else
   setFont(&fonts::Font0);
+#endif
   s_spr.setTextDatum(textdatum_t::middle_center);
   const float radii[3] = {inner[0], inner[1], c.R};
   for (int i = 0; i < 3; ++i) {
@@ -1038,7 +1044,7 @@ void drawRings(const Cam& c) {
         }
       }
       s_spr.setTextColor(kRing);
-      s_spr.drawString(label, ri(sx) + 12, ri(sy) + 6);
+      s_spr.drawString(label, ri(sx) + S(12), ri(sy) + S(6));
     }
   }
 
@@ -1049,7 +1055,7 @@ void drawRings(const Cam& c) {
   for (int i = 0; i < 4; ++i) {
     float sx, sy;
     if (project(c, dirs[i][0] * c.R * 1.14f, dirs[i][1] * c.R * 1.14f, 0, &sx, &sy) &&
-        sy < kH - 10 && !overlapsUi(ri(sx) - 8, ri(sy) - 8, 16, 16)) {
+        sy < kH - S(10) && !overlapsUi(ri(sx) - S(8), ri(sy) - S(8), S(16), S(16))) {
       s_spr.setTextColor(kRing);
       s_spr.drawString(names[i], ri(sx), ri(sy));
     }
@@ -1059,12 +1065,12 @@ void drawRings(const Cam& c) {
   if (project(c, 0, 0, groundZ(c, 0, 0), &hx, &hy)) {
     // Red house on the radar centre: roof triangle over a square body, dark outline.
     const int x = ri(hx), y = ri(hy);
-    s_spr.fillTriangle(x - 8, y - 5, x + 8, y - 5, x, y - 13, kBg);
-    s_spr.fillRect(x - 6, y - 6, 13, 9, kBg);
-    s_spr.fillTriangle(x - 7, y - 6, x + 7, y - 6, x, y - 12, kRed);
-    s_spr.fillRect(x - 5, y - 6, 11, 8, kRed);
-    s_spr.fillRect(x - 1, y - 2, 3, 4, kBg);  // door
-    s_spr.drawFastHLine(x - 3, y + 3, 7, kRed);
+    s_spr.fillTriangle(x - S(8), y - S(5), x + S(8), y - S(5), x, y - S(13), kBg);
+    s_spr.fillRect(x - S(6), y - S(6), S(13), S(9), kBg);
+    s_spr.fillTriangle(x - S(7), y - S(6), x + S(7), y - S(6), x, y - S(12), kRed);
+    s_spr.fillRect(x - S(5), y - S(6), S(11), S(8), kRed);
+    s_spr.fillRect(x - S(1), y - S(2), S(3), S(4), kBg);  // door
+    s_spr.drawFastHLine(x - S(3), y + S(3), S(7), kRed);
   }
 }
 
@@ -1122,10 +1128,10 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       float sx, sy;
       if (project(c, s_items[k].x_km, s_items[k].y_km, s_items[k].z, &sx, &sy)) min_y = std::min(min_y, sy);
     }
-    constexpr float kTopLimit = kTopBarH + kStripH + 14.0f;
+    constexpr float kTopLimit = kTopBarH + kStripH + ui::Sf(14.0f);
     if (min_y < kTopLimit) {
       s_zfit = std::max(0.12f, s_zfit * 0.82f);
-    } else if (min_y > kTopLimit + 30.0f && s_zfit < 1.0f) {
+    } else if (min_y > kTopLimit + ui::Sf(30.0f) && s_zfit < 1.0f) {
       s_zfit = std::min(1.0f, s_zfit * 1.03f);
     }
   }
@@ -1161,7 +1167,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
 
     // Drop line to the ground and the ground shadow give the depth cue.
     dottedLine(ri(sx), ri(sy), ri(gx), ri(gy), col, 2, 2);
-    s_spr.fillEllipse(ri(gx), ri(gy), 3, 1, col);
+    s_spr.fillEllipse(ri(gx), ri(gy), S(3), S(1), col);
 
     // Icon, rotated to where the track points on screen.
     float ax, ay;
@@ -1170,13 +1176,14 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
                 &ay)) {
       heading = atan2f(ax - sx, -(ay - sy)) / kDegToRad;
     }
-    float size = 16.0f * 100.0f / (d / unit);
-    if (size < 9.0f) size = 9.0f;
-    if (size > 18.0f) size = 18.0f;
+    float size = ui::Sf(16.0f) * 100.0f / (d / unit);
+    if (size < ui::Sf(9.0f)) size = ui::Sf(9.0f);
+    if (size > ui::Sf(18.0f)) size = ui::Sf(18.0f);
     drawPlaneIcon(ri(sx), ri(sy), heading, size / 16.0f * 1.1f, col);
 
     if (static_cast<int>(it.idx) == card_idx && s_selected[0] != '\0') {
-      s_spr.drawCircle(ri(sx), ri(sy), 15, col);
+      s_spr.drawCircle(ri(sx), ri(sy), S(15), col);
+      if (ui::kScaleNum != ui::kScaleDen) s_spr.drawCircle(ri(sx), ri(sy), S(15) + 1, col);
     }
 
     s_label_pos[k] = {ri(sx), ri(sy), ri(size)};
@@ -1224,31 +1231,31 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
         setFont(&ui::font::SansBold8);
         const int wc = s_spr.textWidth(a.callsign);
         setFont(&ui::font::Sans8);
-        const int w = std::max({wc + 8 + static_cast<int>(s_spr.textWidth(l1)),
+        const int w = std::max({wc + S(8) + static_cast<int>(s_spr.textWidth(l1)),
                                 static_cast<int>(s_spr.textWidth(l2)),
-                                static_cast<int>(s_spr.textWidth(l3))}) + 12;
-        constexpr int h = 48;
-        const int off = ri(lp.size * 0.6f) + 6;
-        Box box{lp.x + off, lp.y - 12, w, h};
+                                static_cast<int>(s_spr.textWidth(l3))}) + S(12);
+        constexpr int h = S(48);
+        const int off = ri(lp.size * 0.6f) + S(6);
+        Box box{lp.x + off, lp.y - S(12), w, h};
         if (!claimLabel(box)) {
           box.x = lp.x - off - w;
           claimLabel(box);  // drawn anyway: the selected aircraft always gets its card
         }
-        box.x = std::max(2, std::min(kW - 2 - w, box.x));
-        box.y = std::max(kTopBarH + 3, std::min(kH - 2 - h, box.y));
-        s_spr.fillRoundRect(box.x, box.y, w, h, 5, kBg);
-        s_spr.drawRoundRect(box.x, box.y, w, h, 5, kRingDim);
+        box.x = std::max(S(2), std::min(kW - S(2) - w, box.x));
+        box.y = std::max(kTopBarH + S(3), std::min(kH - S(2) - h, box.y));
+        s_spr.fillRoundRect(box.x, box.y, w, h, S(5), kBg);
+        s_spr.drawRoundRect(box.x, box.y, w, h, S(5), kRingDim);
         const uint8_t col = altitudeColor(a.alt_ft);
         setFont(&ui::font::SansBold8);
         s_spr.setTextDatum(textdatum_t::top_left);
         s_spr.setTextColor(col);
-        s_spr.drawString(a.callsign, box.x + 6, box.y + 3);
+        s_spr.drawString(a.callsign, box.x + S(6), box.y + S(3));
         setFont(&ui::font::Sans8);
         s_spr.setTextColor(kTextDim);
-        s_spr.drawString(l1, box.x + 6 + wc + 8, box.y + 4);
+        s_spr.drawString(l1, box.x + S(6) + wc + S(8), box.y + S(4));
         s_spr.setTextColor(kText);
-        s_spr.drawString(l2, box.x + 6, box.y + 18);
-        s_spr.drawString(l3, box.x + 6, box.y + 32);
+        s_spr.drawString(l2, box.x + S(6), box.y + S(18));
+        s_spr.drawString(l3, box.x + S(6), box.y + S(32));
         continue;
       }
       const bool two_lines = !busy || is_card;
@@ -1258,10 +1265,10 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
         setFont(&ui::font::Sans8);
         w = std::max<int>(w, s_spr.textWidth(alt));
       }
-      w += 3;
-      const int h = two_lines ? 30 : 16;
-      const int off = ri(lp.size * 0.6f) + 5;
-      Box box{lp.x + off, lp.y - 9, w, h};
+      w += S(3);
+      const int h = two_lines ? S(30) : S(16);
+      const int off = ri(lp.size * 0.6f) + S(5);
+      Box box{lp.x + off, lp.y - S(9), w, h};
       if (!claimLabel(box)) {
         box.x = lp.x - off - w;
         if (!claimLabel(box)) continue;
@@ -1270,7 +1277,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       haloText(a.callsign, box.x + 1, box.y, altitudeColor(a.alt_ft));
       if (two_lines) {
         setFont(&ui::font::Sans8);
-        haloText(alt, box.x + 1, box.y + 14, kText);
+        haloText(alt, box.x + 1, box.y + S(14), kText);
       }
     }
   }
@@ -1280,15 +1287,16 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   s_spr.fillRect(0, 0, kW, kTopBarH, kPanel);
   s_spr.drawFastHLine(0, kTopBarH, kW, kRingDim);
   const bool fresh = fetched_ms != 0 && millis() - fetched_ms < 20000;
-  s_spr.fillCircle(10, 11, 3, fresh ? kCyan : kOrange);
+  const int ty = kTopBarH / 2;
+  s_spr.fillCircle(S(10), ty, S(3), fresh ? kCyan : kOrange);
 
   setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::middle_left);
   s_spr.setTextColor(kText);
-  s_spr.drawString("RADAR 3B", 19, 11);
-  const int src_x = 19 + s_spr.textWidth("RADAR 3B") + 10;
+  s_spr.drawString("RADAR 3B", S(19), ty);
+  const int src_x = S(19) + s_spr.textWidth("RADAR 3B") + S(10);
   s_spr.setTextColor(kTextDim);
-  s_spr.drawString(services::usb_feed::active() ? "USB" : services::adsb::sourceName(), src_x, 11);
+  s_spr.drawString(services::usb_feed::active() ? "USB" : services::adsb::sourceName(), src_x, ty);
 
   char buf[40];
   char range[12];
@@ -1297,25 +1305,25 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   snprintf(buf, sizeof(buf), "%u uçak  /  %s", static_cast<unsigned>(in_range), range);
   s_spr.setTextDatum(textdatum_t::middle_center);
   s_spr.setTextColor(kText);
-  s_spr.drawString(buf, kW / 2, 11);
+  s_spr.drawString(buf, kW / 2, ty);
 
   // Right side: indoor temperature / humidity (SHT30) and the time.
-  int x = kW - 8;
+  int x = kW - S(8);
   s_spr.setTextDatum(textdatum_t::middle_right);
   tm t;
   if (services::clock::now(&t)) {
     snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
     s_spr.setTextColor(kText);
-    s_spr.drawString(buf, x, 11);
-    x -= s_spr.textWidth(buf) + 12;
+    s_spr.drawString(buf, x, ty);
+    x -= s_spr.textWidth(buf) + S(12);
   }
   if (services::sht30::valid()) {
     snprintf(buf, sizeof(buf), "%%%d", static_cast<int>(lroundf(services::sht30::humidity())));
     s_spr.setTextColor(kTextDim);
-    s_spr.drawString(buf, x, 11);
-    x -= s_spr.textWidth(buf) + 10;
+    s_spr.drawString(buf, x, ty);
+    x -= s_spr.textWidth(buf) + S(10);
     snprintf(buf, sizeof(buf), "%.1f°C", services::sht30::temperatureC());
-    s_spr.drawString(buf, x, 11);
+    s_spr.drawString(buf, x, ty);
   }
 }
 
@@ -1330,12 +1338,12 @@ void drawLegendStrip() {
     uint8_t col;
     const char* text;
   } rows[3] = {{kCyan, "25K ft +"}, {kCream, "10-25K ft"}, {kOrange, "10K ft altı"}};
-  int x = 10;
+  int x = S(10);
   const int yc = y0 + kStripH / 2;
   for (const auto& r : rows) {
-    s_spr.fillCircle(x + 4, yc, 4, r.col);
-    s_spr.drawString(r.text, x + 13, yc + 1);
-    x += 13 + s_spr.textWidth(r.text) + 22;
+    s_spr.fillCircle(x + S(4), yc, S(4), r.col);
+    s_spr.drawString(r.text, x + S(13), yc + 1);
+    x += S(13) + s_spr.textWidth(r.text) + S(22);
   }
 }
 
@@ -1356,10 +1364,10 @@ PadButton padButton(int i) {
 }
 
 void drawButton(int x, int y, Arrow dir) {
-  s_spr.fillRoundRect(x, y, kBtnSize, kBtnSize, 7, kPanel);
-  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, 7, kRing);
+  s_spr.fillRoundRect(x, y, kBtnSize, kBtnSize, S(7), kPanel);
+  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, S(7), kRing);
   const int cx = x + kBtnSize / 2, cy = y + kBtnSize / 2;
-  constexpr int a = 8, b = 5;
+  constexpr int a = S(8), b = S(5);
   switch (dir) {
     case Arrow::Left:
       thickLine(cx + b, cy - a, cx - b, cy, kCyan);
@@ -1383,18 +1391,18 @@ void drawButton(int x, int y, Arrow dir) {
 /** Bottom right: opens the forecast screen. Sun + cloud and "HAVA". */
 void drawSwitchButton() {
   using namespace ui;
-  s_spr.fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, kPanel);
-  s_spr.drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, kRing);
+  s_spr.fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, S(8), kPanel);
+  s_spr.drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, S(8), kRing);
   const weather::IconPalette<Pal> pal{kPanel, kOrange, kCream, kCream, kTextDim,
                                       kCyan,  kText,   kOrange, kTextDim};
-  weather::drawWeatherIcon(s_spr, kSwitchX + 22, kSwitchY + kSwitchH / 2, 14,
+  weather::drawWeatherIcon(s_spr, kSwitchX + S(22), kSwitchY + kSwitchH / 2, S(14),
                            services::weather::Condition::PartlyCloudy, true, pal);
   setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::middle_left);
   s_spr.setTextColor(kText);
   setFont(&ui::font::SansBold8);
   s_spr.setTextDatum(textdatum_t::middle_center);
-  s_spr.drawString("HAVA", (kSwitchX + 40 + kSwitchX + kSwitchW) / 2, kSwitchY + kSwitchH / 2 + 1);
+  s_spr.drawString("HAVA", (kSwitchX + S(40) + kSwitchX + kSwitchW) / 2, kSwitchY + kSwitchH / 2 + 1);
 }
 
 void drawControls() {
@@ -1416,17 +1424,17 @@ void drawInfoPanels(int idx, const float* dist_km, const float* bearing_deg) {
   char buf[48];
 
   // Left: callsign, type, route codes, cities.
-  int x0 = 4;
-  s_spr.fillRoundRect(x0, kInfoY, kInfoLW, kInfoH, 6, kPanel);
-  s_spr.drawRoundRect(x0, kInfoY, kInfoLW, kInfoH, 6, kRingDim);
+  int x0 = S(4);
+  s_spr.fillRoundRect(x0, kInfoY, kInfoLW, kInfoH, S(6), kPanel);
+  s_spr.drawRoundRect(x0, kInfoY, kInfoLW, kInfoH, S(6), kRingDim);
   setFont(&ui::font::SansBold9);
   s_spr.setTextDatum(textdatum_t::top_left);
   s_spr.setTextColor(col);
-  s_spr.drawString(a.callsign, x0 + 8, kInfoY + 4);
+  s_spr.drawString(a.callsign, x0 + S(8), kInfoY + S(4));
   setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::top_right);
   s_spr.setTextColor(kTextDim);
-  s_spr.drawString(a.type, x0 + kInfoLW - 8, kInfoY + 6);
+  s_spr.drawString(a.type, x0 + kInfoLW - S(8), kInfoY + S(6));
   s_spr.setTextDatum(textdatum_t::top_left);
   services::route::Route rt;
   const services::route::Status rs = services::route::get(a.callsign, &rt);
@@ -1434,29 +1442,29 @@ void drawInfoPanels(int idx, const float* dist_km, const float* bearing_deg) {
     snprintf(buf, sizeof(buf), "%s > %s", rt.from_code[0] ? rt.from_code : "?",
              rt.to_code[0] ? rt.to_code : "?");
     s_spr.setTextColor(kText);
-    s_spr.drawString(buf, x0 + 8, kInfoY + 24);
+    s_spr.drawString(buf, x0 + S(8), kInfoY + S(24));
     if (rt.from_city[0] || rt.to_city[0]) {
       buf[0] = '\0';
       for (int cut = 19; cut >= 3; cut -= 2) {
         // Cut by letters, not bytes: Turkish letters are two bytes in UTF-8.
         snprintf(buf, sizeof(buf), "%.*s > %.*s", utf8Bytes(rt.from_city, cut), rt.from_city,
                  utf8Bytes(rt.to_city, cut), rt.to_city);
-        if (static_cast<int>(s_spr.textWidth(buf)) <= kInfoLW - 16) break;
+        if (static_cast<int>(s_spr.textWidth(buf)) <= kInfoLW - S(16)) break;
         buf[0] = '\0';
       }
       s_spr.setTextColor(kTextDim);
-      s_spr.drawString(buf, x0 + 8, kInfoY + 41);
+      s_spr.drawString(buf, x0 + S(8), kInfoY + S(41));
     }
   } else {
     s_spr.setTextColor(kTextDim);
     s_spr.drawString(rs == services::route::Status::Pending ? "Rota aranıyor..." : "Rota bilinmiyor",
-                     x0 + 8, kInfoY + 24);
+                     x0 + S(8), kInfoY + S(24));
   }
 
   // Right: the flight values, each with its name ("Hız: 233 kt"). No distance to home.
   x0 = kInfoRX;
-  s_spr.fillRoundRect(x0, kInfoY, kInfoRW, kInfoH, 6, kPanel);
-  s_spr.drawRoundRect(x0, kInfoY, kInfoRW, kInfoH, 6, kRingDim);
+  s_spr.fillRoundRect(x0, kInfoY, kInfoRW, kInfoH, S(6), kPanel);
+  s_spr.drawRoundRect(x0, kInfoY, kInfoRW, kInfoH, S(6), kRingDim);
   char alt[12];
   formatAltitude(a.alt_ft, alt, sizeof(alt));
   char spd[16];
@@ -1480,11 +1488,11 @@ void drawInfoPanels(int idx, const float* dist_km, const float* bearing_deg) {
   setFont(&ui::font::Sans8);
   s_spr.setTextDatum(textdatum_t::top_left);
   for (int r = 0; r < 3; ++r) {
-    const int y = kInfoY + 6 + r * 18;
+    const int y = kInfoY + S(6) + r * S(18);
     s_spr.setTextColor(kTextDim);
-    s_spr.drawString(rows[r].name, x0 + 8, y);
+    s_spr.drawString(rows[r].name, x0 + S(8), y);
     s_spr.setTextColor(rows[r].col);
-    s_spr.drawString(rows[r].value, x0 + 8 + s_spr.textWidth(rows[r].name) + 5, y);
+    s_spr.drawString(rows[r].value, x0 + S(8) + s_spr.textWidth(rows[r].name) + S(5), y);
   }
 }
 
@@ -1493,13 +1501,13 @@ void drawEmptyNote(unsigned long fetched_ms) {
   s_spr.setTextDatum(textdatum_t::middle_center);
   s_spr.setTextColor(kTextDim);
   s_spr.drawString(fetched_ms == 0 ? "Uçak verisi bekleniyor..." : "Menzilde uçak yok", kW / 2,
-                   kTopBarH + kStripH + 24);
+                   kTopBarH + kStripH + S(24));
   const char* err = services::adsb::lastError();
   if (fetched_ms == 0 && err[0] != '\0' && !services::usb_feed::active()) {
     char line[64];
     snprintf(line, sizeof(line), "Son deneme: %s", err);
     setFont(&ui::font::Sans8);
-    s_spr.drawString(line, kW / 2, kTopBarH + kStripH + 44);
+    s_spr.drawString(line, kW / 2, kTopBarH + kStripH + S(44));
   }
 }
 
@@ -1525,7 +1533,11 @@ void animateYaw() {
 
 bool init() {
   s_spr.setColorDepth(4);
+#if defined(BOARD_WS5)
+  s_spr.setPsram(true);  // 800x480 at 4 bits = 192 KB: in the 8 MB PSRAM
+#else
   s_spr.setPsram(false);
+#endif
   if (s_spr.createSprite(kW, kH) == nullptr) {
     Serial.println("radar3d: sprite allocation failed");
     return false;
@@ -1639,7 +1651,7 @@ bool hostHitPos(const char* callsign, int* x, int* y) {
 bool handleTap(int x, int y) {
   for (int i = 0; i < 4; ++i) {
     const PadButton b = padButton(i);
-    if (x >= b.x - 2 && x < b.x + kBtnSize + 2 && y >= b.y - 2 && y < b.y + kBtnSize + 2) {
+    if (x >= b.x - S(2) && x < b.x + kBtnSize + S(2) && y >= b.y - S(2) && y < b.y + kBtnSize + S(2)) {
       auto p = services::display_prefs::get();
       if (i == 0 || i == 1) {
         // Right arrow turns the view to the right (the map swings left), left to the left.
@@ -1656,7 +1668,7 @@ bool handleTap(int x, int y) {
       return true;
     }
   }
-  if (y < kTopBarH + 6) {
+  if (y < kTopBarH + S(6)) {
     ui::radar::rangeNext();
     return true;
   }
@@ -1676,7 +1688,7 @@ bool handleTap(int x, int y) {
     return true;
   }
   const bool on_info = s_selected[0] != '\0' && !infoInLabel() && y >= kInfoY &&
-                       y < kInfoY + kInfoH && (x < 4 + kInfoLW || x >= kInfoRX);
+                       y < kInfoY + kInfoH && (x < S(4) + kInfoLW || x >= kInfoRX);
   if (on_info) return true;  // the panels themselves do nothing
   if (s_selected[0] != '\0') {
     s_selected[0] = '\0';  // tap on empty sky: back to "nearest"

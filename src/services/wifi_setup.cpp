@@ -46,6 +46,7 @@ void IRAM_ATTR onBootButtonIsr() {
 }
 
 void initBootButton() {
+  if (!config::kHasBootButton) return;  // 5" board: GPIO 0 drives the LCD
   pinMode(config::kBootPin, INPUT_PULLUP);
   if (s_boot_interrupt_attached) {
     return;
@@ -263,6 +264,7 @@ bool wifiShowsSetupScreenOnBoot() {
 }
 
 bool wifiBootButtonPressed() {
+  if (!config::kHasBootButton) return false;
   return digitalRead(config::kBootPin) == LOW;
 }
 

@@ -48,11 +48,17 @@ jobs:
           printf '#pragma once\n#define SETUP_PAGE_URL "%s.github.io/%s"\n' "$OWNER" "$REPO" > include/setup_url.h
           cat include/setup_url.h
 
-      - name: Build
+      - name: Build (4" ESP32 board)
         run: pio run -e wroom32u
 
-      - name: Merge web-flash image
+      - name: Merge web-flash image (4")
         run: pio run -e wroom32u -t merge
+
+      - name: Build (Waveshare ESP32-S3-Touch-LCD-5)
+        run: pio run -e ws5
+
+      - name: Merge web-flash image (5")
+        run: pio run -e ws5 -t merge
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -64,6 +70,10 @@ jobs:
             .pio/build/wroom32u/firmware.bin
             .pio/build/wroom32u/bootloader.bin
             .pio/build/wroom32u/partitions.bin
+            .pio/build/ws5/firmware-merged.bin
+            .pio/build/ws5/firmware.bin
+            .pio/build/ws5/bootloader.bin
+            .pio/build/ws5/partitions.bin
 
       - name: Assemble web site
         run: |
@@ -75,6 +85,10 @@ jobs:
           cp .pio/build/wroom32u/firmware-merged.bin site/firmware-merged.bin
           cp .pio/build/wroom32u/bootloader.bin site/bootloader.bin
           cp .pio/build/wroom32u/partitions.bin site/partitions.bin
+          cp .pio/build/ws5/firmware.bin site/firmware-ws5.bin
+          cp .pio/build/ws5/firmware-merged.bin site/firmware-merged-ws5.bin
+          cp .pio/build/ws5/bootloader.bin site/bootloader-ws5.bin
+          cp .pio/build/ws5/partitions.bin site/partitions-ws5.bin
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
@@ -82,12 +96,15 @@ jobs:
           import json, sys
           version = sys.argv[1]
 
-          def manifest(name, parts):
+          # One entry per board; the installer picks the one matching the connected chip
+          # (ESP32 = 4" board, ESP32-S3 = Waveshare 5" board).
+          def manifest(name, parts, parts_s3):
               return {
                   "name": name,
                   "version": version,
                   "new_install_prompt_erase": True,
-                  "builds": [{"chipFamily": "ESP32", "parts": parts}],
+                  "builds": [{"chipFamily": "ESP32", "parts": parts},
+                             {"chipFamily": "ESP32-S3", "parts": parts_s3}],
               }
 
           def write(path, data):
@@ -101,10 +118,16 @@ jobs:
                     {"path": "bootloader.bin", "offset": 4096},
                     {"path": "partitions.bin", "offset": 32768},
                     {"path": "firmware.bin", "offset": 65536},
+                ], [
+                    {"path": "bootloader-ws5.bin", "offset": 0},
+                    {"path": "partitions-ws5.bin", "offset": 32768},
+                    {"path": "firmware-ws5.bin", "offset": 65536},
                 ]))
           # Full install: one merged image at 0x0. Wipes settings.
           write("site/manifest-full.json",
-                manifest("Plane Radar 3D full install", [{"path": "firmware-merged.bin", "offset": 0}]))
+                manifest("Plane Radar 3D full install",
+                         [{"path": "firmware-merged.bin", "offset": 0}],
+                         [{"path": "firmware-merged-ws5.bin", "offset": 0}]))
           write("site/version.json", {"version": version})
           PY
           ls -l site

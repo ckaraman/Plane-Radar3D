@@ -321,11 +321,13 @@ void setup() {
   }
   services::sht30::init();
 
+#if !defined(BOARD_WS5)  // capacitive panel on the 5" board needs no calibration
   // Finger on the screen during power-up: (re)calibrate the touch panel.
   lgfx::touch_point_t tp;
   if (tft.getTouch(&tp) > 0) {
     displayRunTouchCalibration();
   }
+#endif
 
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();

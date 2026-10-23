@@ -1,5 +1,8 @@
 #pragma once
 
+#include "config.h"
+#include "ui/ui_scale.h"
+
 namespace ui {
 
 /**
@@ -9,18 +12,18 @@ namespace ui {
  *  - water button (kWaterBtn*): a small droplet avatar left of the switch button on
  *    the radar and forecast screens (top right on the clock): jumps to water tracking
  */
-constexpr int kSwitchW = 100;
-constexpr int kSwitchH = 42;
-constexpr int kSwitchX = 480 - 4 - kSwitchW;
-constexpr int kSwitchY = 320 - 4 - kSwitchH;
+constexpr int kSwitchW = S(100);
+constexpr int kSwitchH = S(42);
+constexpr int kSwitchX = config::kDisplayWidth - S(4) - kSwitchW;
+constexpr int kSwitchY = config::kDisplayHeight - S(4) - kSwitchH;
 
-constexpr int kWaterBtnW = 50;
+constexpr int kWaterBtnW = S(50);
 constexpr int kWaterBtnH = kSwitchH;
-constexpr int kWaterBtnX = kSwitchX - 6 - kWaterBtnW;
+constexpr int kWaterBtnX = kSwitchX - S(6) - kWaterBtnW;
 constexpr int kWaterBtnY = kSwitchY;
 
 inline bool hitBox(int x, int y, int bx, int by, int bw, int bh) {
-  constexpr int m = 4;  // a little slack for the resistive panel
+  constexpr int m = S(4);  // a little slack for the touch panel
   return x >= bx - m && x < bx + bw + m && y >= by - m && y < by + bh + m;
 }
 
@@ -40,21 +43,24 @@ inline bool waterButtonHit(int x, int y) {
 template <typename Gfx, typename Color>
 void drawWaterButton(Gfx& g, int x, int y, int w, int h, Color panel, Color edge, Color water,
                      Color white, Color dark) {
-  g.fillRoundRect(x, y, w, h, 8, panel);
-  g.drawRoundRect(x, y, w, h, 8, edge);
-  const int cx = x + w / 2, cy = y + h / 2 + 5;
-  constexpr int r = 11;
+  g.fillRoundRect(x, y, w, h, S(8), panel);
+  g.drawRoundRect(x, y, w, h, S(8), edge);
+  const int cx = x + w / 2, cy = y + h / 2 + S(5);
+  constexpr int r = S(11);
   g.fillCircle(cx, cy, r, water);
-  g.fillTriangle(cx, cy - 2 * r - 2, cx - r + 1, cy - 5, cx + r - 1, cy - 5, water);
+  g.fillTriangle(cx, cy - 2 * r - S(2), cx - r + 1, cy - S(5), cx + r - 1, cy - S(5), water);
   // eyes
-  g.fillEllipse(cx - 4, cy - 2, 2, 3, white);
-  g.fillEllipse(cx + 4, cy - 2, 2, 3, white);
-  g.fillCircle(cx - 4, cy - 1, 1, dark);
-  g.fillCircle(cx + 4, cy - 1, 1, dark);
+  g.fillEllipse(cx - S(4), cy - S(2), S(2), S(3), white);
+  g.fillEllipse(cx + S(4), cy - S(2), S(2), S(3), white);
+  g.fillCircle(cx - S(4), cy - S(1), S(1), dark);
+  g.fillCircle(cx + S(4), cy - S(1), S(1), dark);
   // smile
-  g.drawFastHLine(cx - 2, cy + 5, 5, dark);
-  g.drawPixel(cx - 3, cy + 4, dark);
-  g.drawPixel(cx + 3, cy + 4, dark);
+  g.drawFastHLine(cx - S(2), cy + S(5), S(5), dark);
+  g.drawPixel(cx - S(3), cy + S(4), dark);
+  g.drawPixel(cx + S(3), cy + S(4), dark);
+  if (kScaleNum != kScaleDen) {  // bigger panel: a 2 px smile
+    g.drawFastHLine(cx - S(2), cy + S(5) + 1, S(5), dark);
+  }
 }
 
 }  // namespace ui

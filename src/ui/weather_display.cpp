@@ -18,6 +18,8 @@
 #include "ui/screen_switch.h"
 #include "ui/weather_icons.h"
 #include "ui/fonts_tr.h"
+#include "ui/scaled_gfx.h"
+#include "ui/ui_scale.h"
 
 #ifdef RADAR3D_HOST_TEST
 namespace ui::radar3d {
@@ -32,9 +34,17 @@ namespace {
 using services::weather::Day;
 using services::weather::Forecast;
 
-constexpr int kW = config::kDisplayWidth;
-constexpr int kH = config::kDisplayHeight;
+// Laid out on the 480x320 design grid; ScaledGfx maps it to the panel (identity on
+// the 4" board, 1.5x and centred on the 5" one). The top bar and the screen buttons
+// use real panel coordinates so they line up with the radar screen's.
+using Canvas = ScaledGfx<LGFX_Sprite>;
+constexpr int kW = Canvas::kDesignW;
+constexpr int kH = Canvas::kDesignH;
 constexpr int kTopBarH = 22;
+// The switch button's place in the design grid (layout only; it is drawn in panel
+// coordinates by drawSwitchButton()).
+constexpr int kDSwitchH = 42;
+constexpr int kDSwitchY = kH - 4 - kDSwitchH;
 
 // Palette of the forecast screen (index = colour number in the 4-bit sprite).
 enum Pal : uint8_t {
@@ -72,7 +82,8 @@ const char* const kMonth[12] = {"Ocak",   "Şubat",   "Mart",  "Nisan", "Mayıs"
                                 "Temmuz", "Ağustos", "Eylül", "Ekim",  "Kasım", "Aralık"};
 const char* const kCompass[8] = {"K", "KD", "D", "GD", "G", "GB", "B", "KB"};
 
-LGFX_Sprite* s_spr = nullptr;
+Canvas s_canvas;
+Canvas* s_spr = nullptr;
 long s_drawn_key = -1;
 int s_selected = 0;  // day shown in the big card: 0 = today (current conditions)
 struct Rect {
@@ -122,18 +133,31 @@ void drop(int cx, int cy, int r, uint8_t color) {
   s_spr->fillTriangle(cx - r, cy + r / 2, cx + r, cy + r / 2, cx, cy - r - r / 2, color);
 }
 
+/** Text in panel coordinates (top bar, screen buttons). */
+void rawText(const char* t, int x, int y, textdatum_t datum, const lgfx::IFont* f, uint8_t color) {
+  LGFX_Sprite* g = s_spr->raw();
+  g->setFont(f);
+  g->setTextSize(1);
+  g->setTextDatum(datum);
+  g->setTextColor(color);
+  g->drawString(t, x, y);
+}
+
 void drawTopBar() {
-  s_spr->fillRect(0, 0, kW, kTopBarH, wPanel);
-  s_spr->drawFastHLine(0, kTopBarH, kW, wEdge);
-  text("HAVA DURUMU", 10, 11, textdatum_t::middle_left, &ui::font::Sans8, wText);
+  // Panel coordinates, full width: the same bar as on the radar screen.
+  LGFX_Sprite* g = s_spr->raw();
+  const int pw = config::kDisplayWidth, bh = S(kTopBarH), ty = bh / 2;
+  g->fillRect(0, 0, pw, bh, wPanel);
+  g->drawFastHLine(0, bh, pw, wEdge);
+  rawText("HAVA DURUMU", S(10), ty, textdatum_t::middle_left, &ui::font::Sans8, wText);
   tm t;
   if (services::clock::now(&t)) {
     char buf[40];
     snprintf(buf, sizeof(buf), "%d %s %s", t.tm_mday, kMonth[t.tm_mon % 12],
              kDayLong[t.tm_wday % 7]);
-    text(buf, kW / 2, 11, textdatum_t::middle_center, &ui::font::Sans8, wDim);
+    rawText(buf, pw / 2, ty, textdatum_t::middle_center, &ui::font::Sans8, wDim);
     snprintf(buf, sizeof(buf), "%02d:%02d", t.tm_hour, t.tm_min);
-    text(buf, kW - 8, 11, textdatum_t::middle_right, &ui::font::Sans8, wText);
+    rawText(buf, pw - S(8), ty, textdatum_t::middle_right, &ui::font::Sans8, wText);
   }
 }
 
@@ -340,19 +364,21 @@ void drawDay(const Day& d, bool today, bool selected, int x, int y, int w, int h
 }
 
 void drawSwitchButton() {
-  s_spr->fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, wPanel);
-  s_spr->drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, 8, wCool);
+  // Panel coordinates: the buttons sit exactly where the radar screen has them.
+  LGFX_Sprite* g = s_spr->raw();
+  g->fillRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, S(8), wPanel);
+  g->drawRoundRect(kSwitchX, kSwitchY, kSwitchW, kSwitchH, S(8), wCool);
   // Small radar: two rings, crosshair and a blip.
-  const int cx = kSwitchX + 21, cy = kSwitchY + kSwitchH / 2;
-  s_spr->drawCircle(cx, cy, 13, wCool);
-  s_spr->drawCircle(cx, cy, 7, wEdge);
-  s_spr->drawFastHLine(cx - 13, cy, 27, wEdge);
-  s_spr->drawFastVLine(cx, cy - 13, 27, wEdge);
-  s_spr->drawLine(cx, cy, cx + 9, cy - 9, wCool);
-  s_spr->fillCircle(cx + 5, cy - 2, 2, wWarm);
-  text("RADAR", (kSwitchX + 38 + kSwitchX + kSwitchW) / 2, cy + 1, textdatum_t::middle_center,
-       &ui::font::SansBold8, wText);
-  drawWaterButton(*s_spr, kWaterBtnX, kWaterBtnY, kWaterBtnW, kWaterBtnH, wPanel, wCool, wRain,
+  const int cx = kSwitchX + S(21), cy = kSwitchY + kSwitchH / 2;
+  g->drawCircle(cx, cy, S(13), wCool);
+  g->drawCircle(cx, cy, S(7), wEdge);
+  g->drawFastHLine(cx - S(13), cy, 2 * S(13) + 1, wEdge);
+  g->drawFastVLine(cx, cy - S(13), 2 * S(13) + 1, wEdge);
+  g->drawLine(cx, cy, cx + S(9), cy - S(9), wCool);
+  g->fillCircle(cx + S(5), cy - S(2), S(2), wWarm);
+  rawText("RADAR", (kSwitchX + S(38) + kSwitchX + kSwitchW) / 2, cy + 1,
+          textdatum_t::middle_center, &ui::font::SansBold8, wText);
+  drawWaterButton(*g, kWaterBtnX, kWaterBtnY, kWaterBtnW, kWaterBtnH, wPanel, wCool, wRain,
                   wText, wBg);
 }
 
@@ -369,7 +395,7 @@ void sunIcon(int cx, int cy, bool rise, uint8_t color) {
 }
 
 void drawStatusLine(const Forecast& f, bool have, unsigned long fetched_ms) {
-  const int y = kSwitchY + kSwitchH / 2;
+  const int y = kDSwitchY + kDSwitchH / 2;
   int x = 10;
   char buf[48];
   if (have && f.sunrise_min >= 0 && f.sunset_min >= 0) {
@@ -440,7 +466,7 @@ void drawScreen() {
   drawIndoor(kW - 6 - kIndoorW, kTopY, kIndoorW, kTopH);
 
   constexpr int kDaysY = kTopY + kTopH + 6;
-  constexpr int kDaysH = kSwitchY - 6 - kDaysY;
+  constexpr int kDaysH = kDSwitchY - 6 - kDaysY;
   if (have && f.day_count > 0) {
     const int n = f.day_count;
     constexpr int gap = 6;
@@ -460,7 +486,7 @@ void drawScreen() {
   drawSwitchButton();
 
 #ifdef RADAR3D_HOST_TEST
-  ui::radar3d::hostCaptureFrame(*s_spr);
+  ui::radar3d::hostCaptureFrame(*s_spr->raw());
 #else
   s_spr->pushSprite(0, 0);
 #endif
@@ -489,13 +515,16 @@ long screenKey() {
 
 void weatherDisplayEnter() {
   s_selected = 0;
-  s_spr = ui::radar3d::frame();
-  if (s_spr == nullptr) return;
+  LGFX_Sprite* frame = ui::radar3d::frame();
+  if (frame == nullptr) return;
+  s_canvas.bind(frame);
+  s_spr = &s_canvas;
   drawScreen();
   s_drawn_key = screenKey();
 }
 
-bool weatherDisplayTap(int x, int y) {
+bool weatherDisplayTap(int px, int py) {
+  const int x = Canvas::toDesignX(px), y = Canvas::toDesignY(py);  // day boxes are in design units
   for (int i = 0; i < s_day_rect_count; ++i) {
     const Rect& r = s_day_rects[i];
     if (x >= r.x - 3 && x < r.x + r.w + 3 && y >= r.y - 3 && y < r.y + r.h + 3) {

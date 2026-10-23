@@ -476,7 +476,9 @@
     bar.hidden = false; bar.value = 0;
     try {
       setMsg(msg, 'info', 'Yeni yazılım indiriliyor…');
-      const r = await fetch('firmware.bin?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
+      // The 5" Waveshare board (ESP32-S3) has its own image; older firmware sends no "hw".
+      const fwFile = state.device && state.device.hw === 'ws5' ? 'firmware-ws5.bin' : 'firmware.bin';
+      const r = await fetch(fwFile + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
       if (!r.ok) throw new Error('indirme ' + r.status);
       const fw = new Uint8Array(await r.arrayBuffer());
       // The start line is retried a few times: on a device busy with Wi-Fi (TLS takes

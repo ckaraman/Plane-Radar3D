@@ -9,7 +9,7 @@ namespace config {
 
 /** Shown on the web setup page; the build copies it into the update manifest.
  *  Bump it for every release you publish. Keep this declaration on a single line. */
-constexpr char kFirmwareVersion[] = "3d-0.15.1";
+constexpr char kFirmwareVersion[] = "3d-0.16.0";
 
 // --- USB setup page address shown on the setup screen ---
 // CI writes include/setup_url.h with the GitHub Pages address of the repository
@@ -38,7 +38,31 @@ constexpr unsigned long kWifiReconnectIntervalMs = 15000;
  *  (The C3 Super Mini build had to drop to 8.5 dBm because of its chip antenna.) */
 constexpr wifi_power_t kWifiTxPower = WIFI_POWER_19_5dBm;
 
+#if defined(BOARD_WS5)
+// =====================================================================================
+// Waveshare ESP32-S3-Touch-LCD-5 (800x480 RGB panel, GT911 capacitive touch, CH422G
+// I/O expander for backlight / resets, 8 MB PSRAM). Pins from the board's schematic as
+// used by Waveshare's demos and ESPHome's "ESP32-S3-TOUCH-LCD-4.3" model (same family).
+// =====================================================================================
+constexpr bool kHasBootButton = false;  // GPIO 0 is an RGB data line on this board
+constexpr gpio_num_t kBootPin = GPIO_NUM_NC;
+constexpr unsigned long kBootResetHoldMs = 3000UL;
+constexpr unsigned long kBootTapMinMs = 40UL;
+
+constexpr int kDisplayWidth = 800;
+constexpr int kDisplayHeight = 480;
+/** Default backlight (0-255). The CH422G switches it on/off only. */
+constexpr uint8_t kDisplayBrightness = 255;
+
+// Shared I2C bus: GT911 touch, CH422G expander and the SHT30 (on the board's I2C header).
+constexpr int kI2cPort = 1;  // LovyanGFX I2C port used for all three
+constexpr int kI2cPinSda = 8;
+constexpr int kI2cPinScl = 9;
+constexpr int kTouchPinInt = 4;
+constexpr uint8_t kSht30Address = 0x44;
+#else
 // --- BOOT button (ESP32 DevKit, GPIO 0, active LOW) ---
+constexpr bool kHasBootButton = true;
 constexpr gpio_num_t kBootPin = GPIO_NUM_0;
 constexpr unsigned long kBootResetHoldMs = 3000UL;
 /** Ignore BOOT taps shorter than this (debounce). */
@@ -70,6 +94,7 @@ constexpr uint8_t kDisplayBrightness = 255;  // full backlight
 constexpr int kI2cPinSda = 25;
 constexpr int kI2cPinScl = 26;
 constexpr uint8_t kSht30Address = 0x44;  // 0x45 when the ADDR pin is tied to 3.3 V
+#endif
 constexpr unsigned long kSht30IntervalMs = 10000;
 /** Added to every temperature reading. Use a negative value if the sensor sits
  *  close to the display or the ESP32 and reads warm. */
