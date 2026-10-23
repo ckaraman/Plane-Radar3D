@@ -219,6 +219,14 @@
         </esp-web-install-button>
         <button type="button" class="btn danger" id="btn-reset" disabled>Ayarları sıfırla</button>
       </div>
+      <p class="small"><strong>Waveshare 5" ekranlı kart:</strong> yukarıdaki düğme 800×480 sürümü (ESP32-S3-Touch-LCD-5) yükler. Kartınız 1024×600 sürümüyse (ESP32-S3-Touch-LCD-5<strong>B</strong>; görüntü karışık çizgiler halinde geliyorsa büyük ihtimalle budur) bu düğmeyi kullanın:</p>
+      <div class="row">
+        <esp-web-install-button id="install-full-ws5b" manifest="manifest-full-ws5b.json">
+          <button slot="activate" class="btn" type="button">5" 1024×600 (5B) tam kurulum</button>
+          <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
+          <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+        </esp-web-install-button>
+      </div>
       <p class="small">“Ayarları sıfırla” bağlı cihazdaki WiFi, konum ve birim ayarlarını siler ve cihazı yeniden başlatır.</p>
     </details>
   </section>
@@ -477,7 +485,8 @@
     try {
       setMsg(msg, 'info', 'Yeni yazılım indiriliyor…');
       // The 5" Waveshare board (ESP32-S3) has its own image; older firmware sends no "hw".
-      const fwFile = state.device && state.device.hw === 'ws5' ? 'firmware-ws5.bin' : 'firmware.bin';
+      const hw = state.device && state.device.hw;
+      const fwFile = hw === 'ws5' ? 'firmware-ws5.bin' : hw === 'ws5b' ? 'firmware-ws5b.bin' : 'firmware.bin';
       const r = await fetch(fwFile + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
       if (!r.ok) throw new Error('indirme ' + r.status);
       const fw = new Uint8Array(await r.arrayBuffer());
@@ -1366,7 +1375,7 @@
     } catch (_) { state.latest = null; }
     // The installer fetches its manifest with normal caching (up to ~10 min on GitHub Pages), which
     // could offer the previous version. A unique query string always fetches the current one.
-    for (const id of ['install-update', 'install-full']) {
+    for (const id of ['install-update', 'install-full', 'install-full-ws5b']) {
       const el = $('#' + id), base = el && (el.getAttribute('manifest') || '').split('?')[0];
       if (el && base) el.setAttribute('manifest', base + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now());
     }

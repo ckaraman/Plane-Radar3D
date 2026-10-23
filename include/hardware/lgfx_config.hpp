@@ -76,16 +76,34 @@ class LGFX : public lgfx::LGFX_Device {
       cfg.pin_vsync = 3;
       cfg.pin_hsync = 46;
       cfg.pin_pclk = 7;
+#if defined(BOARD_WS5B)
+      // 1024x600 "5B" panel: timing proven with LovyanGFX on this board
+      // (VaAndCob/Waveshare-ESP32-S3-Touch-5). 14 MHz keeps the PSRAM frame buffer
+      // read within budget (LovyanGFX has no bounce buffers).
+      cfg.freq_write = 14000000;
+      cfg.hsync_polarity = 0;
+      cfg.hsync_front_porch = 40;
+      cfg.hsync_pulse_width = 20;
+      cfg.hsync_back_porch = 40;
+      cfg.vsync_polarity = 0;
+      cfg.vsync_front_porch = 40;
+      cfg.vsync_pulse_width = 20;
+      cfg.vsync_back_porch = 40;
+      cfg.pclk_active_neg = 0;
+#else
+      // 800x480 panel: Waveshare's own values for ESP32-S3-Touch-LCD-5
+      // (ESP32_Display_Panel, BOARD_WAVESHARE_ESP32_S3_TOUCH_LCD_5).
       cfg.freq_write = 16000000;
       cfg.hsync_polarity = 0;
-      cfg.hsync_front_porch = 210;
-      cfg.hsync_pulse_width = 30;
-      cfg.hsync_back_porch = 30;
+      cfg.hsync_front_porch = 8;
+      cfg.hsync_pulse_width = 4;
+      cfg.hsync_back_porch = 8;
       cfg.vsync_polarity = 0;
-      cfg.vsync_front_porch = 4;
+      cfg.vsync_front_porch = 8;
       cfg.vsync_pulse_width = 4;
-      cfg.vsync_back_porch = 4;
+      cfg.vsync_back_porch = 8;
       cfg.pclk_active_neg = 1;
+#endif
       cfg.de_idle_high = 0;
       cfg.pclk_idle_high = 0;
       _bus.config(cfg);

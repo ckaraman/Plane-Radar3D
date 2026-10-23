@@ -10,7 +10,10 @@ namespace ui {
  * right or bottom edge use the real screen size, so the extra width of the 5:3 panel
  * goes to the map, not to stretched widgets.
  */
-#if defined(BOARD_WS5)
+#if defined(BOARD_WS5B)  // 1024x600: 1.875x (320 -> 600 rows)
+constexpr int kScaleNum = 15;
+constexpr int kScaleDen = 8;
+#elif defined(BOARD_WS5)
 constexpr int kScaleNum = 3;
 constexpr int kScaleDen = 2;
 #else

@@ -60,6 +60,9 @@ jobs:
       - name: Merge web-flash image (5")
         run: pio run -e ws5 -t merge
 
+      - name: Build + merge (Waveshare ESP32-S3-Touch-LCD-5B, 1024x600)
+        run: pio run -e ws5b -t merge
+
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -74,6 +77,8 @@ jobs:
             .pio/build/ws5/firmware.bin
             .pio/build/ws5/bootloader.bin
             .pio/build/ws5/partitions.bin
+            .pio/build/ws5b/firmware-merged.bin
+            .pio/build/ws5b/firmware.bin
 
       - name: Assemble web site
         run: |
@@ -89,6 +94,8 @@ jobs:
           cp .pio/build/ws5/firmware-merged.bin site/firmware-merged-ws5.bin
           cp .pio/build/ws5/bootloader.bin site/bootloader-ws5.bin
           cp .pio/build/ws5/partitions.bin site/partitions-ws5.bin
+          cp .pio/build/ws5b/firmware.bin site/firmware-ws5b.bin
+          cp .pio/build/ws5b/firmware-merged.bin site/firmware-merged-ws5b.bin
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
@@ -128,6 +135,14 @@ jobs:
                 manifest("Plane Radar 3D full install",
                          [{"path": "firmware-merged.bin", "offset": 0}],
                          [{"path": "firmware-merged-ws5.bin", "offset": 0}]))
+          # 1024x600 "5B" board: same chip family as the 800x480 one, so its own manifest.
+          write("site/manifest-full-ws5b.json", {
+              "name": "Plane Radar 3D full install (5B 1024x600)",
+              "version": version,
+              "new_install_prompt_erase": True,
+              "builds": [{"chipFamily": "ESP32-S3",
+                          "parts": [{"path": "firmware-merged-ws5b.bin", "offset": 0}]}],
+          })
           write("site/version.json", {"version": version})
           PY
           ls -l site
