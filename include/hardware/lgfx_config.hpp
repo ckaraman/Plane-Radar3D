@@ -9,6 +9,7 @@
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 
+#include "hardware/bus_rgb_bounce.hpp"
 #include "hardware/ch422g.h"
 
 /** Backlight on the CH422G expander: on / off only. */
@@ -26,11 +27,10 @@ class Light_CH422G : public lgfx::ILight {
 /**
  * LovyanGFX device: Waveshare ESP32-S3-Touch-LCD-5, 800x480 RGB panel (frame buffer
  * in PSRAM), GT911 capacitive touch on the shared I2C bus, backlight via the CH422G.
- * Panel timing: Waveshare's 800x480 values as in ESPHome's ESP32-S3-TOUCH-LCD-4.3
- * model (16 MHz pixel clock, inverted clock).
+ * Panel timing: Waveshare's values for this board (16 MHz pixel clock, inverted clock).
  */
 class LGFX : public lgfx::LGFX_Device {
-  lgfx::Bus_RGB _bus;
+  Bus_RGB_Bounce _bus;  // esp_lcd with bounce buffers (see bus_rgb_bounce.hpp)
   lgfx::Panel_RGB _panel;
   lgfx::Touch_GT911 _touch;
   Light_CH422G _light;

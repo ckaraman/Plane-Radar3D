@@ -29,6 +29,7 @@ jobs:
             ~/.cache/pip
             ~/.platformio/.cache
             .pio/libdeps
+            .pio-core-s3
           key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
           restore-keys: |
             ${{ runner.os }}-pio-
@@ -54,14 +55,23 @@ jobs:
       - name: Merge web-flash image (4")
         run: pio run -e wroom32u -t merge
 
-      - name: Build (Waveshare ESP32-S3-Touch-LCD-5)
-        run: pio run -e ws5
+      # The 5" boards build on Arduino core 3 (pioarduino platform; its RGB LCD driver has
+      # bounce buffers). Separate PlatformIO core dir so its packages do not replace the
+      # core 2.0.14 ones the 4" build uses; click < 8.2 for its esptool 5.0.0.
+      - name: Set up PlatformIO for the 5" boards
+        run: |
+          python -m venv "$HOME/pio-s3"
+          "$HOME/pio-s3/bin/pip" install --upgrade platformio "click<8.2"
 
-      - name: Merge web-flash image (5")
-        run: pio run -e ws5 -t merge
+      - name: Build + merge (Waveshare ESP32-S3-Touch-LCD-5, 800x480)
+        env:
+          PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio-core-s3
+        run: '"$HOME/pio-s3/bin/pio" run -e ws5 -t merge'
 
       - name: Build + merge (Waveshare ESP32-S3-Touch-LCD-5B, 1024x600)
-        run: pio run -e ws5b -t merge
+        env:
+          PLATFORMIO_CORE_DIR: ${{ github.workspace }}/.pio-core-s3
+        run: '"$HOME/pio-s3/bin/pio" run -e ws5b -t merge'
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4

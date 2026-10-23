@@ -2,7 +2,18 @@
 
 #include <Arduino.h>
 #include <esp_partition.h>
+#include <esp_arduino_version.h>
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+#include <spi_flash_mmap.h>
+#define MAP_MMAP_DATA ESP_PARTITION_MMAP_DATA
+typedef esp_partition_mmap_handle_t map_mmap_handle_t;
+#define map_munmap(h) esp_partition_munmap(h)
+#else
 #include <esp_spi_flash.h>
+#define MAP_MMAP_DATA SPI_FLASH_MMAP_DATA
+typedef spi_flash_mmap_handle_t map_mmap_handle_t;
+#define map_munmap(h) spi_flash_munmap(h)
+#endif
 
 #include <cstdlib>
 #include <cstring>
@@ -24,7 +35,7 @@ struct FlashHeader {
 // costs no RAM: with Wi-Fi on, the HTTPS client needs every free kilobyte.
 const uint8_t* s_active = nullptr;
 size_t s_active_len = 0;
-spi_flash_mmap_handle_t s_mmap = 0;
+map_mmap_handle_t s_mmap = 0;
 bool s_mapped = false;
 uint8_t* s_active_ram = nullptr;  // fallback copy if mapping fails
 uint32_t s_generation = 1;
@@ -41,7 +52,7 @@ const esp_partition_t* partition() {
 
 void releaseActive() {
   if (s_mapped) {
-    spi_flash_munmap(s_mmap);
+    map_munmap(s_mmap);
     s_mapped = false;
   }
   free(s_active_ram);
@@ -109,12 +120,12 @@ bool activateStored() {
     return false;
   }
   const void* ptr = nullptr;
-  spi_flash_mmap_handle_t handle;
-  if (esp_partition_mmap(part, 0, sizeof(h) + h.length, SPI_FLASH_MMAP_DATA, &ptr, &handle) ==
+  map_mmap_handle_t handle;
+  if (esp_partition_mmap(part, 0, sizeof(h) + h.length, MAP_MMAP_DATA, &ptr, &handle) ==
       ESP_OK) {
     const uint8_t* blob = static_cast<const uint8_t*>(ptr) + sizeof(h);
     if (crc32(blob, h.length) != h.crc || !validBlob(blob, h.length)) {
-      spi_flash_munmap(handle);
+      map_munmap(handle);
       Serial.println("map: stored map is damaged, ignoring it");
       return false;
     }

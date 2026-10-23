@@ -262,11 +262,13 @@ void Client::stop() {
   tcp_.stop();
 }
 
+#if !(defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3)
 int Client::setTimeout(uint32_t seconds) {
   io_ms_ = seconds * 1000UL;
   if (io_ms_ < 1000) io_ms_ = 1000;
   return 0;
 }
+#endif
 
 int Client::lastError(char* buf, size_t size) {
   if (buf != nullptr && size > 0) snprintf(buf, size, "BearSSL %d", last_error_);

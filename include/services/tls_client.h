@@ -1,5 +1,7 @@
 #pragma once
 
+#include <esp_arduino_version.h>
+
 #include <WiFiClient.h>
 
 namespace services::tls {
@@ -39,7 +41,12 @@ class Client : public WiFiClient {
   void flush() override {}
   void stop() override;
   uint8_t connected() override;
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+  // Core 3.x: Stream::setTimeout(ms) is not virtual; HTTPClient sets it in ms.
+  void setTimeout(unsigned long ms) { Stream::setTimeout(ms); io_ms_ = ms < 1000 ? 1000 : ms; }
+#else
   int setTimeout(uint32_t seconds) override;
+#endif
 
   // WiFiClientSecure-compatible knobs.
   void setInsecure() {}

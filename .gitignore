@@ -1,3 +1,4 @@
 .pio/
 include/setup_url.h
 __pycache__/
+.pio-core-s3/
