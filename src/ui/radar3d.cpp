@@ -197,7 +197,8 @@ constexpr uint8_t kPlaneBase = 160;    // 3 altitude colours x 24 shades
 constexpr int kPlaneShades = 24;
 constexpr uint8_t kAsphalt = 232;      // runway surface
 constexpr uint8_t kMarking = 233;      // runway markings
-constexpr uint8_t kUrbanBase = 234;    // built-up areas: 16 shades (234..249)
+constexpr uint8_t kUrbanBase = 234;    // built-up areas: 8 shades (234..241)
+constexpr uint8_t kForestBase = 242;   // forest and woodland: 8 shades (242..249)
 struct LabelPos {
   int x, y, size;
 };
@@ -459,10 +460,15 @@ bool claimLabel(const Box& b) {
 uint8_t s_urban[64 * 64];
 int s_urban_n = 0;
 float s_urban_r = 0.0f, s_urban_ox = 0.0f, s_urban_oy = 0.0f;
+// Forest grid (map entry type 7, same layout as the built-up grid).
+uint8_t s_forest[64 * 64];
+int s_forest_n = 0;
+float s_forest_r = 0.0f, s_forest_ox = 0.0f, s_forest_oy = 0.0f;
 
 struct Poi {
   float x, y;     // km from home
   uint8_t kind;   // 0 airport, 1 landmark, 2 district / town
+  uint8_t cat;    // landmark category (see drawLandmarkIcon); 0 = generic
   char name[24];
 };
 struct Runway {
@@ -478,9 +484,10 @@ void loadPois() {
 #if defined(RADAR3D_HOST_TEST) && defined(POI_PREVIEW)
   if (s_poi_gen == 1) return;
   s_poi_gen = 1;
-  const Poi sample[] = {{-3, 27, 0, "IST"}, {14, -6, 0, "ISL"}, {19, 9, 1, "Çamlıca Kulesi"},
-                        {9, -13, 1, "Köprü"}, {-24, 34, 1, "Baraj Gölü"}, {-33, -4, 2, "Beylikdüzü"},
-                        {-12, 13, 2, "Başakşehir"}, {28, 24, 2, "Sarıyer"}};
+  const Poi sample[] = {{-3, 27, 0, 0, "IST"},  {14, -6, 0, 0, "ISL"},   {19, 9, 1, 3, "Kule"},
+                        {9, -13, 1, 5, "Köprü"}, {-24, 34, 1, 7, "Park"}, {-16, -10, 1, 1, "Stad"},
+                        {26, -22, 1, 2, "Zoo"},  {-8, 6, 1, 4, "Kale"},   {30, 14, 1, 6, "Müze"},
+                        {-30, 14, 1, 8, "Cami"}, {-36, -18, 1, 0, "Diğer"}};
   s_poi_count = sizeof(sample) / sizeof(sample[0]);
   memcpy(s_pois, sample, sizeof(sample));
   const Runway rw[] = {{-4.2f, 29.6f, -3.6f, 25.2f}, {-2.4f, 29.8f, -1.8f, 25.4f}, {-6.0f, 28.5f, -5.5f, 24.8f},
@@ -495,6 +502,15 @@ void loadPois() {
         const float x = (i - 15.5f) / 16.0f, y = (j - 15.5f) / 16.0f;
         const float d = hypotf(x - 0.15f, (y - 0.25f) * 1.6f);
         s_urban[j * 32 + i] = static_cast<uint8_t>(std::max(0.0f, std::min(15.0f, (0.45f - d) * 60.0f)));
+      }
+    // sample forest: a wooded belt to the north-west
+    s_forest_n = 32;
+    s_forest_r = s_urban_r;
+    for (int j = 0; j < 32; ++j)
+      for (int i = 0; i < 32; ++i) {
+        const float x = (i - 15.5f) / 16.0f, y = (j - 15.5f) / 16.0f;
+        const float d = hypotf((x + 0.45f) * 1.3f, y - 0.55f);
+        s_forest[j * 32 + i] = static_cast<uint8_t>(std::max(0.0f, std::min(15.0f, (0.38f - d) * 70.0f)));
       }
   }
   const float k = ui::radar::rangeCurrent().outer_km / 50.0f;  // sample laid out for 50 km
@@ -511,6 +527,7 @@ void loadPois() {
   s_poi_gen = gen;
   s_poi_count = s_rwy_count = 0;
   s_urban_n = 0;
+  s_forest_n = 0;
   const uint8_t* m = services::map::data();
   const size_t size = services::map::size();
   if (m == nullptr || size < services::map::kHeaderBytes) return;
@@ -541,24 +558,26 @@ void loadPois() {
       Runway& r = s_rwys[s_rwy_count++];
       pt(0, &r.x0, &r.y0);
       pt(n - 1, &r.x1, &r.y1);
-    } else if (type == 6 && n >= 2) {
-      // Built-up grid: word 0 = [N, 0, radius x10 (u16)], then N*N nibbles (low first),
-      // rows south to north, cells west to east.
+    } else if ((type == 6 || type == 7) && n >= 2) {
+      // Built-up (6) / forest (7) grid: word 0 = [N, 0, radius x10 (u16)], then N*N
+      // nibbles (low first), rows south to north, cells west to east.
       const int gn = e[0];
       uint16_t r10;
       memcpy(&r10, e + 2, 2);
       if (gn > 0 && gn <= 64 && static_cast<size_t>((gn * gn + 1) / 2) <= (static_cast<size_t>(n) - 1) * 4) {
-        s_urban_n = gn;
-        s_urban_r = r10 / 10.0f;
-        s_urban_ox = ox;
-        s_urban_oy = oy;
-        for (int k = 0; k < gn * gn; ++k) s_urban[k] = (e[4 + k / 2] >> ((k & 1) * 4)) & 0x0F;
+        uint8_t* g = type == 6 ? s_urban : s_forest;
+        (type == 6 ? s_urban_n : s_forest_n) = gn;
+        (type == 6 ? s_urban_r : s_forest_r) = r10 / 10.0f;
+        (type == 6 ? s_urban_ox : s_forest_ox) = ox;
+        (type == 6 ? s_urban_oy : s_forest_oy) = oy;
+        for (int k = 0; k < gn * gn; ++k) g[k] = (e[4 + k / 2] >> ((k & 1) * 4)) & 0x0F;
       }
     } else if (type == 5 && n >= 2 && s_poi_count < sizeof(s_pois) / sizeof(s_pois[0])) {
       // word 0: position; word 1: kind, name length; then the UTF-8 name.
       Poi& p = s_pois[s_poi_count];
       pt(0, &p.x, &p.y);
       p.kind = e[4];
+      p.cat = e[6];
       const size_t len = std::min<size_t>({e[5], sizeof(p.name) - 1, (static_cast<size_t>(n) - 2) * 4});
       memcpy(p.name, e + 8, len);
       p.name[len] = '\0';
@@ -893,7 +912,7 @@ int16_t s_rv_y[(kReliefN + 1) * (kReliefN + 1)];
 uint16_t s_rc_order[kReliefN * kReliefN];
 uint8_t s_rv_shade[(kReliefN + 1) * (kReliefN + 1)];  // 0 dark .. 128 flat .. 255 lit
 uint8_t s_rv_elev[(kReliefN + 1) * (kReliefN + 1)];   // 0 sea level .. 255 highest point
-uint8_t s_rv_urban[(kReliefN + 1) * (kReliefN + 1)];  // 0 open land .. 255 built-up
+int8_t s_rv_urban[(kReliefN + 1) * (kReliefN + 1)];  // land cover: -127 forest .. 0 open .. 127 built-up
 uint16_t s_rc_count = 0;
 
 // Grid vertices that lie in the sea (map type 2 rings, world coordinates). The terrain
@@ -976,19 +995,21 @@ inline bool lowVertex(int k) { return (s_low_vertex_bits[k >> 3] >> (k & 7)) & 1
 // city reads at a glance without any names.
 
 /** 0..1 built-up share at a ground point (km from home), bilinear. */
-float urbanAt(float x, float y) {
-  if (s_urban_n == 0) return 0.0f;
-  const float cell = 2.0f * s_urban_r / s_urban_n;
-  const float fx = (x - s_urban_ox + s_urban_r) / cell - 0.5f, fy = (y - s_urban_oy + s_urban_r) / cell - 0.5f;
+float gridAt(const uint8_t* g, int n, float r, float ox, float oy, float x, float y) {
+  if (n == 0) return 0.0f;
+  const float cell = 2.0f * r / n;
+  const float fx = (x - ox + r) / cell - 0.5f, fy = (y - oy + r) / cell - 0.5f;
   const int i0 = static_cast<int>(floorf(fx)), j0 = static_cast<int>(floorf(fy));
   const float tx = fx - i0, ty = fy - j0;
   auto at = [&](int i, int j) {
-    if (i < 0 || j < 0 || i >= s_urban_n || j >= s_urban_n) return 0.0f;
-    return s_urban[j * s_urban_n + i] / 15.0f;
+    if (i < 0 || j < 0 || i >= n || j >= n) return 0.0f;
+    return g[j * n + i] / 15.0f;
   };
   return (at(i0, j0) * (1 - tx) + at(i0 + 1, j0) * tx) * (1 - ty) +
          (at(i0, j0 + 1) * (1 - tx) + at(i0 + 1, j0 + 1) * tx) * ty;
 }
+float urbanAt(float x, float y) { return gridAt(s_urban, s_urban_n, s_urban_r, s_urban_ox, s_urban_oy, x, y); }
+float forestAt(float x, float y) { return gridAt(s_forest, s_forest_n, s_forest_r, s_forest_ox, s_forest_oy, x, y); }
 
 void loadPois();
 
@@ -1029,7 +1050,12 @@ void buildShade(const Cam& c) {
       s_rv_shade[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, v)));
       const float hmax = std::max(60.0f, services::terrain::maxHeightM());
       s_rv_elev[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, h(i, j) / hmax * 255.0f)));
-      s_rv_urban[k] = static_cast<uint8_t>(255.0f * urbanAt(-c.R + i * step, -c.R + j * step));
+      {  // town wins over forest where both are mapped
+        const float ux = -c.R + i * step, uy = -c.R + j * step;
+        const float u = urbanAt(ux, uy);
+        const float cover = u > 0.15f ? u : -forestAt(ux, uy);
+        s_rv_urban[k] = static_cast<int8_t>(std::max(-127.0f, std::min(127.0f, cover * 127.0f)));
+      }
     }
   }
 }
@@ -1081,7 +1107,8 @@ void buildRelief(const Cam& c) {
       // land fill underneath, sea is covered by the sea fill. With a map, the vector sea
       // (and lakes) are drawn over the relief, so the coastline comes from the map.
       auto gone = [&](int k) { return lowVertex(k) || (s_sea.count > 0 && seaVertex(k)); };
-      if (gone(k00) && gone(k10) && gone(k01) && gone(k11)) continue;
+      const bool covered = s_rv_urban[k00] | s_rv_urban[k10] | s_rv_urban[k01] | s_rv_urban[k11];
+      if (gone(k00) && gone(k10) && gone(k01) && gone(k11) && !covered) continue;
       if (s_rv_x[k00] == kOff || s_rv_x[k10] == kOff || s_rv_x[k01] == kOff || s_rv_x[k11] == kOff) continue;
       s_rc_order[s_rc_count++] = static_cast<uint16_t>(j * N + i);
     }
@@ -1110,7 +1137,7 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
   if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); std::swap(s0, s1); std::swap(e0, e1); std::swap(u0, u1); }
   if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); std::swap(e0, e2); std::swap(u0, u2); }
   if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); std::swap(e1, e2); std::swap(u1, u2); }
-  const bool urban = u0 > 0.0f || u1 > 0.0f || u2 > 0.0f;
+  const bool urban = u0 != 0.0f || u1 != 0.0f || u2 != 0.0f;  // any land cover
   if (y2 - y0 < 0.5f) return;
   const int ya = std::max(std::max(kTopBarH + 1, s_band_y0), static_cast<int>(ceilf(y0 - 0.5f)));
   const int yb = std::min(s_band_y1 - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
@@ -1153,9 +1180,12 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
       if ((e16 & 15) > bay2[(x + 1) & 3]) ++bd;
       if (sh > 15) sh = 15;
       if (bd > 7) bd = 7;
-      // Built-up share 0..1 (x16 here) against the dither: town tint or terrain.
-      if (urban && (uv >> 12) > kBayer[(y + 1) & 3][(x + 3) & 3]) {
-        row[x] = static_cast<uint8_t>(kUrbanBase + sh);
+      // Land cover share (x16 here, + town, - forest) against the dither: tint or terrain.
+      int32_t cov = urban ? (uv >> 12) : 0;
+      const bool forest = cov < 0;
+      if (forest) cov = -cov;
+      if (cov > kBayer[(y + 1) & 3][(x + 3) & 3]) {
+        row[x] = static_cast<uint8_t>((forest ? kForestBase : kUrbanBase) + (sh >> 1));
       } else {
         row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
       }
@@ -1177,7 +1207,7 @@ void drawRelief() {
     const float a2 = s_rv_shade[k11] * kShadeScale, a3 = s_rv_shade[k01] * kShadeScale;
     const float e0 = s_rv_elev[k00] * kElevScale, e1 = s_rv_elev[k10] * kElevScale;
     const float e2 = s_rv_elev[k11] * kElevScale, e3 = s_rv_elev[k01] * kElevScale;
-    constexpr float kU = 1.0f / 255.0f;
+    constexpr float kU = 1.0f / 127.0f;
     const float u0 = s_rv_urban[k00] * kU, u1 = s_rv_urban[k10] * kU, u2 = s_rv_urban[k11] * kU,
                 u3 = s_rv_urban[k01] * kU;
     shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, u0, s_rv_x[k10], s_rv_y[k10], a1, e1, u1,
@@ -1187,6 +1217,8 @@ void drawRelief() {
   }
 }
 
+bool s_rebuilt = false;  // drawSurface re-projected the ground this frame (camera moved)
+
 /** Land, sea, terrain and lakes: everything on the ground below the map lines. */
 void drawSurface(const Cam& c) {
   const SeaKey key{services::map::generation(), services::terrain::generation(), s_yaw_cur, c.R,
@@ -1195,6 +1227,7 @@ void drawSurface(const Cam& c) {
       key.R != s_sea_key.R || key.pitch != s_sea_key.pitch || key.lat != s_sea_key.lat ||
       key.lon != s_sea_key.lon) {
     s_sea_key = key;
+    s_rebuilt = true;
     buildDiscSpans(c);
     const bool sea_ok = buildRings(c, 2, false, &s_sea);
     const bool lakes_ok = buildRings(c, 3, true, &s_lakes);
@@ -2149,11 +2182,14 @@ void applyPaletteTo(LGFX_Sprite& g, bool force) {
                             clamp8(c.b * f));
     }
   }
-  {  // built-up: a warm grey, shaded like the terrain
+  {  // built-up (warm grey) and forest (deep green), 8 shades each, lit like the terrain
     const Rgb ub = hc ? Rgb{124, 116, 100} : Rgb{98, 92, 80};
-    for (int sh = 0; sh < kTerrainShades; ++sh) {
+    const Rgb fo = hc ? Rgb{50, 128, 58} : Rgb{30, 88, 40};
+    for (int i = 0; i < 8; ++i) {
+      const int sh = i * 2 + 1;
       const float f = sh < 8 ? kd + (1.0f - kd) * sh / 8.0f : 1.0f + (kl - 1.0f) * (sh - 8) / 7.0f;
-      setPal(kUrbanBase + sh, clamp8(ub.r * f), clamp8(ub.g * f), clamp8(ub.b * f));
+      setPal(kUrbanBase + i, clamp8(ub.r * f), clamp8(ub.g * f), clamp8(ub.b * f));
+      setPal(kForestBase + i, clamp8(fo.r * f), clamp8(fo.g * f), clamp8(fo.b * f));
     }
   }
   setPal(kAsphalt, 70, 74, 78);
@@ -2296,6 +2332,85 @@ void drawAirportBadge(int x, int gy) {
   s_spr.fillRect(X(-9), Y(7), ri(18 * u), ri(1.5f * u), kText);
 }
 
+/** Landmark: a small round badge with a category symbol (no name), on a short stem.
+ *  cat: 1 stadium, 2 zoo, 3 tower, 4 castle / historic, 5 bridge, 6 museum,
+ *  7 park, 8 place of worship; anything else is a plain diamond. */
+constexpr int kIconLift = S(13);
+void drawLandmarkIcon(int x, int gy, uint8_t cat) {
+  if (cat < 1 || cat > 8) {
+    const int d = S(4);
+    s_spr.fillTriangle(x, gy - d - 1, x - d - 1, gy, x + d + 1, gy, kBg);
+    s_spr.fillTriangle(x, gy + d + 1, x - d - 1, gy, x + d + 1, gy, kBg);
+    s_spr.fillTriangle(x, gy - d, x - d, gy, x + d, gy, kCream);
+    s_spr.fillTriangle(x, gy + d, x - d, gy, x + d, gy, kCream);
+    return;
+  }
+  const int y = gy - kIconLift;
+  const float u = ui::Sf(1.0f);
+  auto X = [&](float v) { return x + ri(v * u); };
+  auto Y = [&](float v) { return y + ri(v * u); };
+  auto L = [&](float v) { return std::max(1, ri(v * u)); };
+  const int r = ri(8.5f * u);
+  s_spr.drawLine(x, y + r, x, gy, kBg);
+  s_spr.drawLine(x + 1, y + r, x + 1, gy, kTextDim);
+  s_spr.fillCircle(x + 1, gy, S(1), kTextDim);
+  s_spr.fillCircle(x, y, r + 1, kBg);
+  s_spr.fillCircle(x, y, r, kPanel);
+  s_spr.drawCircle(x, y, r, kTextDim);
+  const uint8_t k = kCream;
+  switch (cat) {
+    case 1:  // stadium: oval bowl with the pitch inside
+      s_spr.drawEllipse(x, y, L(5.5f), L(3.6f), k);
+      s_spr.drawEllipse(x, y, L(4.5f), L(2.6f), k);
+      s_spr.fillRect(X(-2), Y(-1), L(4), L(2), k);
+      break;
+    case 2:  // zoo: paw print
+      s_spr.fillEllipse(x, Y(1.8f), L(2.6f), L(2.1f), k);
+      s_spr.fillCircle(X(-3.4f), Y(-1.6f), L(1.2f), k);
+      s_spr.fillCircle(X(-1.2f), Y(-3.6f), L(1.2f), k);
+      s_spr.fillCircle(X(1.2f), Y(-3.6f), L(1.2f), k);
+      s_spr.fillCircle(X(3.4f), Y(-1.6f), L(1.2f), k);
+      break;
+    case 3:  // tower: mast, pod, tapering shaft
+      s_spr.drawLine(x, Y(-6), x, Y(-3), k);
+      s_spr.fillEllipse(x, Y(-2), L(2.2f), L(1.3f), k);
+      s_spr.fillTriangle(X(-0.8f), Y(-1), X(0.8f), Y(-1), X(2.2f), Y(5), k);
+      s_spr.fillTriangle(X(-0.8f), Y(-1), X(-2.2f), Y(5), X(2.2f), Y(5), k);
+      break;
+    case 4:  // castle: wall with battlements and a gate
+      s_spr.fillRect(X(-5), Y(-1), L(10), L(6), k);
+      for (int i = 0; i < 3; ++i) s_spr.fillRect(X(-5 + i * 4), Y(-4), L(2), L(3), k);
+      s_spr.fillRect(X(-1), Y(2), L(2), L(3), kPanel);
+      break;
+    case 5:  // bridge: deck, two pylons, cables
+      s_spr.fillRect(X(-6), Y(2), L(12), L(1.5f), k);
+      s_spr.fillRect(X(-3.5f), Y(-4), L(1.4f), L(8), k);
+      s_spr.fillRect(X(2.1f), Y(-4), L(1.4f), L(8), k);
+      s_spr.drawLine(X(-6), Y(1), X(-3), Y(-4), k);
+      s_spr.drawLine(X(-3), Y(-4), X(0), Y(0.5f), k);
+      s_spr.drawLine(X(0), Y(0.5f), X(3), Y(-4), k);
+      s_spr.drawLine(X(3), Y(-4), X(6), Y(1), k);
+      break;
+    case 6:  // museum: pediment, columns, base
+      s_spr.fillTriangle(X(-5.5f), Y(-2), X(5.5f), Y(-2), x, Y(-5.5f), k);
+      for (int i = 0; i < 4; ++i) s_spr.fillRect(X(-4.5f + i * 2.8f), Y(-1), L(1.4f), L(4.5f), k);
+      s_spr.fillRect(X(-5.5f), Y(4), L(11), L(1.4f), k);
+      break;
+    case 7:  // park: tree
+      s_spr.fillCircle(x, Y(-1.5f), L(3.8f), k);
+      s_spr.fillRect(X(-0.7f), Y(2), L(1.5f), L(3.5f), k);
+      s_spr.fillCircle(x, Y(-1.5f), L(1.2f), kPanel);
+      break;
+    case 8:  // place of worship: dome, finial and a minaret
+      s_spr.fillCircle(X(-1), Y(1), L(3.5f), k);
+      s_spr.fillRect(X(-4.5f), Y(1), L(7), L(4), k);
+      s_spr.drawLine(X(-1), Y(-2.5f), X(-1), Y(-4.5f), k);
+      s_spr.fillRect(X(3.8f), Y(-4), L(1.4f), L(9), k);
+      s_spr.fillTriangle(X(3.6f), Y(-4), X(5.4f), Y(-4), X(4.5f), Y(-6.5f), k);
+      break;
+  }
+}
+
 void drawPois(const Cam& c, bool names) {
   loadPois();
   if (!names) {
@@ -2324,22 +2439,42 @@ void drawPois(const Cam& c, bool names) {
         const Box b{x + S(14), by - S(8), w + S(2), S(16)};
         if (claimLabel(b)) haloText(p.name, x + S(15), by - S(8), kText);
       } else if (p.kind == 1) {
-        const int d = S(4);
-        if (!names) {
-          s_spr.fillTriangle(x, y - d - 1, x - d - 1, y, x + d + 1, y, kBg);
-          s_spr.fillTriangle(x, y + d + 1, x - d - 1, y, x + d + 1, y, kBg);
-          s_spr.fillTriangle(x, y - d, x - d, y, x + d, y, kCream);
-          s_spr.fillTriangle(x, y + d, x - d, y, x + d, y, kCream);
-          continue;
-        }
-        setFont(&ui::font::Sans8);
-        const int w = s_spr.textWidth(p.name);
-        const Box b{x + d + S(3), y - S(7), w + S(2), S(14)};
-        if (claimLabel(b)) haloText(p.name, x + d + S(4), y - S(6), kTextDim);
+        if (!names) drawLandmarkIcon(x, y, p.cat);  // symbol only: names crowded the map
       }  // kind 2 (district / town names): not drawn, they crowded the map
     }
   }
   s_spr.setTextDatum(textdatum_t::top_left);
+}
+
+// ---------------------------------------------------------------- static layer cache
+//
+// Ground, map, rings and place markers only change when the camera (or the map, or a
+// display option) changes. They are kept in a second 8-bit buffer and copied back in
+// one go on frames where nothing moved: every pixel the ground stage writes goes out to
+// PSRAM, so redrawing it each frame cost far more than one copy.
+uint8_t* s_bg = nullptr;
+struct BgKey {
+  float pitch, cyaw, syaw, R, f, cx, cy, tscale;
+  uint32_t mgen, tgen;
+  uint8_t rings, miles, card, pad;
+  double lat, lon;
+};
+BgKey s_bg_key;
+bool s_bg_valid = false;
+
+BgKey bgKeyFor(const Cam& c) {
+  BgKey k;
+  memset(&k, 0, sizeof(k));
+  k.pitch = c.pitch_deg; k.cyaw = c.cyaw; k.syaw = c.syaw; k.R = c.R;
+  k.f = c.f; k.cx = c.cx; k.cy = c.cy; k.tscale = c.tscale;
+  k.mgen = services::map::generation();
+  k.tgen = services::terrain::generation();
+  k.rings = ui::radar::showRings();
+  k.miles = ui::radar::useMiles();
+  k.card = s_selected[0] != '\0' && !infoInLabel();
+  k.lat = services::location::lat();
+  k.lon = services::location::lon();
+  return k;
 }
 
 void drawFrame() {
@@ -2367,7 +2502,8 @@ void drawFrame() {
   static float dist_km[services::adsb::kMaxAircraft];
   static float bearing[services::adsb::kMaxAircraft];
 
-  static uint32_t st[5];  // us per stage, summed for the serial report
+  static uint32_t st[7];  // us per stage, summed for the serial report
+  static uint32_t n_cached = 0, n_moving = 0;
 #if !defined(RADAR3D_HOST_TEST)
   tft.beginHiddenFrame();  // bands go straight into the hidden frame buffer
 #endif
@@ -2375,13 +2511,37 @@ void drawFrame() {
     s_first_band = y0 == 0;
     selectBand(y0);
     uint32_t t = micros();
-    drawGround(c);
-    drawSurface(c);
-    st[0] += micros() - t; t = micros();
-    drawMap(c);
-    drawRings(c);
-    drawPois(c, false);
-    st[1] += micros() - t; t = micros();
+    const BgKey bk = bgKeyFor(c);
+    const bool same = s_bg_valid && memcmp(&bk, &s_bg_key, sizeof(bk)) == 0;
+    if (same) {
+      memcpy(s_band_mem, s_bg, static_cast<size_t>(kW) * kH);
+      ++n_cached;
+      st[5] += micros() - t; t = micros();
+    } else {
+      s_rebuilt = false;
+      drawGround(c);
+      drawSurface(c);
+      const uint32_t dt = micros() - t;
+      st[0] += dt;
+      if (s_rebuilt) ++n_moving;
+      t = micros();
+      drawMap(c);
+      drawRings(c);
+      drawPois(c, false);
+      st[1] += micros() - t; t = micros();
+      if (s_bg == nullptr) {
+        s_bg = static_cast<uint8_t*>(malloc(static_cast<size_t>(kW) * kH));  // large: lands in PSRAM
+      }
+      // Kept only once the camera has settled: while it turns every frame differs.
+      if (s_bg != nullptr && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
+        memcpy(s_bg, s_band_mem, static_cast<size_t>(kW) * kH);
+        s_bg_key = bk;
+        s_bg_valid = true;
+      } else {
+        s_bg_valid = false;
+      }
+      st[6] += micros() - t; t = micros();
+    }
     int card_idx = -1;
     drawAircraft(c, count, fetched_ms, dist_km, bearing, &card_idx);
     drawPois(c, true);
@@ -2434,13 +2594,19 @@ void drawFrame() {
     ++n;
     if (millis() - t0 >= 30000) {
       if (t0 != 0 && n) {
-        Serial.printf("radar3d: %.1f fps; ms/frame: ground %lu, lines %lu, aircraft %lu, ui %lu, push %lu\n",
-                      n * 1000.0f / (millis() - t0), st[0] / n / 1000, st[1] / n / 1000,
+        const uint32_t nd = std::max<uint32_t>(1, n - n_cached);  // frames that drew the ground
+        Serial.printf("radar3d: %.1f fps; cached %lu/%lu frames (moving %lu); ms/frame: "
+                      "bg-copy %lu | ground %lu, lines %lu, bg-save %lu (drawn frames) | "
+                      "aircraft %lu, ui %lu, push %lu\n",
+                      n * 1000.0f / (millis() - t0), (unsigned long)n_cached, (unsigned long)n,
+                      (unsigned long)n_moving, n_cached ? st[5] / n_cached / 1000 : 0,
+                      st[0] / nd / 1000, st[1] / nd / 1000, st[6] / nd / 1000,
                       st[2] / n / 1000, st[3] / n / 1000, st[4] / n / 1000);
       }
       t0 = millis();
       for (auto& v : st) v = 0;
       n = 0;
+      n_cached = n_moving = 0;
     }
   }
 }
