@@ -9,7 +9,7 @@ namespace config {
 
 /** Shown on the web setup page; the build copies it into the update manifest.
  *  Bump it for every release you publish. Keep this declaration on a single line. */
-constexpr char kFirmwareVersion[] = "5in-0.19.0";
+constexpr char kFirmwareVersion[] = "5in-0.20.0";
 
 // --- USB setup page address shown on the setup screen ---
 // CI writes include/setup_url.h with the GitHub Pages address of the repository
@@ -112,6 +112,7 @@ constexpr double kDefaultRadarLon = 28.9784;
 /** Poll adsb.fi (API public limit: 1 req/s). */
 constexpr unsigned long kAdsbFetchIntervalMs = 5000;
 /** Redraw cadence of the 3D view. Aircraft are dead-reckoned between fetches. */
+constexpr unsigned long kRadarFrameIntervalMs = 16;    // 5": radar frame pacing (as fast as it draws)
 constexpr unsigned long kRadarRedrawIntervalMs = 200;  // leaves time between frames to read the touch panel
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;

@@ -104,8 +104,10 @@ class Bus_RGB_Bounce : public lgfx::IBus {
   uint8_t* hidden() const { return _fb == _fbs[0] ? _fbs[1] : _fbs[0]; }
   uint8_t* visible() const { return _fb; }
   /**
-   * Show the hidden buffer from the next frame on. Returns once the panel has
-   * switched to it, so the old one can be drawn into.
+   * Show the hidden buffer from the next frame on. Returns at once; the next
+   * waitHidden() blocks until the panel has really switched (the driver switches
+   * when it starts reading a new frame, right where it reports the previous one
+   * complete), so the next frame is rendered while the panel catches up.
    */
   void present() {
     uint8_t* next = hidden();
@@ -113,9 +115,13 @@ class Bus_RGB_Bounce : public lgfx::IBus {
     esp_lcd_panel_draw_bitmap(_handle, 0, 0, _cfg.panel->config().panel_width,
                               _cfg.panel->config().panel_height, next);
     _fb = next;
-    // The driver switches buffers when it starts reading a new frame, right where it
-    // reports the previous frame as complete.
-    xSemaphoreTake(_swapped, pdMS_TO_TICKS(100));
+    _pending = true;
+  }
+  /** Before drawing into hidden(): make sure the panel no longer reads it. */
+  void waitHidden() {
+    if (!_pending) return;
+    xSemaphoreTake(_swapped, pdMS_TO_TICKS(60));
+    _pending = false;
   }
   void release() override {}
 
@@ -153,6 +159,7 @@ class Bus_RGB_Bounce : public lgfx::IBus {
   uint8_t* _fbs[2] = {nullptr, nullptr};
   size_t _fb_bytes = 0;
   SemaphoreHandle_t _swapped = nullptr;
+  volatile bool _pending = false;
 };
 
 /** Panel_RGB whose drawing target can be moved between the two frame buffers. */

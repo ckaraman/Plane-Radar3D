@@ -383,7 +383,11 @@ void loop() {
       showRadarIfConnected();
     } else {
       pollTouch();
-      if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs) {
+      // 5": the radar redraws as fast as it can (camera moves smoothly); the other
+      // screens keep the slow cadence.
+      const unsigned long interval =
+          g_screen == Screen::Radar ? config::kRadarFrameIntervalMs : config::kRadarRedrawIntervalMs;
+      if (millis() - g_last_redraw_ms >= interval) {
         g_last_redraw_ms = millis();
         updateScreen();
         pollTouch();  // a short tap may start while the frame is being drawn

@@ -76,10 +76,13 @@ constexpr Rgb kPalette[16] = {
 // --- Camera (same numbers as the canvas mockup, scaled with the range) ---
 constexpr float kTerrainRelief = 0.15f;  // highest terrain point = 15 % of the radius
 // The disc is scaled to fill this box (any tilt); aircraft rise into the space above it.
-constexpr float kFitLeft = ui::Sf(6.0f);
-constexpr float kFitRight = kW - ui::Sf(6.0f);
-constexpr float kFitBottom = kH - ui::Sf(16.0f);
-constexpr float kFitTop = ui::Sf(84.0f);
+// The disc is as large as the screen allows: its thin left / right tips may run a
+// little past the edges, the near rim sits just above the bottom, and the aircraft
+// height scale (fitted to the traffic) uses whatever room is left above it.
+constexpr float kFitLeft = -ui::Sf(22.0f);
+constexpr float kFitRight = kW + ui::Sf(22.0f);
+constexpr float kFitBottom = kH - ui::Sf(6.0f);
+constexpr float kFitTop = ui::Sf(70.0f);
 constexpr float kCamDistOverR = 2.1f;  // camera ground distance / outer radius
 
 // --- Layout ---
@@ -114,6 +117,13 @@ float s_yaw_cur = 20.0f;  // animated camera heading
 // Altitude auto-fit: shrinks the vertical scale smoothly when the highest aircraft
 // would rise above the top of the view, and relaxes back when there is room.
 float s_zfit = 1.0f;
+unsigned long s_last_frame_ms = 0;
+float s_dt = 0.2f;  // seconds since the previous frame (clamped)
+
+/** Fraction to move towards a target this frame for an exponential ease with time
+ *  constant tau seconds: the same speed at any frame rate. */
+float ease(float tau) { return 1.0f - expf(-s_dt / tau); }
+
 float s_yaw_target = 20.0f;
 // While an aircraft the user tapped is selected, the camera turns to keep it on the
 // screen's centre line, in front of home. Deselecting returns to the saved heading.
@@ -828,12 +838,17 @@ void buildRelief(const Cam& c) {
     for (int i = 0; i < N; ++i) {
       const int k00 = j * (N + 1) + i, k10 = k00 + 1, k01 = k00 + N + 1, k11 = k01 + 1;
       const float x0 = -c.R + i * step, y0 = -c.R + j * step, x1 = x0 + step, y1 = y0 + step;
-      if (x0 * x0 + y0 * y0 > r2 || x1 * x1 + y0 * y0 > r2 || x0 * x0 + y1 * y1 > r2 ||
-          x1 * x1 + y1 * y1 > r2) {
-        continue;  // outside the disc
+      // Cells reaching into the disc (the drawing is clipped to its rim).
+      const float nx = std::max(x0, std::min(0.0f, x1)), ny = std::max(y0, std::min(0.0f, y1));
+      if (nx * nx + ny * ny > r2) continue;  // wholly outside
+      if (s_sea.count > 0) {
+        // The vector sea (and lakes) are drawn over the relief, so the coastline comes
+        // from the map, smooth; only cells wholly at sea are left out.
+        if (seaVertex(k00) && seaVertex(k10) && seaVertex(k01) && seaVertex(k11)) continue;
+      } else {
+        // No map: the terrain's sea level is the coast.
+        if (lowVertex(k00) && lowVertex(k10) && lowVertex(k01) && lowVertex(k11)) continue;
       }
-      if (lowVertex(k00) || lowVertex(k10) || lowVertex(k01) || lowVertex(k11)) continue;  // sea / shore
-      if (seaVertex(k00) || seaVertex(k10) || seaVertex(k01) || seaVertex(k11)) continue;
       if (s_rv_x[k00] == kOff || s_rv_x[k10] == kOff || s_rv_x[k01] == kOff || s_rv_x[k11] == kOff) continue;
       s_rc_order[s_rc_count++] = static_cast<uint16_t>(j * N + i);
     }
@@ -878,8 +893,9 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x
       xb = x1 + u * (x2 - x1); sb = s1 + u * (s2 - s1); eb = e1 + u * (e2 - e1);
     }
     if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); std::swap(ea, eb); }
-    const int xs = std::max(0, static_cast<int>(ceilf(xa - 0.5f)));
-    const int xe = std::min(kW - 1, static_cast<int>(ceilf(xb - 0.5f)) - 1);
+    // Clipped to the disc, so the relief ends on its smooth rim, not on cell edges.
+    const int xs = std::max<int>(s_disc_l[y], static_cast<int>(ceilf(xa - 0.5f)));
+    const int xe = std::min<int>(s_disc_r[y], static_cast<int>(ceilf(xb - 0.5f)) - 1);
     if (xe < xs) continue;
     const float inv = (xb - xa) > 1e-3f ? 1.0f / (xb - xa) : 0.0f;
     const float ds = (sb - sa) * inv, de = (eb - ea) * inv;
@@ -945,8 +961,8 @@ void drawSurface(const Cam& c) {
       s_disc_bottom = std::max(s_disc_bottom, y);
     }
   }
-  fillRings(s_sea, kSea);
   drawRelief();
+  fillRings(s_sea, kSea);  // over the relief: the map's coastline cuts it cleanly
   fillRings(s_lakes, kSea);
 }
 
@@ -1077,7 +1093,10 @@ void drawRings(const Cam& c) {
         }
       }
       s_spr.setTextColor(kRing);
-      s_spr.drawString(label, ri(sx) + S(12), ri(sy) + S(6));
+      // The disc may run past the screen edge: keep the label on screen.
+      const int half = s_spr.textWidth(label) / 2 + S(4);
+      const int lx = std::max(half, std::min(kW - half, ri(sx) + S(12)));
+      s_spr.drawString(label, lx, ri(sy) + S(6));
     }
   }
 
@@ -1088,7 +1107,8 @@ void drawRings(const Cam& c) {
   for (int i = 0; i < 4; ++i) {
     float sx, sy;
     if (project(c, dirs[i][0] * c.R * 1.14f, dirs[i][1] * c.R * 1.14f, 0, &sx, &sy) &&
-        sy < kH - S(10) && !overlapsUi(ri(sx) - S(8), ri(sy) - S(8), S(16), S(16))) {
+        (sx = std::max<float>(S(10), std::min<float>(kW - S(10), sx)), sy < kH - S(10)) &&
+        !overlapsUi(ri(sx) - S(8), ri(sy) - S(8), S(16), S(16))) {
       s_spr.setTextColor(kRing);
       s_spr.drawString(names[i], ri(sx), ri(sy));
     }
@@ -1333,7 +1353,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
       const float want_h = std::max(ui::Sf(20.0f), best_gy - kTopLimit);
       const float target = std::max(0.12f, std::min(12.0f, s_zfit * want_h / best_h));
       // Shrink quickly (never out of the top), grow gently.
-      const float k = target < s_zfit ? 0.5f : 0.12f;
+      const float k = target < s_zfit ? ease(0.12f) : ease(0.9f);
       s_zfit += (target - s_zfit) * k;
     }
   }
@@ -1769,10 +1789,15 @@ void applyPalette() {
 
 void animateYaw() {
   float diff = fmodf(s_yaw_target - s_yaw_cur + 540.0f, 360.0f) - 180.0f;
-  if (fabsf(diff) < 0.5f) {
+  if (fabsf(diff) < 0.05f) {
     s_yaw_cur = s_yaw_target;
   } else {
-    s_yaw_cur += diff * 0.35f;
+    // Ease with a capped turn rate: a long swing (selecting an aircraft behind)
+    // turns at a steady pace instead of a jump, then settles softly.
+    float step = diff * ease(0.28f);
+    const float max_step = 140.0f * s_dt;
+    step = std::max(-max_step, std::min(max_step, step));
+    s_yaw_cur = fmodf(s_yaw_cur + step + 360.0f, 360.0f);
   }
 }
 
@@ -1813,14 +1838,23 @@ void followSelected(size_t count, unsigned long fetched_ms) {
     if (b >= 360.0f) b -= 360.0f;
     // Move in steps of a few degrees, so the cached ground is not rebuilt every frame
     // while the aircraft creeps across the sky.
-    const float diff = fmodf(b - s_yaw_target + 540.0f, 360.0f) - 180.0f;
-    if (fabsf(diff) >= 2.0f) s_yaw_target = b;
+    // At the 5" frame rate the ground is cheap enough to rebuild every frame, so the
+    // camera follows continuously instead of in steps.
+    s_yaw_target = b;
     return;
   }
 }
 
 void drawFrame() {
   if (!s_ready) return;
+  {
+    const unsigned long now = millis();
+    s_dt = s_last_frame_ms == 0 ? 0.05f : std::min(0.25f, (now - s_last_frame_ms) / 1000.0f);
+    s_last_frame_ms = now;
+#ifdef RADAR3D_HOST_TEST
+    s_dt = 0.1f;  // the preview's clock does not run
+#endif
+  }
   applyPalette();
   unsigned long fetched_ms = 0;
   const size_t count =
@@ -1851,6 +1885,21 @@ void drawFrame() {
     drawInfoPanels(card_idx, dist_km, bearing);
   }
 
+  {  // frame-rate report on the serial log every 30 s
+    static unsigned long t0 = 0, busy = 0;
+    static uint32_t n = 0;
+    busy += millis() - s_last_frame_ms;
+    ++n;
+    if (millis() - t0 >= 30000) {
+      if (t0 != 0) {
+        Serial.printf("radar3d: %.1f fps, draw %lu ms/frame\n", n * 1000.0f / (millis() - t0),
+                      busy / (n ? n : 1));
+      }
+      t0 = millis();
+      busy = 0;
+      n = 0;
+    }
+  }
 #ifdef RADAR3D_HOST_TEST
   extern void hostCaptureFrame(LGFX_Sprite & spr);  // desktop preview harness
   hostCaptureFrame(s_spr);

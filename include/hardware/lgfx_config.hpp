@@ -37,7 +37,10 @@ class LGFX : public lgfx::LGFX_Device {
 
  public:
   /** Full-screen frame: draw into the hidden buffer between these two calls. */
-  void beginHiddenFrame() { _panel.setTarget(_bus.hidden()); }
+  void beginHiddenFrame() {
+    _bus.waitHidden();
+    _panel.setTarget(_bus.hidden());
+  }
   /** Show it at the next refresh; afterwards drawing goes to the visible buffer. */
   void presentHiddenFrame() {
     _bus.present();
