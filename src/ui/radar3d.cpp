@@ -197,6 +197,7 @@ constexpr uint8_t kPlaneBase = 160;    // 3 altitude colours x 24 shades
 constexpr int kPlaneShades = 24;
 constexpr uint8_t kAsphalt = 232;      // runway surface
 constexpr uint8_t kMarking = 233;      // runway markings
+constexpr uint8_t kUrbanBase = 234;    // built-up areas: 16 shades (234..249)
 struct LabelPos {
   int x, y, size;
 };
@@ -454,6 +455,11 @@ bool claimLabel(const Box& b) {
 // background: airports as an airport badge with their three-letter code over their
 // runways, landmarks as a small diamond, district names as dim text only. Drawn on
 // the ground before the aircraft; names only where aircraft labels leave room.
+// Built-up grid (see urbanAt).
+uint8_t s_urban[64 * 64];
+int s_urban_n = 0;
+float s_urban_r = 0.0f, s_urban_ox = 0.0f, s_urban_oy = 0.0f;
+
 struct Poi {
   float x, y;     // km from home
   uint8_t kind;   // 0 airport, 1 landmark, 2 district / town
@@ -481,6 +487,16 @@ void loadPois() {
                        {12.4f, -7.0f, 15.6f, -5.0f}};
   s_rwy_count = sizeof(rw) / sizeof(rw[0]);
   memcpy(s_rwys, rw, sizeof(rw));
+  {  // sample built-up area: a town around home stretching north-east
+    s_urban_n = 32;
+    s_urban_r = ui::radar::rangeCurrent().outer_km;
+    for (int j = 0; j < 32; ++j)
+      for (int i = 0; i < 32; ++i) {
+        const float x = (i - 15.5f) / 16.0f, y = (j - 15.5f) / 16.0f;
+        const float d = hypotf(x - 0.15f, (y - 0.25f) * 1.6f);
+        s_urban[j * 32 + i] = static_cast<uint8_t>(std::max(0.0f, std::min(15.0f, (0.45f - d) * 60.0f)));
+      }
+  }
   const float k = ui::radar::rangeCurrent().outer_km / 50.0f;  // sample laid out for 50 km
   for (size_t i = 0; i < s_poi_count; ++i) { s_pois[i].x *= k; s_pois[i].y *= k; }
   for (size_t i = 0; i < s_rwy_count; ++i) {
@@ -494,6 +510,7 @@ void loadPois() {
   if (gen == s_poi_gen) return;
   s_poi_gen = gen;
   s_poi_count = s_rwy_count = 0;
+  s_urban_n = 0;
   const uint8_t* m = services::map::data();
   const size_t size = services::map::size();
   if (m == nullptr || size < services::map::kHeaderBytes) return;
@@ -524,6 +541,19 @@ void loadPois() {
       Runway& r = s_rwys[s_rwy_count++];
       pt(0, &r.x0, &r.y0);
       pt(n - 1, &r.x1, &r.y1);
+    } else if (type == 6 && n >= 2) {
+      // Built-up grid: word 0 = [N, 0, radius x10 (u16)], then N*N nibbles (low first),
+      // rows south to north, cells west to east.
+      const int gn = e[0];
+      uint16_t r10;
+      memcpy(&r10, e + 2, 2);
+      if (gn > 0 && gn <= 64 && static_cast<size_t>((gn * gn + 1) / 2) <= (static_cast<size_t>(n) - 1) * 4) {
+        s_urban_n = gn;
+        s_urban_r = r10 / 10.0f;
+        s_urban_ox = ox;
+        s_urban_oy = oy;
+        for (int k = 0; k < gn * gn; ++k) s_urban[k] = (e[4 + k / 2] >> ((k & 1) * 4)) & 0x0F;
+      }
     } else if (type == 5 && n >= 2 && s_poi_count < sizeof(s_pois) / sizeof(s_pois[0])) {
       // word 0: position; word 1: kind, name length; then the UTF-8 name.
       Poi& p = s_pois[s_poi_count];
@@ -746,47 +776,105 @@ bool buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
 /** Scanline even-odd fill of a ring set, clipped to the radar disc. */
 int s_disc_top = 0, s_disc_bottom = 0;  // screen rows the disc covers (sea gradient)
 
+// Scanline fill with an edge table: each edge is set up once and only the edges
+// crossing the current row are visited (testing every edge on every row cost ~100 ms
+// per frame with a detailed coastline).
+struct FillEdge {
+  int16_t r0, r1;  // first / last row it crosses
+  float x, dx;     // x at row r0 (pixel centre), change per row
+};
+FillEdge* s_fill_edges = nullptr;
+size_t s_fill_cap = 0;
+uint16_t* s_fill_order = nullptr;
+uint16_t s_fill_bucket[kH + 1];
+
 void fillRings(const RingSet& set, uint8_t color) {
-  if (set.count == 0) return;
-  constexpr int kMaxCross = 128;
-  float xs[kMaxCross];
-  for (int y = kTopBarH; y < kH; ++y) {
-    if (s_disc_l[y] > s_disc_r[y]) continue;
-    const float ys = y + 0.5f;
-    int n = 0;
-    for (size_t r = 0; r < set.count && n < kMaxCross; ++r) {
-      if (ys < set.ymin[r] || ys > set.ymax[r]) continue;
-      const int16_t* p = set.xy + set.start[r] * 2;
-      const int len = set.len[r];
-      for (int i = 0; i < len && n < kMaxCross; ++i) {
-        const int j = (i + 1 == len) ? 0 : i + 1;
-        const float y0 = p[i * 2 + 1], y1 = p[j * 2 + 1];
-        if ((y0 <= ys) != (y1 <= ys)) {
-          xs[n++] = p[i * 2] + (ys - y0) * (p[j * 2] - p[i * 2]) / (y1 - y0);
-        }
-      }
+  if (set.count == 0 || set.points == 0) return;
+  if (s_fill_cap < set.points) {
+    free(s_fill_edges);
+    free(s_fill_order);
+    s_fill_cap = set.points + 256;
+    s_fill_edges = static_cast<FillEdge*>(malloc(s_fill_cap * sizeof(FillEdge)));
+    s_fill_order = static_cast<uint16_t*>(malloc(s_fill_cap * sizeof(uint16_t)));
+    if (s_fill_edges == nullptr || s_fill_order == nullptr || s_fill_cap > 65535) {
+      free(s_fill_edges);
+      free(s_fill_order);
+      s_fill_edges = nullptr;
+      s_fill_order = nullptr;
+      s_fill_cap = 0;
+      return;
     }
-    if (n < 2) continue;
+  }
+  // Edges, bucketed by their first row (counting sort).
+  size_t ne = 0;
+  memset(s_fill_bucket, 0, sizeof(s_fill_bucket));
+  for (size_t r = 0; r < set.count; ++r) {
+    const int16_t* p = set.xy + set.start[r] * 2;
+    const int len = set.len[r];
+    for (int i = 0; i < len; ++i) {
+      const int j = (i + 1 == len) ? 0 : i + 1;
+      float x0 = p[i * 2], y0 = p[i * 2 + 1], x1 = p[j * 2], y1 = p[j * 2 + 1];
+      if (y0 == y1) continue;
+      if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); }
+      // Rows whose centre ys = r + 0.5 lies in [y0, y1).
+      int r0 = static_cast<int>(ceilf(y0 - 0.5f)), r1 = static_cast<int>(ceilf(y1 - 0.5f)) - 1;
+      r0 = std::max(r0, kTopBarH);
+      r1 = std::min(r1, kH - 1);
+      if (r1 < r0) continue;
+      const float dx = (x1 - x0) / (y1 - y0);
+      s_fill_edges[ne] = {static_cast<int16_t>(r0), static_cast<int16_t>(r1), x0 + (r0 + 0.5f - y0) * dx, dx};
+      ++s_fill_bucket[r0];
+      ++ne;
+    }
+  }
+  if (ne < 2) return;
+  {  // bucket start offsets, then place the edges
+    uint16_t sum = 0;
+    for (int y = 0; y <= kH; ++y) { const uint16_t c = s_fill_bucket[y]; s_fill_bucket[y] = sum; sum += c; }
+    static uint16_t fillpos[kH + 1];
+    memcpy(fillpos, s_fill_bucket, sizeof(fillpos));
+    for (size_t e = 0; e < ne; ++e) s_fill_order[fillpos[s_fill_edges[e].r0]++] = static_cast<uint16_t>(e);
+  }
+  constexpr int kMaxActive = 256;
+  uint16_t active[kMaxActive];
+  int na = 0;
+  float xs[kMaxActive];
+  size_t next = s_fill_bucket[kTopBarH];
+  for (int y = kTopBarH; y < kH; ++y) {
+    // Add edges starting here, drop finished ones.
+    const size_t end = s_fill_bucket[y + 1 <= kH ? y + 1 : kH];
+    for (; next < end && next < ne; ++next) {
+      if (na < kMaxActive) active[na++] = s_fill_order[next];
+    }
+    int w = 0;
+    for (int k = 0; k < na; ++k) {
+      if (s_fill_edges[active[k]].r1 >= y) active[w++] = active[k];
+    }
+    na = w;
+    if (na < 2) continue;
+    const bool in_disc = s_disc_l[y] <= s_disc_r[y];
+    int n = 0;
+    for (int k = 0; k < na; ++k) {
+      FillEdge& e = s_fill_edges[active[k]];
+      xs[n++] = e.x;
+      e.x += e.dx;  // ready for the next row
+    }
+    if (!in_disc) continue;
     for (int i = 1; i < n; ++i) {  // insertion sort, n is small
       const float v = xs[i];
       int k = i;
-      while (k > 0 && xs[k - 1] > v) {
-        xs[k] = xs[k - 1];
-        --k;
-      }
+      while (k > 0 && xs[k - 1] > v) { xs[k] = xs[k - 1]; --k; }
       xs[k] = v;
+    }
+    uint8_t col = color;
+    if (color == kSea && s_disc_bottom > s_disc_top) {  // haze towards the horizon
+      const int t = (y - s_disc_top) * 15 / (s_disc_bottom - s_disc_top);
+      col = static_cast<uint8_t>(kSeaBase + std::max(0, std::min(15, t)));
     }
     for (int k = 0; k + 1 < n; k += 2) {
       const int xa = std::max<int>(static_cast<int>(ceilf(xs[k])), s_disc_l[y]);
       const int xb = std::min<int>(static_cast<int>(floorf(xs[k + 1])), s_disc_r[y]);
-      if (xb >= xa) {
-        uint8_t col = color;
-        if (color == kSea && s_disc_bottom > s_disc_top) {  // haze towards the horizon
-          const int t = (y - s_disc_top) * 15 / (s_disc_bottom - s_disc_top);
-          col = static_cast<uint8_t>(kSeaBase + std::max(0, std::min(15, t)));
-        }
-        s_spr.drawFastHLine(xa, y, xb - xa + 1, col);
-      }
+      if (xb >= xa) s_spr.drawFastHLine(xa, y, xb - xa + 1, col);
     }
   }
 }
@@ -805,6 +893,7 @@ int16_t s_rv_y[(kReliefN + 1) * (kReliefN + 1)];
 uint16_t s_rc_order[kReliefN * kReliefN];
 uint8_t s_rv_shade[(kReliefN + 1) * (kReliefN + 1)];  // 0 dark .. 128 flat .. 255 lit
 uint8_t s_rv_elev[(kReliefN + 1) * (kReliefN + 1)];   // 0 sea level .. 255 highest point
+uint8_t s_rv_urban[(kReliefN + 1) * (kReliefN + 1)];  // 0 open land .. 255 built-up
 uint16_t s_rc_count = 0;
 
 // Grid vertices that lie in the sea (map type 2 rings, world coordinates). The terrain
@@ -882,11 +971,33 @@ inline bool lowVertex(int k) { return (s_low_vertex_bits[k >> 3] >> (k & 7)) & 1
 // view then only re-projects the vertices: no memory is allocated while rotating
 // (with Wi-Fi up, the network task needs ~40 KB for TLS at the same moment, and a
 // failed allocation here used to leave the relief out until the next camera change).
+// Built-up areas (map entry type 6 from the setup page): a coarse grid of how much of
+// each cell is town (0..15). The relief is tinted towards a grey-brown there, so the
+// city reads at a glance without any names.
+
+/** 0..1 built-up share at a ground point (km from home), bilinear. */
+float urbanAt(float x, float y) {
+  if (s_urban_n == 0) return 0.0f;
+  const float cell = 2.0f * s_urban_r / s_urban_n;
+  const float fx = (x - s_urban_ox + s_urban_r) / cell - 0.5f, fy = (y - s_urban_oy + s_urban_r) / cell - 0.5f;
+  const int i0 = static_cast<int>(floorf(fx)), j0 = static_cast<int>(floorf(fy));
+  const float tx = fx - i0, ty = fy - j0;
+  auto at = [&](int i, int j) {
+    if (i < 0 || j < 0 || i >= s_urban_n || j >= s_urban_n) return 0.0f;
+    return s_urban[j * s_urban_n + i] / 15.0f;
+  };
+  return (at(i0, j0) * (1 - tx) + at(i0 + 1, j0) * tx) * (1 - ty) +
+         (at(i0, j0 + 1) * (1 - tx) + at(i0 + 1, j0 + 1) * tx) * ty;
+}
+
+void loadPois();
+
 struct ShadeKey {
+  uint32_t mgen;
   uint32_t tgen;
   float R, tscale;
   double lat, lon;
-} s_shade_key = {0, -1, -1, 0, 0};
+} s_shade_key = {0, 0, -1, -1, 0, 0};
 
 void buildShade(const Cam& c) {
   constexpr int N = kReliefN;
@@ -918,6 +1029,7 @@ void buildShade(const Cam& c) {
       s_rv_shade[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, v)));
       const float hmax = std::max(60.0f, services::terrain::maxHeightM());
       s_rv_elev[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, h(i, j) / hmax * 255.0f)));
+      s_rv_urban[k] = static_cast<uint8_t>(255.0f * urbanAt(-c.R + i * step, -c.R + j * step));
     }
   }
 }
@@ -936,9 +1048,10 @@ void buildRelief(const Cam& c) {
     s_mask_key = mk;
     buildSeaMask(c.R);
   }
-  const ShadeKey sk{services::terrain::generation(), c.R, c.tscale, services::location::lat(),
-                    services::location::lon()};
-  if (sk.tgen != s_shade_key.tgen || sk.R != s_shade_key.R || sk.tscale != s_shade_key.tscale ||
+  loadPois();  // the built-up grid comes with the map
+  const ShadeKey sk{services::map::generation(), services::terrain::generation(), c.R, c.tscale,
+                    services::location::lat(), services::location::lon()};
+  if (sk.mgen != s_shade_key.mgen || sk.tgen != s_shade_key.tgen || sk.R != s_shade_key.R || sk.tscale != s_shade_key.tscale ||
       sk.lat != s_shade_key.lat || sk.lon != s_shade_key.lon) {
     s_shade_key = sk;
     buildShade(c);
@@ -992,11 +1105,12 @@ constexpr uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, 
  * frame: 16 shades x 8 elevation bands, a light ordered dither between neighbours so
  * no steps show.
  */
-void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x1, float y1, float s1,
-                   float e1, float x2, float y2, float s2, float e2) {
-  if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); std::swap(s0, s1); std::swap(e0, e1); }
-  if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); std::swap(e0, e2); }
-  if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); std::swap(e1, e2); }
+void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u0, float x1, float y1,
+                   float s1, float e1, float u1, float x2, float y2, float s2, float e2, float u2) {
+  if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); std::swap(s0, s1); std::swap(e0, e1); std::swap(u0, u1); }
+  if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); std::swap(e0, e2); std::swap(u0, u2); }
+  if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); std::swap(e1, e2); std::swap(u1, u2); }
+  const bool urban = u0 > 0.0f || u1 > 0.0f || u2 > 0.0f;
   if (y2 - y0 < 0.5f) return;
   const int ya = std::max(std::max(kTopBarH + 1, s_band_y0), static_cast<int>(ceilf(y0 - 0.5f)));
   const int yb = std::min(s_band_y1 - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
@@ -1004,16 +1118,16 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x
   for (int y = ya; y <= yb; ++y) {
     const float yc = y + 0.5f;
     const float t = (yc - y0) / (y2 - y0);
-    float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0), ea = e0 + t * (e2 - e0);
-    float xb, sb, eb;
+    float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0), ea = e0 + t * (e2 - e0), ua = u0 + t * (u2 - u0);
+    float xb, sb, eb, ub;
     if (yc < y1) {
       const float u = (y1 - y0) > 1e-3f ? (yc - y0) / (y1 - y0) : 1.0f;
-      xb = x0 + u * (x1 - x0); sb = s0 + u * (s1 - s0); eb = e0 + u * (e1 - e0);
+      xb = x0 + u * (x1 - x0); sb = s0 + u * (s1 - s0); eb = e0 + u * (e1 - e0); ub = u0 + u * (u1 - u0);
     } else {
       const float u = (y2 - y1) > 1e-3f ? (yc - y1) / (y2 - y1) : 0.0f;
-      xb = x1 + u * (x2 - x1); sb = s1 + u * (s2 - s1); eb = e1 + u * (e2 - e1);
+      xb = x1 + u * (x2 - x1); sb = s1 + u * (s2 - s1); eb = e1 + u * (e2 - e1); ub = u1 + u * (u2 - u1);
     }
-    if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); std::swap(ea, eb); }
+    if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); std::swap(ea, eb); std::swap(ua, ub); }
     // Clipped to the disc, so the relief ends on its smooth rim, not on cell edges.
     const int xs = std::max<int>(s_disc_l[y], static_cast<int>(ceilf(xa - 0.5f)));
     const int xe = std::min<int>(s_disc_r[y], static_cast<int>(ceilf(xb - 0.5f)) - 1);
@@ -1021,6 +1135,7 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x
     const float inv = (xb - xa) > 1e-3f ? 1.0f / (xb - xa) : 0.0f;
     const float ds = (sb - sa) * inv, de = (eb - ea) * inv;
     const float sv0 = sa + (xs + 0.5f - xa) * ds, ev0 = ea + (xs + 0.5f - xa) * de;
+    const float du = (ub - ua) * inv, uv0 = ua + (xs + 0.5f - xa) * du;
     // Fixed point (8.8, in 16ths of a level for the dither): the inner loop is integer
     // only. Shade is clamped to 0..15, band to 0..7.
     int32_t sv = static_cast<int32_t>(sv0 * 4096.0f), ev = static_cast<int32_t>(ev0 * 4096.0f);
@@ -1028,7 +1143,8 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x
     const uint8_t* bay = kBayer[y & 3];
     const uint8_t* bay2 = kBayer[(y + 2) & 3];
     uint8_t* row = buf + y * kW;
-    for (int x = xs; x <= xe; ++x, sv += dsv, ev += dev) {
+    int32_t uv = static_cast<int32_t>(uv0 * 4096.0f * 16.0f), duv = static_cast<int32_t>(du * 4096.0f * 16.0f);
+    for (int x = xs; x <= xe; ++x, sv += dsv, ev += dev, uv += duv) {
       int32_t s16 = sv >> 8, e16 = ev >> 8;  // level * 16
       s16 = s16 < 0 ? 0 : (s16 > 15 * 16 ? 15 * 16 : s16);
       e16 = e16 < 0 ? 0 : (e16 > 7 * 16 ? 7 * 16 : e16);
@@ -1037,7 +1153,12 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x
       if ((e16 & 15) > bay2[(x + 1) & 3]) ++bd;
       if (sh > 15) sh = 15;
       if (bd > 7) bd = 7;
-      row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
+      // Built-up share 0..1 (x16 here) against the dither: town tint or terrain.
+      if (urban && (uv >> 12) > kBayer[(y + 1) & 3][(x + 3) & 3]) {
+        row[x] = static_cast<uint8_t>(kUrbanBase + sh);
+      } else {
+        row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
+      }
     }
   }
 }
@@ -1056,10 +1177,13 @@ void drawRelief() {
     const float a2 = s_rv_shade[k11] * kShadeScale, a3 = s_rv_shade[k01] * kShadeScale;
     const float e0 = s_rv_elev[k00] * kElevScale, e1 = s_rv_elev[k10] * kElevScale;
     const float e2 = s_rv_elev[k11] * kElevScale, e3 = s_rv_elev[k01] * kElevScale;
-    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, s_rv_x[k10], s_rv_y[k10], a1, e1,
-                  s_rv_x[k11], s_rv_y[k11], a2, e2);
-    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, s_rv_x[k11], s_rv_y[k11], a2, e2,
-                  s_rv_x[k01], s_rv_y[k01], a3, e3);
+    constexpr float kU = 1.0f / 255.0f;
+    const float u0 = s_rv_urban[k00] * kU, u1 = s_rv_urban[k10] * kU, u2 = s_rv_urban[k11] * kU,
+                u3 = s_rv_urban[k01] * kU;
+    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, u0, s_rv_x[k10], s_rv_y[k10], a1, e1, u1,
+                  s_rv_x[k11], s_rv_y[k11], a2, e2, u2);
+    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, u0, s_rv_x[k11], s_rv_y[k11], a2, e2, u2,
+                  s_rv_x[k01], s_rv_y[k01], a3, e3, u3);
   }
 }
 
@@ -1093,12 +1217,33 @@ void drawSurface(const Cam& c) {
   fillRings(s_lakes, kSea);
 }
 
+// Projected map points, kept while the camera stays put (re-projecting every point
+// with its terrain height each frame cost ~20 ms).
+int16_t* s_map_xy = nullptr;
+size_t s_map_xy_cap = 0;
+struct MapKey {
+  uint32_t gen, tgen;
+  float yaw, R, pitch;
+} s_map_key = {0xFFFFFFFFu, 0, 0, 0, 0};
+
 void drawMap(const Cam& c) {
   const uint8_t* m = services::map::data();
   const size_t size = services::map::size();
   if (m == nullptr || size < services::map::kHeaderBytes) {
     return;
   }
+  const size_t max_pts = size / 4;
+  if (s_map_xy_cap < max_pts) {
+    free(s_map_xy);
+    s_map_xy = static_cast<int16_t*>(malloc(max_pts * 2 * sizeof(int16_t)));
+    s_map_xy_cap = s_map_xy ? max_pts : 0;
+    s_map_key.gen = 0xFFFFFFFFu;
+  }
+  const MapKey key{services::map::generation(), services::terrain::generation(), s_yaw_cur, c.R, c.pitch_deg};
+  const bool fresh = s_map_xy != nullptr && key.gen == s_map_key.gen && key.tgen == s_map_key.tgen &&
+                     key.yaw == s_map_key.yaw && key.R == s_map_key.R && key.pitch == s_map_key.pitch;
+  if (s_map_xy != nullptr) s_map_key = key;
+  size_t pt_index = 0;
   int32_t lat_e7, lon_e7;
   uint16_t count;
   memcpy(&lat_e7, m + 4, 4);
@@ -1122,6 +1267,15 @@ void drawMap(const Cam& c) {
       continue;
     }
     const uint8_t color = type == 1 ? kRoad : kCoast;  // coast and lake shores
+    // Motorways / trunk roads stand out a little: 2 px with a dark edge under them,
+    // so the main axes read as the borders between parts of the city.
+    auto seg = [&](int x0, int y0, int x1, int y1) {
+      if (type == 1) {
+        s_spr.drawLine(x0, y0 + 1, x1, y1 + 1, kBg);
+        s_spr.drawLine(x0, y0 - 1, x1, y1 - 1, color);
+      }
+      s_spr.drawLine(x0, y0, x1, y1, color);
+    };
     const bool closed = type == 3;
     float fsx = 0, fsy = 0;
     bool have_first = false;
@@ -1131,18 +1285,35 @@ void drawMap(const Cam& c) {
       int16_t xi, yi;
       memcpy(&xi, m + pos, 2);
       memcpy(&yi, m + pos + 2, 2);
-      const float x = ox + xi * 0.01f;
-      const float y = oy + yi * 0.01f;
       float sx, sy;
-      // Coast lines at sea level, exactly on the edge of the (flat) sea fill; lake
-      // shores and roads follow the terrain like the lakes do.
-      const float z = type == 0 ? 0.0f : groundZ(c, x, y);
-      if (x * x + y * y > r2 || !project(c, x, y, z, &sx, &sy)) {
-        have_prev = false;
-        continue;
+      int16_t* cache = s_map_xy != nullptr && pt_index < s_map_xy_cap ? s_map_xy + pt_index * 2 : nullptr;
+      ++pt_index;
+      if (fresh && cache != nullptr) {
+        if (cache[0] == INT16_MIN) {
+          have_prev = false;
+          continue;
+        }
+        sx = cache[0];
+        sy = cache[1];
+      } else {
+        const float x = ox + xi * 0.01f;
+        const float y = oy + yi * 0.01f;
+        // Coast lines at sea level, exactly on the edge of the (flat) sea fill; lake
+        // shores and roads follow the terrain like the lakes do.
+        const float z = type == 0 ? 0.0f : groundZ(c, x, y);
+        const bool ok = x * x + y * y <= r2 && project(c, x, y, z, &sx, &sy) && fabsf(sx) < 30000 && fabsf(sy) < 30000;
+        if (cache != nullptr) {
+          cache[0] = ok ? static_cast<int16_t>(lroundf(sx)) : INT16_MIN;
+          cache[1] = ok ? static_cast<int16_t>(lroundf(sy)) : 0;
+          if (ok) { sx = cache[0]; sy = cache[1]; }
+        }
+        if (!ok) {
+          have_prev = false;
+          continue;
+        }
       }
       if (have_prev) {
-        s_spr.drawLine(ri(psx), ri(psy), ri(sx), ri(sy), color);
+        seg(ri(psx), ri(psy), ri(sx), ri(sy));
       } else if (i == 0) {
         fsx = sx;
         fsy = sy;
@@ -1152,7 +1323,7 @@ void drawMap(const Cam& c) {
       psy = sy;
       have_prev = true;
     }
-    if (closed && have_first && have_prev) s_spr.drawLine(ri(psx), ri(psy), ri(fsx), ri(fsy), color);
+    if (closed && have_first && have_prev) seg(ri(psx), ri(psy), ri(fsx), ri(fsy));
   }
 }
 
@@ -1928,11 +2099,18 @@ void drawEmptyNote(unsigned long fetched_ms) {
   }
 }
 
+uint16_t s_lut565[256];  // palette as the panel's frame buffer stores it (byte-swapped RGB565)
+
 void applyPaletteTo(LGFX_Sprite& g, bool force) {
+  auto setPal = [&](int i, uint8_t r, uint8_t gg, uint8_t b) {
+    g.setPaletteColor(i, r, gg, b);
+    const uint16_t c = static_cast<uint16_t>(((r & 0xF8) << 8) | ((gg & 0xFC) << 3) | (b >> 3));
+    s_lut565[i] = static_cast<uint16_t>((c >> 8) | (c << 8));
+  };
   // Set every frame: the forecast screen shares the sprite with its own palette.
   const bool hc = services::display_prefs::get().high_contrast;
   const Rgb* pal = hc ? kPaletteHighContrast : kPalette;
-  for (int i = 0; i < 16; ++i) g.setPaletteColor(i, pal[i].r, pal[i].g, pal[i].b);
+  for (int i = 0; i < 16; ++i) setPal(i, pal[i].r, pal[i].g, pal[i].b);
   if (!force && s_palette_set && s_palette_hc == hc) return;  // ramps unchanged
   auto clamp8 = [](float v) { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
   auto luma = [](const Rgb& c) { return 0.3f * c.r + 0.59f * c.g + 0.11f * c.b + 1.0f; };
@@ -1948,7 +2126,7 @@ void applyPaletteTo(LGFX_Sprite& g, bool force) {
                 bb = land.b + (high.b - land.b) * t;
     for (int sh = 0; sh < kTerrainShades; ++sh) {
       const float f = sh < 8 ? kd + (1.0f - kd) * sh / 8.0f : 1.0f + (kl - 1.0f) * (sh - 8) / 7.0f;
-      g.setPaletteColor(kTerrainBase + b * kTerrainShades + sh, clamp8(br * f), clamp8(bg * f),
+      setPal(kTerrainBase + b * kTerrainShades + sh, clamp8(br * f), clamp8(bg * f),
                             clamp8(bb * f));
     }
   }
@@ -1957,7 +2135,7 @@ void applyPaletteTo(LGFX_Sprite& g, bool force) {
   for (int i = 0; i < 16; ++i) {
     const float t = i / 15.0f;  // 0 far .. 1 near
     const float hz = (1.0f - t) * 0.35f, dk = 1.08f - 0.22f * t;
-    g.setPaletteColor(kSeaBase + i, clamp8((sea.r + (haze.r - sea.r) * hz) * dk),
+    setPal(kSeaBase + i, clamp8((sea.r + (haze.r - sea.r) * hz) * dk),
                           clamp8((sea.g + (haze.g - sea.g) * hz) * dk),
                           clamp8((sea.b + (haze.b - sea.b) * hz) * dk));
   }
@@ -1967,12 +2145,19 @@ void applyPaletteTo(LGFX_Sprite& g, bool force) {
     const Rgb c = pal[alt_cols[a]];
     for (int j = 0; j < kPlaneShades; ++j) {
       const float f = 0.32f + 0.78f * j / (kPlaneShades - 1);
-      g.setPaletteColor(kPlaneBase + a * kPlaneShades + j, clamp8(c.r * f), clamp8(c.g * f),
+      setPal(kPlaneBase + a * kPlaneShades + j, clamp8(c.r * f), clamp8(c.g * f),
                             clamp8(c.b * f));
     }
   }
-  g.setPaletteColor(kAsphalt, 70, 74, 78);
-  g.setPaletteColor(kMarking, 236, 236, 228);
+  {  // built-up: a warm grey, shaded like the terrain
+    const Rgb ub = hc ? Rgb{124, 116, 100} : Rgb{98, 92, 80};
+    for (int sh = 0; sh < kTerrainShades; ++sh) {
+      const float f = sh < 8 ? kd + (1.0f - kd) * sh / 8.0f : 1.0f + (kl - 1.0f) * (sh - 8) / 7.0f;
+      setPal(kUrbanBase + sh, clamp8(ub.r * f), clamp8(ub.g * f), clamp8(ub.b * f));
+    }
+  }
+  setPal(kAsphalt, 70, 74, 78);
+  setPal(kMarking, 236, 236, 228);
   s_palette_hc = hc;
   s_palette_set = true;
 }
@@ -2215,10 +2400,23 @@ void drawFrame() {
     }
     st[3] += micros() - t; t = micros();
 #if !defined(RADAR3D_HOST_TEST)
-    // Copy the band's rows (the clip makes the push read only those) to the panel.
-    tft.setClipRect(0, y0, kW, s_band_y1 - y0);
-    s_spr.pushSprite(0, 0);
-    tft.clearClipRect();
+    // Straight into the hidden frame buffer through a 256-entry colour table
+    // (LovyanGFX's generic palette push spent ~85 ms per frame on this).
+    {
+      uint16_t* fb = tft.hiddenBuffer();
+      const bool flip = tft.getRotation() == 2;
+      static uint16_t line[kW];
+      for (int y = y0; y < s_band_y1; ++y) {
+        const uint8_t* src = s_band_mem + static_cast<size_t>(y - y0) * kW;
+        if (!flip) {
+          for (int x = 0; x < kW; ++x) line[x] = s_lut565[src[x]];
+          memcpy(fb + static_cast<size_t>(y) * kW, line, sizeof(line));
+        } else {
+          for (int x = 0; x < kW; ++x) line[kW - 1 - x] = s_lut565[src[x]];
+          memcpy(fb + static_cast<size_t>(kH - 1 - y) * kW, line, sizeof(line));
+        }
+      }
+    }
     st[4] += micros() - t;
 #endif
   }

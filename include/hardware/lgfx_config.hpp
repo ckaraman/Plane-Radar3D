@@ -43,6 +43,8 @@ class LGFX : public lgfx::LGFX_Device {
   }
   /** Show it at the next refresh; afterwards drawing goes to the visible buffer. */
   void setPanelPclk(uint32_t hz) { _bus.setPclk(hz); }
+  /** The hidden frame buffer itself (800 x 480, byte-swapped RGB565), for fast copies. */
+  uint16_t* hiddenBuffer() { return reinterpret_cast<uint16_t*>(_bus.hidden()); }
   void presentHiddenFrame() {
     _bus.present();
     _panel.setTarget(_bus.visible());
