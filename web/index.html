@@ -873,6 +873,31 @@
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
 
+  // Sends the query to all mirrors at once and takes the first good answer (the others
+  // are cancelled): a busy server no longer costs a 30 s wait before the next is tried.
+  async function overpassRace(q, timeoutMs, reasons) {
+    const ctls = OVERPASS.map(() => new AbortController());
+    const timer = setTimeout(() => ctls.forEach((c) => c.abort()), timeoutMs);
+    try {
+      return await Promise.any(OVERPASS.map(async (url, i) => {
+        const host = new URL(url).hostname;
+        try {
+          const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctls[i].signal,
+                                       headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+          if (!r.ok) throw new Error(r.status === 429 ? 'sunucu meşgul (429)' : 'HTTP ' + r.status);
+          const j = JSON.parse(await r.text());                // an HTML error page throws here
+          if (!j || !Array.isArray(j.elements)) throw new Error('geçersiz yanıt');
+          if (j.remark && /runtime error|timed out|out of memory/i.test(j.remark)) throw new Error('sunucu meşgul');
+          ctls.forEach((c, k) => { if (k !== i) c.abort(); });
+          return j.elements;
+        } catch (e) {
+          if (reasons) reasons.push(host + ': ' + (e && e.name === 'AbortError' ? 'zaman aşımı' : (e && e.message) || 'bağlanılamadı'));
+          throw e;
+        }
+      }));
+    } finally { clearTimeout(timer); }
+  }
+
   async function fetchOverpass(lat, lon, radiusKm, onStatus) {
     const key = lat.toFixed(4) + ',' + lon.toFixed(4) + ',' + radiusKm;
     if (overpassCache.has(key)) return overpassCache.get(key);
@@ -886,29 +911,14 @@
       'relation["natural"="water"]' + notRiver + '(' + bbox + ');' +
       'way["landuse"="reservoir"](' + bbox + '););out geom(' + bbox + ');';
     const reasons = [];
-    for (let round = 0; round < 3; round++) {
-      for (const url of OVERPASS) {
-        const host = new URL(url).hostname;
-        if (onStatus) onStatus('Harita sunucusuna bağlanılıyor (' + host + ', deneme ' + (round * OVERPASS.length + OVERPASS.indexOf(url) + 1) + ')…');
-        try {
-          const ctl = new AbortController();
-          const t = setTimeout(() => ctl.abort(), 30000);
-          let r;
-          try {
-            r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctl.signal,
-                                   headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-            if (!r.ok) throw new Error(r.status === 429 ? 'sunucu meşgul (429)' : 'HTTP ' + r.status);
-            const j = JSON.parse(await r.text());                // an HTML error page throws here
-            if (!j || !Array.isArray(j.elements)) throw new Error('geçersiz yanıt');
-            if (j.remark && /runtime error|timed out|out of memory/i.test(j.remark)) throw new Error('sunucu meşgul');
-            overpassCache.set(key, j.elements);
-            return j.elements;
-          } finally { clearTimeout(t); }
-        } catch (e) {
-          reasons.push(host + ': ' + (e && e.name === 'AbortError' ? 'zaman aşımı' : (e && e.message) || 'bağlanılamadı'));
-        }
-      }
-      if (round < 2) await sleep(2000 * (round + 1));
+    for (let round = 0; round < 2; round++) {
+      if (onStatus) onStatus('Harita sunucularına bağlanılıyor' + (round ? ' (yeniden deneniyor)' : '') + '…');
+      try {
+        const els = await overpassRace(q, 35000, reasons);
+        overpassCache.set(key, els);
+        return els;
+      } catch (_) { /* all mirrors failed this round */ }
+      if (round < 1) await sleep(2000);
     }
     const err = new Error('network'); err.reasons = reasons;
     throw err;
@@ -930,19 +940,7 @@
       'nwr["historic"~"^(castle|monument|fort|palace)$"]["wikidata"]["name"]' + b + ';' +
       'way["bridge"="yes"]["highway"~"^(motorway|trunk)$"]["wikidata"]["name"]' + b + ';' +
       'node["place"~"^(city|town|suburb)$"]["name"]' + b + ';);out center tags;';
-    for (const url of OVERPASS) {
-      try {
-        const ctl = new AbortController();
-        const t = setTimeout(() => ctl.abort(), 25000);
-        try {
-          const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctl.signal,
-                                       headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-          if (!r.ok) continue;
-          const j = JSON.parse(await r.text());
-          if (j && Array.isArray(j.elements)) return j.elements;
-        } finally { clearTimeout(t); }
-      } catch (_) { /* next mirror */ }
-    }
+    try { return await overpassRace(q, 25000, null); } catch (_) { /* optional */ }
     return null;   // places are optional
   }
 
@@ -1353,14 +1351,17 @@
     }
     try {
       setMsg(msg, 'info', 'Harita indiriliyor… (birkaç saniye sürebilir)');
+      // 5" board: places are fetched at the same time as the map.
+      const wantPlaces = dev.hw === 'ws5' || dev.hw === 'ws5b';
+      const placesP = wantPlaces ? fetchPlaces(lat, lon, radius) : Promise.resolve(null);
       const elements = await fetchOverpass(lat, lon, radius, (t) => setMsg(msg, 'info', t));
       const water = (dev.mapv || 1) >= 2;
       let blob = buildMapBlob(elements, lat, lon, water, radius);
       if (!blob) return ' Bu konumda çizilecek kıyı ya da ana yol bulunamadı, harita eklenmedi.';
       // 5" board: airports, landmarks and town names on the map too.
-      if (dev.hw === 'ws5' || dev.hw === 'ws5b') {
-        setMsg(msg, 'info', 'Önemli yerler indiriliyor…');
-        const places = await fetchPlaces(lat, lon, radius);
+      if (wantPlaces) {
+        setMsg(msg, 'info', 'Önemli yerler ekleniyor…');
+        const places = await placesP;
         if (places) blob = appendEntries(blob, buildPlaceEntries(places, lat, lon, radius));
       }
       await uploadMap(blob, (p) => setMsg(msg, 'info', 'Harita cihaza yazılıyor… %' + p));
