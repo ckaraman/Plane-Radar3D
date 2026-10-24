@@ -914,6 +914,112 @@
     throw err;
   }
 
+  // ---- places for the 5" board: airports (IATA code + runways), landmarks, towns.
+  // Map blob entries (firmware radar3d.cpp loadPois): type 4 = runway centre line
+  // (2 points); type 5 = place: word 0 position, word 1 [kind, name length, 0, 0],
+  // then the UTF-8 name padded to 4 bytes. Older firmware skips both types.
+  async function fetchPlaces(lat, lon, radiusKm) {
+    const dLat = radiusKm / KM_PER_DEG, dLon = radiusKm / (KM_PER_DEG * Math.cos(lat * Math.PI / 180));
+    const bbox = [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map((v) => v.toFixed(5)).join(',');
+    const b = '(' + bbox + ')';
+    const q = '[out:json][timeout:25];way["aeroway"="runway"]' + b + ';out geom;(' +
+      'nwr["aeroway"="aerodrome"]["iata"]' + b + ';' +
+      'nwr["tourism"="attraction"]["wikidata"]["name"]' + b + ';' +
+      'nwr["man_made"~"^(tower|lighthouse)$"]["wikidata"]["name"]' + b + ';' +
+      'nwr["leisure"="stadium"]["wikidata"]["name"]' + b + ';' +
+      'nwr["historic"~"^(castle|monument|fort|palace)$"]["wikidata"]["name"]' + b + ';' +
+      'way["bridge"="yes"]["highway"~"^(motorway|trunk)$"]["wikidata"]["name"]' + b + ';' +
+      'node["place"~"^(city|town|suburb)$"]["name"]' + b + ';);out center tags;';
+    for (const url of OVERPASS) {
+      try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 25000);
+        try {
+          const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctl.signal,
+                                       headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+          if (!r.ok) continue;
+          const j = JSON.parse(await r.text());
+          if (j && Array.isArray(j.elements)) return j.elements;
+        } finally { clearTimeout(t); }
+      } catch (_) { /* next mirror */ }
+    }
+    return null;   // places are optional
+  }
+
+  function buildPlaceEntries(elements, lat, lon, radiusKm) {
+    const cosL = Math.cos(lat * Math.PI / 180);
+    const xy = (la, lo) => [(lo - lon) * KM_PER_DEG * cosL, (la - lat) * KM_PER_DEG];
+    const inside = ([x, y]) => x * x + y * y <= radiusKm * radiusKm;
+    const pos = (el) => el.type === 'node' ? xy(el.lat, el.lon) : (el.center ? xy(el.center.lat, el.center.lon) : null);
+    const runways = [], airports = [], landmarks = [], towns = [];
+    for (const el of elements) {
+      const t = el.tags || {};
+      if (t.aeroway === 'runway' && el.geometry && el.geometry.length >= 2) {
+        const a = xy(el.geometry[0].lat, el.geometry[0].lon), z = xy(el.geometry[el.geometry.length - 1].lat, el.geometry[el.geometry.length - 1].lon);
+        if (Math.hypot(z[0] - a[0], z[1] - a[1]) >= 0.8 && (inside(a) || inside(z))) runways.push([a, z]);
+        continue;
+      }
+      const p = pos(el);
+      if (!p || !inside(p)) continue;
+      if (t.aeroway === 'aerodrome' && /^[A-Z]{3}$/.test(t.iata || '')) airports.push({ p, name: t.iata, kind: 0 });
+      else if (t.place) towns.push({ p, name: t.name, kind: 2, rank: t.place === 'city' ? 0 : t.place === 'town' ? 1 : 2 });
+      else if (t.name) landmarks.push({ p, name: t.name, kind: 1, rank: t.wikipedia ? 0 : 1 });
+    }
+    // Spread out: a place closer than `gap` km to one already taken is skipped.
+    const pick = (list, max, gap, taken) => {
+      const out = [];
+      for (const it of list) {
+        if (out.length >= max) break;
+        if (taken.concat(out).some((o) => Math.hypot(o.p[0] - it.p[0], o.p[1] - it.p[1]) < gap)) continue;
+        if (Math.hypot(it.p[0], it.p[1]) < 0.6) continue;     // home has its own marker
+        out.push(it);
+      }
+      return out;
+    };
+    const near = (a, b) => Math.hypot(a.p[0], a.p[1]) - Math.hypot(b.p[0], b.p[1]);
+    const ap = pick(airports.sort(near), 4, 2, []);
+    const lm = pick(landmarks.sort((a, b) => a.rank - b.rank || near(a, b)), 6, radiusKm * 0.12, ap);
+    const tw = pick(towns.sort((a, b) => a.rank - b.rank || near(a, b)), 8, radiusKm * 0.15, ap.concat(lm));
+    const enc = new TextEncoder();
+    const entries = [];
+    const q = (v) => Math.max(-32767, Math.min(32767, Math.round(v * 100)));   // 10 m units
+    for (const [a, z] of runways.slice(0, 16)) {
+      const raw = new Uint8Array(8), dv = new DataView(raw.buffer);
+      dv.setInt16(0, q(a[0]), true); dv.setInt16(2, q(a[1]), true); dv.setInt16(4, q(z[0]), true); dv.setInt16(6, q(z[1]), true);
+      entries.push({ type: 4, n: 2, raw });
+    }
+    for (const it of ap.concat(lm, tw)) {
+      let name = enc.encode(it.name);
+      if (name.length > 23) {                                   // cut on a character boundary
+        let s = it.name;
+        while (enc.encode(s + '.').length > 23) s = s.slice(0, -1);
+        name = enc.encode(s.trimEnd() + '.');
+      }
+      const words = 2 + Math.ceil(name.length / 4);
+      const raw = new Uint8Array(words * 4), dv = new DataView(raw.buffer);
+      dv.setInt16(0, q(it.p[0]), true); dv.setInt16(2, q(it.p[1]), true);
+      raw[4] = it.kind; raw[5] = name.length;
+      raw.set(name, 8);
+      entries.push({ type: 5, n: words, raw });
+    }
+    return entries;
+  }
+
+  // Appends extra entries to a map blob (count at offset 12).
+  function appendEntries(blob, entries) {
+    const extra = entries.reduce((s, e) => s + 3 + e.raw.length, 0);
+    if (!entries.length || blob.length + extra > MAP_MAX_BYTES) return blob;
+    const out = new Uint8Array(blob.length + extra);
+    out.set(blob);
+    const dv = new DataView(out.buffer);
+    dv.setUint16(12, dv.getUint16(12, true) + entries.length, true);
+    let o = blob.length;
+    for (const e of entries) { out[o] = e.type; dv.setUint16(o + 1, e.n, true); out.set(e.raw, o + 3); o += 3 + e.raw.length; }
+    out.lakes = blob.lakes;
+    out.places = entries.filter((e) => e.type === 5).length;
+    return out;
+  }
+
   function simplify(pts, tol) {          // Douglas-Peucker, iterative
     const n = pts.length;
     if (n < 3) return pts;
@@ -1249,12 +1355,19 @@
       setMsg(msg, 'info', 'Harita indiriliyor… (birkaç saniye sürebilir)');
       const elements = await fetchOverpass(lat, lon, radius, (t) => setMsg(msg, 'info', t));
       const water = (dev.mapv || 1) >= 2;
-      const blob = buildMapBlob(elements, lat, lon, water, radius);
+      let blob = buildMapBlob(elements, lat, lon, water, radius);
       if (!blob) return ' Bu konumda çizilecek kıyı ya da ana yol bulunamadı, harita eklenmedi.';
+      // 5" board: airports, landmarks and town names on the map too.
+      if (dev.hw === 'ws5' || dev.hw === 'ws5b') {
+        setMsg(msg, 'info', 'Önemli yerler indiriliyor…');
+        const places = await fetchPlaces(lat, lon, radius);
+        if (places) blob = appendEntries(blob, buildPlaceEntries(places, lat, lon, radius));
+      }
       await uploadMap(blob, (p) => setMsg(msg, 'info', 'Harita cihaza yazılıyor… %' + p));
       dev.map = blob.length;
       const lakeNote = !water ? '' : (blob.lakes ? ', ' + blob.lakes + ' göl' : ', bu alanda göl yok');
-      return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB' + lakeNote + ').' +
+      const placeNote = blob.places ? ', ' + blob.places + ' yer adı' : '';
+      return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB' + lakeNote + placeNote + ').' +
         (water ? '' : ' Deniz dolgusu için önce 3. adımdan yazılımı güncelleyin.');
     } catch (e) {
       const m = e && e.message ? e.message : '';
