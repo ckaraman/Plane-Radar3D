@@ -2079,18 +2079,36 @@ void drawRunway(const Cam& c, const Runway& r) {
   }
 }
 
-/** Airport badge: dark disc with a light ring and a small aircraft in it, raised on a
- *  short stem above the airport so its runways stay visible underneath. */
-constexpr int kBadgeLift = S(16);
+/** Airport badge: dark rounded square with a control tower and terminal drawn in
+ *  light lines (no aircraft, so it is not mistaken for traffic), raised on a short
+ *  stem above the airport so its runways stay visible underneath. */
+constexpr int kBadgeLift = S(18);
 void drawAirportBadge(int x, int gy) {
-  const int r = S(8), y = gy - kBadgeLift;
-  s_spr.drawLine(x, y + r, x, gy, kBg);
-  s_spr.drawLine(x + 1, y + r, x + 1, gy, kText);
+  const int y = gy - kBadgeLift;  // badge centre
+  const float u = ui::Sf(1.0f);  // one design pixel
+  auto X = [&](float v) { return x + ri(v * u); };
+  auto Y = [&](float v) { return y + ri(v * u); };
+  const int hw = ri(11 * u), hh = ri(10 * u);
+  s_spr.drawLine(x, y + hh, x, gy, kBg);
+  s_spr.drawLine(x + 1, y + hh, x + 1, gy, kText);
   s_spr.fillCircle(x + 1, gy, S(1), kText);
-  s_spr.fillCircle(x, y, r + 1, kBg);
-  s_spr.fillCircle(x, y, r, kPanel);
-  s_spr.drawCircle(x, y, r, kText);
-  drawPlaneShape(x, y, 45.0f, ui::Sf(0.62f), kText);
+  s_spr.fillRoundRect(x - hw - 1, y - hh - 1, 2 * hw + 3, 2 * hh + 3, S(4), kBg);
+  s_spr.fillRoundRect(x - hw, y - hh, 2 * hw + 1, 2 * hh + 1, S(4), kPanel);
+  s_spr.drawRoundRect(x - hw, y - hh, 2 * hw + 1, 2 * hh + 1, S(4), kTextDim);
+  // Tower: antenna, cab (wider, with a window band), shaft with two windows.
+  s_spr.drawLine(X(-4), Y(-8), X(-4), Y(-6), kText);
+  s_spr.fillRect(X(-8), Y(-6), ri(9 * u), ri(4 * u), kText);
+  s_spr.fillRect(X(-7), Y(-5), ri(7 * u), ri(1.5f * u), kPanel);
+  s_spr.drawRect(X(-6), Y(-2), ri(5 * u), ri(9 * u), kText);
+  s_spr.fillRect(X(-5), Y(0), ri(3 * u), ri(1.5f * u), kText);
+  s_spr.fillRect(X(-5), Y(3), ri(3 * u), ri(1.5f * u), kText);
+  // Terminal: low building with a sloping roof and a row of windows.
+  s_spr.drawLine(X(-1), Y(1), X(8), Y(-1), kText);
+  s_spr.drawLine(X(8), Y(-1), X(8), Y(7), kText);
+  s_spr.drawLine(X(-1), Y(1), X(-1), Y(7), kText);
+  for (int k = 0; k < 3; ++k) s_spr.fillRect(X(0.5f + k * 2.6f), Y(3), ri(1.6f * u), ri(2 * u), kText);
+  // Ground line.
+  s_spr.fillRect(X(-9), Y(7), ri(18 * u), ri(1.5f * u), kText);
 }
 
 void drawPois(const Cam& c, bool names) {
@@ -2102,7 +2120,7 @@ void drawPois(const Cam& c, bool names) {
       if (mx * mx + my * my <= c.R * c.R * 0.95f) drawRunway(c, r);
     }
   }
-  for (int pass = 0; pass < 3; ++pass) {  // airports first, then landmarks, then towns
+  for (int pass = 0; pass < 2; ++pass) {  // airports first, then landmarks
     for (size_t i = 0; i < s_poi_count; ++i) {
       const Poi& p = s_pois[i];
       if (p.kind != pass || p.x * p.x + p.y * p.y > c.R * c.R * 0.95f) continue;
@@ -2118,8 +2136,8 @@ void drawPois(const Cam& c, bool names) {
         setFont(&ui::font::SansBold9);
         const int w = s_spr.textWidth(p.name);
         const int by = y - kBadgeLift;
-        const Box b{x + S(11), by - S(8), w + S(2), S(16)};
-        if (claimLabel(b)) haloText(p.name, x + S(12), by - S(8), kText);
+        const Box b{x + S(14), by - S(8), w + S(2), S(16)};
+        if (claimLabel(b)) haloText(p.name, x + S(15), by - S(8), kText);
       } else if (p.kind == 1) {
         const int d = S(4);
         if (!names) {
@@ -2133,16 +2151,7 @@ void drawPois(const Cam& c, bool names) {
         const int w = s_spr.textWidth(p.name);
         const Box b{x + d + S(3), y - S(7), w + S(2), S(14)};
         if (claimLabel(b)) haloText(p.name, x + d + S(4), y - S(6), kTextDim);
-      } else if (names) {
-        setFont(&ui::font::Sans8);
-        const int w = s_spr.textWidth(p.name);
-        const Box b{x - w / 2, y - S(6), w, S(12)};
-        if (claimLabel(b)) {
-          s_spr.setTextDatum(textdatum_t::middle_center);
-          s_spr.setTextColor(kTextDim);
-          s_spr.drawString(p.name, x, y);
-        }
-      }
+      }  // kind 2 (district / town names): not drawn, they crowded the map
     }
   }
   s_spr.setTextDatum(textdatum_t::top_left);

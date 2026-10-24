@@ -83,6 +83,55 @@ size_t aircraftInRange() {
 
 void repaintScreen();
 
+#if defined(BOARD_WS5)
+/**
+ * One-off speed test at boot, printed to the serial log: PSRAM write / read / copy
+ * and a CPU loop, with the panel running normally and again with its pixel clock
+ * turned down (no display load on PSRAM). Tells what limits the frame rate.
+ */
+void benchMemory() {
+  constexpr size_t kN = 256 * 1024;
+  auto* a = static_cast<uint8_t*>(heap_caps_malloc(kN, MALLOC_CAP_SPIRAM));
+  auto* b = static_cast<uint8_t*>(heap_caps_malloc(kN, MALLOC_CAP_SPIRAM));
+  auto* sram = static_cast<uint8_t*>(heap_caps_malloc(16384, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  if (!a || !b || !sram) {
+    Serial.println("bench: no memory");
+  } else {
+    for (int pass = 0; pass < 2; ++pass) {
+      if (pass == 1) {
+        tft.setPanelPclk(2000000);
+        delay(100);
+      }
+      uint32_t t = micros();
+      memset(a, pass + 1, kN);
+      const uint32_t wr = micros() - t;
+      t = micros();
+      volatile uint32_t sum = 0;
+      const uint32_t* w = reinterpret_cast<const uint32_t*>(b);
+      for (size_t i = 0; i < kN / 4; ++i) sum += w[i];
+      const uint32_t rd = micros() - t;
+      t = micros();
+      memcpy(b, a, kN);
+      const uint32_t cp = micros() - t;
+      t = micros();
+      for (int k = 0; k < 16; ++k) memset(sram, k, 16384);
+      const uint32_t sw = micros() - t;
+      t = micros();
+      volatile float f = 1.0f;
+      for (int i = 0; i < 200000; ++i) f = f * 1.0000001f + 0.5f;
+      const uint32_t cpu = micros() - t;
+      Serial.printf("bench (%s): psram write %.1f MB/s, read %.1f MB/s, copy %.1f MB/s; sram write %.1f MB/s; cpu loop %lu us\n",
+                    pass == 0 ? "panel on" : "panel slow", kN / (float)wr, kN / (float)rd, kN / (float)cp,
+                    16 * 16384 / (float)sw, cpu);
+    }
+    tft.setPanelPclk(16000000);
+  }
+  heap_caps_free(a);
+  heap_caps_free(b);
+  heap_caps_free(sram);
+}
+#endif
+
 // Runs at the redraw cadence: decide radar / clock / weather, then draw.
 void updateScreen() {
   const unsigned long now = millis();
@@ -320,6 +369,9 @@ void setup() {
     Serial.println("Not enough RAM for the radar frame buffer");
   }
   services::sht30::init();
+#if defined(BOARD_WS5)
+  benchMemory();
+#endif
 
 #if !defined(BOARD_WS5)  // capacitive panel on the 5" board needs no calibration
   // Finger on the screen during power-up: (re)calibrate the touch panel.

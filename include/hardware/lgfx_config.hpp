@@ -42,6 +42,7 @@ class LGFX : public lgfx::LGFX_Device {
     _panel.setTarget(_bus.hidden());
   }
   /** Show it at the next refresh; afterwards drawing goes to the visible buffer. */
+  void setPanelPclk(uint32_t hz) { _bus.setPclk(hz); }
   void presentHiddenFrame() {
     _bus.present();
     _panel.setTarget(_bus.visible());

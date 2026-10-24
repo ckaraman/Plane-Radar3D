@@ -128,6 +128,9 @@ class Bus_RGB_Bounce : public lgfx::IBus {
     return true;
   }
 
+  /** Pixel clock change (benchmark: measure memory speed without the panel's load). */
+  void setPclk(uint32_t hz) { if (_handle) esp_lcd_rgb_panel_set_pclk(_handle, hz); }
+
   /** The buffer not on screen. */
   uint8_t* hidden() const { return _fb == _fbs[0] ? _fbs[1] : _fbs[0]; }
   uint8_t* visible() const { return _fb; }
