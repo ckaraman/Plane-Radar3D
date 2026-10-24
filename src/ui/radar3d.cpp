@@ -123,7 +123,10 @@ constexpr float kYawStepDeg = 30.0f;
 // to those rows. The forecast and water screens keep a whole-frame sprite (s_frame).
 LGFX_Sprite s_spr(&tft);
 LGFX_Sprite s_frame(&tft);
-constexpr int kBandH = 40;  // 800 x 40 x 8 bits = 32 KB of internal RAM
+// One band of the full height: measured on the board, drawing in 40-row bands into
+// internal RAM cost far more in per-band overhead than it saved (the frame time is
+// CPU, not memory, bound), so the frame is drawn in one pass into s_frame's buffer.
+constexpr int kBandH = kH;
 uint8_t* s_band_mem = nullptr;
 int s_band_y0 = 0, s_band_y1 = kH;  // rows of the current band [y0, y1)
 bool s_first_band = true;           // per-frame state is updated in the first band only
@@ -2001,18 +2004,8 @@ bool init() {
     return false;
   }
   s_frame.createPalette();  // 8-bit with a palette (setColorDepth(8) alone is RGB332)
-  // Band buffer in internal RAM (PSRAM if that fails: slower, still correct).
-  const size_t band_bytes = static_cast<size_t>(kW) * kBandH;
-#if defined(RADAR3D_HOST_TEST)
-  s_band_mem = static_cast<uint8_t*>(malloc(band_bytes));
-#else
-  s_band_mem = static_cast<uint8_t*>(heap_caps_malloc(band_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-  if (s_band_mem == nullptr) {
-    Serial.println("radar3d: band buffer in PSRAM (internal RAM short)");
-    s_band_mem = static_cast<uint8_t*>(heap_caps_malloc(band_bytes, MALLOC_CAP_SPIRAM));
-  }
-#endif
-  if (s_band_mem == nullptr) return false;
+  // The radar draws into the same pixel memory (its own palette).
+  s_band_mem = static_cast<uint8_t*>(s_frame.getBuffer());
   s_spr.setColorDepth(8);
   selectBand(0);
   s_spr.createPalette();
@@ -2218,9 +2211,6 @@ void drawFrame() {
     s_spr.pushSprite(0, 0);
     tft.clearClipRect();
     st[4] += micros() - t;
-#else
-    memcpy(static_cast<uint8_t*>(s_frame.getBuffer()) + static_cast<size_t>(y0) * kW, s_band_mem,
-           static_cast<size_t>(s_band_y1 - y0) * kW);
 #endif
   }
   s_first_band = true;
