@@ -142,6 +142,18 @@ struct DrawItem {
   float depth;
 };
 DrawItem s_items[services::adsb::kMaxAircraft];
+size_t s_item_count = 0;
+float s_item_size[services::adsb::kMaxAircraft];  // icon size (px) of each drawn aircraft
+// 5" board: the frame is an 8-bit palette sprite (256 colours) in PSRAM. Indices 0-15
+// are the palette above (all drawing code keeps using them); the rest hold shading
+// ramps: smooth hill shading with elevation tints, sea haze and 3D aircraft.
+constexpr bool kPlane3d = true;
+constexpr uint8_t kTerrainBase = 16;   // 8 elevation bands x 16 shades
+constexpr int kTerrainShades = 16;
+constexpr int kTerrainBands = 8;
+constexpr uint8_t kSeaBase = 144;      // 16 sea tones, far (hazy) .. near (deep)
+constexpr uint8_t kPlaneBase = 160;    // 3 altitude colours x 24 shades
+constexpr int kPlaneShades = 24;
 struct LabelPos {
   int x, y, size;
 };
@@ -599,6 +611,8 @@ bool buildRings(const Cam& c, uint8_t want, bool draped, RingSet* set) {
 }
 
 /** Scanline even-odd fill of a ring set, clipped to the radar disc. */
+int s_disc_top = 0, s_disc_bottom = 0;  // screen rows the disc covers (sea gradient)
+
 void fillRings(const RingSet& set, uint8_t color) {
   if (set.count == 0) return;
   constexpr int kMaxCross = 128;
@@ -632,7 +646,14 @@ void fillRings(const RingSet& set, uint8_t color) {
     for (int k = 0; k + 1 < n; k += 2) {
       const int xa = std::max<int>(static_cast<int>(ceilf(xs[k])), s_disc_l[y]);
       const int xb = std::min<int>(static_cast<int>(floorf(xs[k + 1])), s_disc_r[y]);
-      if (xb >= xa) s_spr.drawFastHLine(xa, y, xb - xa + 1, color);
+      if (xb >= xa) {
+        uint8_t col = color;
+        if (color == kSea && s_disc_bottom > s_disc_top) {  // haze towards the horizon
+          const int t = (y - s_disc_top) * 15 / (s_disc_bottom - s_disc_top);
+          col = static_cast<uint8_t>(kSeaBase + std::max(0, std::min(15, t)));
+        }
+        s_spr.drawFastHLine(xa, y, xb - xa + 1, col);
+      }
     }
   }
 }
@@ -650,6 +671,7 @@ int16_t s_rv_x[(kReliefN + 1) * (kReliefN + 1)];
 int16_t s_rv_y[(kReliefN + 1) * (kReliefN + 1)];
 uint16_t s_rc_order[kReliefN * kReliefN];
 uint8_t s_rv_shade[(kReliefN + 1) * (kReliefN + 1)];  // 0 dark .. 128 flat .. 255 lit
+uint8_t s_rv_elev[(kReliefN + 1) * (kReliefN + 1)];   // 0 sea level .. 255 highest point
 uint16_t s_rc_count = 0;
 
 // Grid vertices that lie in the sea (map type 2 rings, world coordinates). The terrain
@@ -761,6 +783,8 @@ void buildShade(const Cam& c) {
       v = v > kFlat ? v - kFlat : (v < -kFlat ? v + kFlat : 0.0f);
       v += 128.0f;
       s_rv_shade[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, v)));
+      const float hmax = std::max(60.0f, services::terrain::maxHeightM());
+      s_rv_elev[k] = static_cast<uint8_t>(std::max(0.0f, std::min(255.0f, h(i, j) / hmax * 255.0f)));
     }
   }
 }
@@ -827,51 +851,50 @@ void buildRelief(const Cam& c) {
 
 // 4x4 ordered-dither thresholds (0..15).
 constexpr uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
-constexpr uint8_t kLandTones[3] = {kLandDark, kLand, kLandLight};
 
-inline void putPixel4(uint8_t* buf, int x, int y, uint8_t c) {
-  uint8_t& b = buf[y * (kW / 2) + (x >> 1)];
-  b = (x & 1) ? static_cast<uint8_t>((b & 0xF0) | c) : static_cast<uint8_t>((b & 0x0F) | (c << 4));
-}
-
-/** Triangle with the shade interpolated across it, dithered between the land tones. */
-void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float x1, float y1, float s1,
-                   float x2, float y2, float s2) {
-  // Sort by y.
-  if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); std::swap(s0, s1); }
-  if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); }
-  if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); }
+/**
+ * Triangle with the shade and the elevation interpolated across it, into the 8-bit
+ * frame: 16 shades x 8 elevation bands, a light ordered dither between neighbours so
+ * no steps show.
+ */
+void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x1, float y1, float s1,
+                   float e1, float x2, float y2, float s2, float e2) {
+  if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); std::swap(s0, s1); std::swap(e0, e1); }
+  if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); std::swap(e0, e2); }
+  if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); std::swap(e1, e2); }
   if (y2 - y0 < 0.5f) return;
   const int ya = std::max(kTopBarH + 1, static_cast<int>(ceilf(y0 - 0.5f)));
   const int yb = std::min(kH - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
   for (int y = ya; y <= yb; ++y) {
     const float yc = y + 0.5f;
-    // Long edge 0-2
     const float t = (yc - y0) / (y2 - y0);
-    float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0);
-    float xb, sb;
+    float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0), ea = e0 + t * (e2 - e0);
+    float xb, sb, eb;
     if (yc < y1) {
       const float u = (y1 - y0) > 1e-3f ? (yc - y0) / (y1 - y0) : 1.0f;
-      xb = x0 + u * (x1 - x0);
-      sb = s0 + u * (s1 - s0);
+      xb = x0 + u * (x1 - x0); sb = s0 + u * (s1 - s0); eb = e0 + u * (e1 - e0);
     } else {
       const float u = (y2 - y1) > 1e-3f ? (yc - y1) / (y2 - y1) : 0.0f;
-      xb = x1 + u * (x2 - x1);
-      sb = s1 + u * (s2 - s1);
+      xb = x1 + u * (x2 - x1); sb = s1 + u * (s2 - s1); eb = e1 + u * (e2 - e1);
     }
-    if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); }
+    if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); std::swap(ea, eb); }
     const int xs = std::max(0, static_cast<int>(ceilf(xa - 0.5f)));
     const int xe = std::min(kW - 1, static_cast<int>(ceilf(xb - 0.5f)) - 1);
     if (xe < xs) continue;
-    const float ds = (xb - xa) > 1e-3f ? (sb - sa) / (xb - xa) : 0.0f;
-    float sv = sa + (xs + 0.5f - xa) * ds;
+    const float inv = (xb - xa) > 1e-3f ? 1.0f / (xb - xa) : 0.0f;
+    const float ds = (sb - sa) * inv, de = (eb - ea) * inv;
+    float sv = sa + (xs + 0.5f - xa) * ds, ev = ea + (xs + 0.5f - xa) * de;
     const uint8_t* bay = kBayer[y & 3];
-    for (int x = xs; x <= xe; ++x, sv += ds) {
-      // sv: 0..2 (dark .. flat .. lit); the fraction picks the tone through the dither.
-      float tv = sv < 0.0f ? 0.0f : (sv > 1.999f ? 1.999f : sv);
-      const int base = static_cast<int>(tv);
-      const int lvl = (tv - base) * 16.0f > bay[x & 3] + 0.5f ? base + 1 : base;
-      putPixel4(buf, x, y, kLandTones[lvl > 2 ? 2 : lvl]);
+    const uint8_t* bay2 = kBayer[(y + 2) & 3];
+    uint8_t* row = buf + y * kW;
+    for (int x = xs; x <= xe; ++x, sv += ds, ev += de) {
+      // sv: 0..15 shade (8 = flat); ev: 0..7 elevation band.
+      const float tv = sv < 0.0f ? 0.0f : (sv > 15.0f ? 15.0f : sv);
+      const float te = ev < 0.0f ? 0.0f : (ev > 7.0f ? 7.0f : ev);
+      int sh = static_cast<int>(tv), bd = static_cast<int>(te);
+      if ((tv - sh) * 16.0f > bay[x & 3] + 0.5f && sh < 15) ++sh;
+      if ((te - bd) * 16.0f > bay2[(x + 1) & 3] + 0.5f && bd < 7) ++bd;
+      row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
     }
   }
 }
@@ -880,17 +903,20 @@ void drawRelief() {
   constexpr int N = kReliefN;
   uint8_t* buf = static_cast<uint8_t*>(s_spr.getBuffer());
   if (buf == nullptr) return;
-  constexpr float kShadeScale = 2.0f / 256.0f;
+  constexpr float kShadeScale = 16.0f / 256.0f;  // 128 (flat) -> shade 8
+  constexpr float kElevScale = 7.0f / 255.0f;
   for (uint16_t n = 0; n < s_rc_count; ++n) {
     const uint16_t idx = s_rc_order[n];
     const int i = idx % N, j = idx / N;
     const int k00 = j * (N + 1) + i, k10 = k00 + 1, k01 = k00 + N + 1, k11 = k01 + 1;
     const float a0 = s_rv_shade[k00] * kShadeScale, a1 = s_rv_shade[k10] * kShadeScale;
     const float a2 = s_rv_shade[k11] * kShadeScale, a3 = s_rv_shade[k01] * kShadeScale;
-    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, s_rv_x[k10], s_rv_y[k10], a1, s_rv_x[k11],
-                  s_rv_y[k11], a2);
-    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, s_rv_x[k11], s_rv_y[k11], a2, s_rv_x[k01],
-                  s_rv_y[k01], a3);
+    const float e0 = s_rv_elev[k00] * kElevScale, e1 = s_rv_elev[k10] * kElevScale;
+    const float e2 = s_rv_elev[k11] * kElevScale, e3 = s_rv_elev[k01] * kElevScale;
+    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, s_rv_x[k10], s_rv_y[k10], a1, e1,
+                  s_rv_x[k11], s_rv_y[k11], a2, e2);
+    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, s_rv_x[k11], s_rv_y[k11], a2, e2,
+                  s_rv_x[k01], s_rv_y[k01], a3, e3);
   }
 }
 
@@ -910,8 +936,14 @@ void drawSurface(const Cam& c) {
     // staying missing until the camera moves again.
     if (!sea_ok || !lakes_ok) s_sea_key.gen = 0xFFFFFFFFu;
   }
+  s_disc_top = kH;
+  s_disc_bottom = 0;
   for (int y = kTopBarH; y < kH; ++y) {  // flat land
-    if (s_disc_l[y] <= s_disc_r[y]) s_spr.drawFastHLine(s_disc_l[y], y, s_disc_r[y] - s_disc_l[y] + 1, kLand);
+    if (s_disc_l[y] <= s_disc_r[y]) {
+      s_spr.drawFastHLine(s_disc_l[y], y, s_disc_r[y] - s_disc_l[y] + 1, kLand);
+      s_disc_top = std::min(s_disc_top, y);
+      s_disc_bottom = std::max(s_disc_bottom, y);
+    }
   }
   fillRings(s_sea, kSea);
   drawRelief();
@@ -1094,6 +1126,163 @@ int cardAircraft(size_t count, const float* dist_km, float R) {
   return nearest;
 }
 
+// ------------------------------------------------------------ 3D aircraft
+// Low-poly airliner, body frame: x forward, y right, z up; 16 units nose to tail
+// (the size of the 2D icon), drawn kModelScale times the icon size.
+constexpr float kModelScale = 1.75f;
+struct V3 {
+  float x, y, z;
+};
+struct Face {
+  uint8_t a, b, c;
+  uint8_t part;  // 0 fuselage, 1 wing, 2 tail, 3 engine
+};
+constexpr int kFusRing = 6;  // fuselage cross-section corners
+// Fuselage stations: x, radius, centre z.
+constexpr float kStation[][3] = {{6.2f, 1.05f, 0.0f}, {-4.6f, 1.0f, 0.05f}, {-7.6f, 0.35f, 0.45f}};
+constexpr int kNoseV = 0;
+constexpr int kTailV = 1;
+constexpr int kStationV0 = 2;  // 3 stations x kFusRing vertices follow
+constexpr int kWingV0 = kStationV0 + 3 * kFusRing;
+
+V3 s_mesh_v[kWingV0 + 12 + 8 + 4 + 16];
+Face s_mesh_f[80];
+int s_mesh_nv = 0, s_mesh_nf = 0;
+
+void buildMesh() {
+  if (s_mesh_nv) return;
+  int nv = 0, nf = 0;
+  auto v = [&](float x, float y, float z) { s_mesh_v[nv] = {x, y, z}; return nv++; };
+  auto f = [&](int a, int b, int c, uint8_t part) { s_mesh_f[nf++] = {(uint8_t)a, (uint8_t)b, (uint8_t)c, part}; };
+  v(8.4f, 0.0f, -0.15f);  // nose
+  v(-8.0f, 0.0f, 0.55f);  // tail cone
+  for (const auto& st : kStation) {
+    for (int i = 0; i < kFusRing; ++i) {
+      const float t = (i + 0.5f) * 6.2831853f / kFusRing;
+      v(st[0], cosf(t) * st[1], st[2] + sinf(t) * st[1] * 0.95f);
+    }
+  }
+  auto sv = [&](int s, int i) { return kStationV0 + s * kFusRing + (i % kFusRing); };
+  for (int i = 0; i < kFusRing; ++i) {
+    f(kNoseV, sv(0, i + 1), sv(0, i), 0);
+    for (int s = 0; s < 2; ++s) {
+      f(sv(s, i), sv(s, i + 1), sv(s + 1, i + 1), 0);
+      f(sv(s, i), sv(s + 1, i + 1), sv(s + 1, i), 0);
+    }
+    f(kTailV, sv(2, i), sv(2, i + 1), 0);
+  }
+  // Wings: swept, slight dihedral; a top and a bottom face.
+  for (int side = -1; side <= 1; side += 2) {
+    const int a = v(2.2f, side * 0.9f, -0.35f), b = v(-2.4f, side * 8.6f, 0.45f);
+    const int c = v(-3.7f, side * 8.6f, 0.45f), d = v(-1.8f, side * 0.9f, -0.35f);
+    const int a2 = v(2.2f, side * 0.9f, -0.55f), d2 = v(-1.8f, side * 0.9f, -0.55f);
+    f(a, b, c, 1); f(a, c, d, 1);
+    f(a2, c, b, 1); f(a2, d2, c, 1);
+  }
+  // Horizontal stabilisers.
+  for (int side = -1; side <= 1; side += 2) {
+    const int a = v(-5.9f, side * 0.4f, 0.45f), b = v(-7.7f, side * 3.5f, 0.75f);
+    const int c = v(-8.5f, side * 3.5f, 0.75f), d = v(-7.7f, side * 0.4f, 0.45f);
+    f(a, b, c, 2); f(a, c, d, 2);
+  }
+  // Fin.
+  {
+    const int a = v(-5.4f, 0.0f, 0.9f), b = v(-7.7f, 0.0f, 3.9f);
+    const int c = v(-8.6f, 0.0f, 3.9f), d = v(-8.1f, 0.0f, 0.6f);
+    f(a, b, c, 2); f(a, c, d, 2);
+  }
+  // Engines under the wings (square nacelles, open ends are too small to see).
+  for (int side = -1; side <= 1; side += 2) {
+    const float y0 = side * 3.3f, zc = -0.95f, rr = 0.5f;
+    int fr[4], bk[4];
+    for (int i = 0; i < 4; ++i) {
+      const float t = (i + 0.5f) * 1.5707963f;
+      fr[i] = v(1.6f, y0 + cosf(t) * rr, zc + sinf(t) * rr);
+      bk[i] = v(-0.9f, y0 + cosf(t) * rr * 0.85f, zc + sinf(t) * rr * 0.85f);
+    }
+    for (int i = 0; i < 4; ++i) {
+      const int j = (i + 1) % 4;
+      f(fr[i], fr[j], bk[j], 3); f(fr[i], bk[j], bk[i], 3);
+    }
+  }
+  s_mesh_nv = nv;
+  s_mesh_nf = nf;
+}
+
+
+/**
+ * One aircraft as a shaded 3D model, into the frame: turned to its real heading
+ * relative to the camera but seen from a steeper angle than the scene (55 deg) so
+ * wings and tail read like the 2D icon; flat-shaded from the altitude colour's
+ * palette ramp; dark outline as on the icon. Nose up when climbing, down when
+ * descending.
+ */
+void drawPlaneModel(const Cam& c, const services::adsb::Aircraft& a, float sx, float sy, float size) {
+  buildMesh();
+  constexpr int kNv = sizeof(s_mesh_v) / sizeof(s_mesh_v[0]);
+  constexpr int kNf = sizeof(s_mesh_f) / sizeof(s_mesh_f[0]);
+  static int16_t px[kNv], py[kNv];
+  static float pz[kNv];
+  static V3 vv[kNv];
+  static uint8_t order[kNf];
+  static float fdepth[kNf];
+  const float view = std::max(c.pitch_deg, 55.0f) * kDegToRad;
+  const float cv = cosf(view), sv = sinf(view);
+  const float lx = -0.5f, ly = 0.45f, lz = 0.74f;  // light in view space: upper left, front
+  const float scale = size * kModelScale / 16.0f;  // px per model unit
+  const float tr = a.track_deg * kDegToRad;
+  const float wx = sinf(tr), wy = cosf(tr);
+  const float fX = wx * c.cyaw - wy * c.syaw, fY = wx * c.syaw + wy * c.cyaw;  // camera ground frame
+  const float rX = fY, rY = -fX;
+  const float pitch = std::max(-0.18f, std::min(0.18f, a.vrate_fpm / 6000.0f));
+  const float cpi = cosf(pitch), spi = sinf(pitch);
+  for (int i = 0; i < s_mesh_nv; ++i) {
+    const V3& m = s_mesh_v[i];
+    const float bx = m.x * cpi - m.z * spi, bz = m.x * spi + m.z * cpi;
+    const float X = bx * fX + m.y * rX, Y = bx * fY + m.y * rY, Z = bz;
+    const float up = Y * sv + Z * cv, tow = -Y * cv + Z * sv;
+    vv[i] = {X, up, tow};
+    px[i] = static_cast<int16_t>(lroundf(sx + X * scale));
+    py[i] = static_cast<int16_t>(lroundf(sy - up * scale));
+    pz[i] = tow;
+  }
+  for (int i = 0; i < s_mesh_nf; ++i) {
+    const Face& fc = s_mesh_f[i];
+    fdepth[i] = pz[fc.a] + pz[fc.b] + pz[fc.c];
+    order[i] = static_cast<uint8_t>(i);
+  }
+  std::sort(order, order + s_mesh_nf, [](uint8_t l, uint8_t r) { return fdepth[l] < fdepth[r]; });
+  for (int o = 0; o < 4; ++o) {  // outline
+    const int ox = o == 0 ? -1 : o == 1 ? 1 : 0, oy = o == 2 ? -1 : o == 3 ? 1 : 0;
+    for (int i = 0; i < s_mesh_nf; ++i) {
+      const Face& fc = s_mesh_f[i];
+      s_spr.fillTriangle(px[fc.a] + ox, py[fc.a] + oy, px[fc.b] + ox, py[fc.b] + oy, px[fc.c] + ox,
+                         py[fc.c] + oy, kBg);
+    }
+  }
+  const uint8_t col = altitudeColor(a.alt_ft);
+  const int ramp = kPlaneBase + (col == kOrange ? 0 : col == kCream ? 1 : 2) * kPlaneShades;
+  for (int n = 0; n < s_mesh_nf; ++n) {
+    const Face& fc = s_mesh_f[order[n]];
+    const V3 &A = vv[fc.a], &B = vv[fc.b], &C = vv[fc.c];
+    const float ux = B.x - A.x, uy = B.y - A.y, uz = B.z - A.z;
+    const float qx = C.x - A.x, qy = C.y - A.y, qz = C.z - A.z;
+    float nx = uy * qz - uz * qy, ny = uz * qx - ux * qz, nz = ux * qy - uy * qx;
+    const float len = sqrtf(nx * nx + ny * ny + nz * nz);
+    if (len <= 0) continue;
+    nx /= len; ny /= len; nz /= len;
+    if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }  // the side facing the viewer
+    float lit = 0.42f + 0.58f * std::max(0.0f, nx * lx + ny * ly + nz * lz);
+    if (fc.part == 3) lit *= 0.7f;
+    if (fc.part == 2) lit *= 0.93f;
+    // Ramp: shade j has brightness 0.32 + 0.78 * j / 23.
+    int j = static_cast<int>(lroundf((lit - 0.32f) / 0.78f * (kPlaneShades - 1)));
+    j = std::max(0, std::min(kPlaneShades - 1, j));
+    s_spr.fillTriangle(px[fc.a], py[fc.a], px[fc.b], py[fc.b], px[fc.c], py[fc.c],
+                       static_cast<uint8_t>(ramp + j));
+  }
+}
+
 void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* dist_km,
                   float* bearing_deg, int card_idx_out[1]) {
   size_t n_items = 0;
@@ -1121,22 +1310,35 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     s_items[j] = t;
   }
 
-  // Auto-fit the altitude scale for the next frame (highest icon just under the top bar).
+  // Altitude scale follows the traffic: the aircraft highest on screen is brought just
+  // under the legend, whatever its altitude. Only low (orange) traffic is stretched
+  // tall; with high traffic too, everything is scaled so the highest one fits. The
+  // height above its ground point is close to linear in z, so the target is one ratio;
+  // eased in so aircraft entering or leaving do not make the view jump.
   {
-    float min_y = 1e9f;
+    float best_y = 1e9f, best_h = 0.0f, best_gy = 0.0f;
     for (size_t k = 0; k < n_items; ++k) {
       if (dist_km[s_items[k].idx] > c.R) continue;
-      float sx, sy;
-      if (project(c, s_items[k].x_km, s_items[k].y_km, s_items[k].z, &sx, &sy)) min_y = std::min(min_y, sy);
+      float sx, sy, gx, gy;
+      if (!project(c, s_items[k].x_km, s_items[k].y_km, s_items[k].z, &sx, &sy)) continue;
+      if (!project(c, s_items[k].x_km, s_items[k].y_km, groundZ(c, s_items[k].x_km, s_items[k].y_km), &gx, &gy)) continue;
+      if (sy < best_y) {
+        best_y = sy;
+        best_h = gy - sy;
+        best_gy = gy;
+      }
     }
-    constexpr float kTopLimit = kTopBarH + kStripH + ui::Sf(14.0f);
-    if (min_y < kTopLimit) {
-      s_zfit = std::max(0.12f, s_zfit * 0.82f);
-    } else if (min_y > kTopLimit + ui::Sf(30.0f) && s_zfit < 1.0f) {
-      s_zfit = std::min(1.0f, s_zfit * 1.03f);
+    constexpr float kTopLimit = kTopBarH + kStripH + ui::Sf(26.0f);  // room for the model
+    if (best_h > ui::Sf(4.0f)) {
+      const float want_h = std::max(ui::Sf(20.0f), best_gy - kTopLimit);
+      const float target = std::max(0.12f, std::min(12.0f, s_zfit * want_h / best_h));
+      // Shrink quickly (never out of the top), grow gently.
+      const float k = target < s_zfit ? 0.5f : 0.12f;
+      s_zfit += (target - s_zfit) * k;
     }
   }
 
+  s_item_count = n_items;
   const int card_idx = cardAircraft(count, dist_km, c.R);
   card_idx_out[0] = card_idx;
   const bool labels = services::display_prefs::get().labels;
@@ -1180,14 +1382,21 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     float size = ui::Sf(16.0f) * 100.0f / (d / unit);
     if (size < ui::Sf(9.0f)) size = ui::Sf(9.0f);
     if (size > ui::Sf(18.0f)) size = ui::Sf(18.0f);
-    drawPlaneIcon(ri(sx), ri(sy), heading, size / 16.0f * 1.1f, col);
-
-    if (static_cast<int>(it.idx) == card_idx && s_selected[0] != '\0') {
-      s_spr.drawCircle(ri(sx), ri(sy), S(15), col);
-      if (ui::kScaleNum != ui::kScaleDen) s_spr.drawCircle(ri(sx), ri(sy), S(15) + 1, col);
+    s_item_size[k] = size;
+    if (kPlane3d) {
+      drawPlaneModel(c, a, sx, sy, size);
+    } else {
+      drawPlaneIcon(ri(sx), ri(sy), heading, size / 16.0f * 1.1f, col);
     }
 
-    s_label_pos[k] = {ri(sx), ri(sy), ri(size)};
+    if (static_cast<int>(it.idx) == card_idx && s_selected[0] != '\0') {
+      const int rad = kPlane3d ? std::max(S(15), ri(size * kModelScale * 0.62f)) : S(15);
+      s_spr.drawCircle(ri(sx), ri(sy), rad, col);
+      if (ui::kScaleNum != ui::kScaleDen) s_spr.drawCircle(ri(sx), ri(sy), rad + 1, col);
+    }
+
+    // Labels sit beside the model, which is larger than the icon was.
+    s_label_pos[k] = {ri(sx), ri(sy), ri(kPlane3d ? size * kModelScale * 0.8f : size)};
 
     if (s_hit_count < services::adsb::kMaxAircraft) {
       Hit& h = s_hits[s_hit_count++];
@@ -1517,6 +1726,43 @@ void applyPalette() {
   const bool hc = services::display_prefs::get().high_contrast;
   const Rgb* pal = hc ? kPaletteHighContrast : kPalette;
   for (int i = 0; i < 16; ++i) s_spr.setPaletteColor(i, pal[i].r, pal[i].g, pal[i].b);
+  auto clamp8 = [](float v) { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
+  auto luma = [](const Rgb& c) { return 0.3f * c.r + 0.59f * c.g + 0.11f * c.b + 1.0f; };
+  // Terrain: band 0 shade 8 is exactly the flat land colour; darker / lighter shades
+  // span the old dark / light land tones; higher bands drift to dry grass and rock.
+  const Rgb land = pal[kLand];
+  const float kd = luma(pal[kLandDark]) / luma(land), kl = luma(pal[kLandLight]) / luma(land);
+  const Rgb high = hc ? Rgb{176, 160, 112} : Rgb{132, 120, 84};
+  for (int b = 0; b < kTerrainBands; ++b) {
+    const float e = static_cast<float>(b) / (kTerrainBands - 1);
+    const float t = e * e * 0.9f;  // lowlands stay green
+    const float br = land.r + (high.r - land.r) * t, bg = land.g + (high.g - land.g) * t,
+                bb = land.b + (high.b - land.b) * t;
+    for (int sh = 0; sh < kTerrainShades; ++sh) {
+      const float f = sh < 8 ? kd + (1.0f - kd) * sh / 8.0f : 1.0f + (kl - 1.0f) * (sh - 8) / 7.0f;
+      s_spr.setPaletteColor(kTerrainBase + b * kTerrainShades + sh, clamp8(br * f), clamp8(bg * f),
+                            clamp8(bb * f));
+    }
+  }
+  // Sea: lighter and a little hazier towards the horizon, deeper close by.
+  const Rgb sea = pal[kSea], haze = pal[kRingDim];
+  for (int i = 0; i < 16; ++i) {
+    const float t = i / 15.0f;  // 0 far .. 1 near
+    const float hz = (1.0f - t) * 0.35f, dk = 1.08f - 0.22f * t;
+    s_spr.setPaletteColor(kSeaBase + i, clamp8((sea.r + (haze.r - sea.r) * hz) * dk),
+                          clamp8((sea.g + (haze.g - sea.g) * hz) * dk),
+                          clamp8((sea.b + (haze.b - sea.b) * hz) * dk));
+  }
+  // Aircraft: each altitude colour from deep shadow to a slight highlight.
+  const uint8_t alt_cols[3] = {kOrange, kCream, kCyan};
+  for (int a = 0; a < 3; ++a) {
+    const Rgb c = pal[alt_cols[a]];
+    for (int j = 0; j < kPlaneShades; ++j) {
+      const float f = 0.32f + 0.78f * j / (kPlaneShades - 1);
+      s_spr.setPaletteColor(kPlaneBase + a * kPlaneShades + j, clamp8(c.r * f), clamp8(c.g * f),
+                            clamp8(c.b * f));
+    }
+  }
   s_palette_hc = hc;
   s_palette_set = true;
 }
@@ -1533,12 +1779,8 @@ void animateYaw() {
 }  // namespace
 
 bool init() {
-  s_spr.setColorDepth(4);
-#if defined(BOARD_WS5)
-  s_spr.setPsram(true);  // 800x480 at 4 bits = 192 KB: in the 8 MB PSRAM
-#else
-  s_spr.setPsram(false);
-#endif
+  s_spr.setColorDepth(8);
+  s_spr.setPsram(true);  // 800x480 at 8 bits (palette) = 384 KB: in the 8 MB PSRAM
   if (s_spr.createSprite(kW, kH) == nullptr) {
     Serial.println("radar3d: sprite allocation failed");
     return false;
