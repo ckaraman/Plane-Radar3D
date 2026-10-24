@@ -939,7 +939,7 @@
       'nwr["leisure"="stadium"]["wikidata"]["name"]' + b + ';' +
       'nwr["historic"~"^(castle|monument|fort|palace)$"]["wikidata"]["name"]' + b + ';' +
       'way["bridge"="yes"]["highway"~"^(motorway|trunk)$"]["wikidata"]["name"]' + b + ';' +
-      'node["place"~"^(city|town|suburb)$"]["name"]' + b + ';);out center tags;';
+      ');out center tags;';
     try { return await overpassRace(q, 25000, null); } catch (_) { /* optional */ }
     return null;   // places are optional
   }
@@ -977,7 +977,7 @@
     const near = (a, b) => Math.hypot(a.p[0], a.p[1]) - Math.hypot(b.p[0], b.p[1]);
     const ap = pick(airports.sort(near), 4, 2, []);
     const lm = pick(landmarks.sort((a, b) => a.rank - b.rank || near(a, b)), 6, radiusKm * 0.12, ap);
-    const tw = pick(towns.sort((a, b) => a.rank - b.rank || near(a, b)), 8, radiusKm * 0.15, ap.concat(lm));
+    const tw = [];   // town / district names: left out, they crowded the screen
     const enc = new TextEncoder();
     const entries = [];
     const q = (v) => Math.max(-32767, Math.min(32767, Math.round(v * 100)));   // 10 m units
