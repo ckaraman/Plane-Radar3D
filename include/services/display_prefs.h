@@ -25,6 +25,8 @@ struct Prefs {
 void init();
 const Prefs& get();
 void save(const Prefs& p);
+/** Change the settings in RAM only (save() later writes them to flash). */
+void setNoSave(const Prefs& p);
 
 /** Touch calibration from LovyanGFX calibrateTouch (8 values). */
 bool touchCalibration(uint16_t out[8]);

@@ -96,7 +96,11 @@ constexpr int kPadLeft = S(6);
 constexpr int kPadTop = kH - S(4) - kBtnSize - kPadStep;
 constexpr int kPadW = 2 * kPadStep + kBtnSize;
 constexpr int kPadH = kPadStep + kBtnSize;
-constexpr int kPitchStepDeg = 8;
+constexpr int kPitchStepDeg = 4;
+// Tilt range: steeper views turn the disc into a circle that leaves the sides of the
+// wide screen black, flatter ones squash it; within this range it fills the width.
+constexpr int kPitchMinDeg = 14;
+constexpr int kPitchMaxDeg = 26;
 // Altitude legend: a thin strip under the top bar, hidden while an aircraft is selected.
 constexpr int kStripH = S(18);
 // Selected aircraft, "corners" style: who / where to on the left, flight values on the right.
@@ -117,7 +121,9 @@ float s_yaw_cur = 20.0f;  // animated camera heading
 // Altitude auto-fit: shrinks the vertical scale smoothly when the highest aircraft
 // would rise above the top of the view, and relaxes back when there is room.
 float s_zfit = 1.0f;
+float s_alt_px = 0.0f;  // altitude scale: screen pixels per foot (fitted to the traffic)
 unsigned long s_last_frame_ms = 0;
+unsigned long s_prefs_dirty_ms = 0;  // view changed by the arrows, not yet saved
 float s_dt = 0.2f;  // seconds since the previous frame (clamped)
 
 /** Fraction to move towards a target this frame for an exponential ease with time
@@ -174,7 +180,7 @@ LabelPos s_label_pos[services::adsb::kMaxAircraft];
 Cam makeCam() {
   Cam c;
   const float yaw = s_yaw_cur * kDegToRad;
-  c.pitch_deg = services::display_prefs::get().pitch_deg;
+  c.pitch_deg = std::max(kPitchMinDeg, std::min<int>(kPitchMaxDeg, services::display_prefs::get().pitch_deg));
   const float pitch = c.pitch_deg * kDegToRad;
   c.cyaw = cosf(yaw);
   c.syaw = sinf(yaw);
@@ -841,14 +847,11 @@ void buildRelief(const Cam& c) {
       // Cells reaching into the disc (the drawing is clipped to its rim).
       const float nx = std::max(x0, std::min(0.0f, x1)), ny = std::max(y0, std::min(0.0f, y1));
       if (nx * nx + ny * ny > r2) continue;  // wholly outside
-      if (s_sea.count > 0) {
-        // The vector sea (and lakes) are drawn over the relief, so the coastline comes
-        // from the map, smooth; only cells wholly at sea are left out.
-        if (seaVertex(k00) && seaVertex(k10) && seaVertex(k01) && seaVertex(k11)) continue;
-      } else {
-        // No map: the terrain's sea level is the coast.
-        if (lowVertex(k00) && lowVertex(k10) && lowVertex(k01) && lowVertex(k11)) continue;
-      }
+      // Cells wholly at sea level are left out: flat land there looks the same as the
+      // land fill underneath, sea is covered by the sea fill. With a map, the vector sea
+      // (and lakes) are drawn over the relief, so the coastline comes from the map.
+      auto gone = [&](int k) { return lowVertex(k) || (s_sea.count > 0 && seaVertex(k)); };
+      if (gone(k00) && gone(k10) && gone(k01) && gone(k11)) continue;
       if (s_rv_x[k00] == kOff || s_rv_x[k10] == kOff || s_rv_x[k01] == kOff || s_rv_x[k11] == kOff) continue;
       s_rc_order[s_rc_count++] = static_cast<uint16_t>(j * N + i);
     }
@@ -899,17 +902,23 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x
     if (xe < xs) continue;
     const float inv = (xb - xa) > 1e-3f ? 1.0f / (xb - xa) : 0.0f;
     const float ds = (sb - sa) * inv, de = (eb - ea) * inv;
-    float sv = sa + (xs + 0.5f - xa) * ds, ev = ea + (xs + 0.5f - xa) * de;
+    const float sv0 = sa + (xs + 0.5f - xa) * ds, ev0 = ea + (xs + 0.5f - xa) * de;
+    // Fixed point (8.8, in 16ths of a level for the dither): the inner loop is integer
+    // only. Shade is clamped to 0..15, band to 0..7.
+    int32_t sv = static_cast<int32_t>(sv0 * 4096.0f), ev = static_cast<int32_t>(ev0 * 4096.0f);
+    const int32_t dsv = static_cast<int32_t>(ds * 4096.0f), dev = static_cast<int32_t>(de * 4096.0f);
     const uint8_t* bay = kBayer[y & 3];
     const uint8_t* bay2 = kBayer[(y + 2) & 3];
     uint8_t* row = buf + y * kW;
-    for (int x = xs; x <= xe; ++x, sv += ds, ev += de) {
-      // sv: 0..15 shade (8 = flat); ev: 0..7 elevation band.
-      const float tv = sv < 0.0f ? 0.0f : (sv > 15.0f ? 15.0f : sv);
-      const float te = ev < 0.0f ? 0.0f : (ev > 7.0f ? 7.0f : ev);
-      int sh = static_cast<int>(tv), bd = static_cast<int>(te);
-      if ((tv - sh) * 16.0f > bay[x & 3] + 0.5f && sh < 15) ++sh;
-      if ((te - bd) * 16.0f > bay2[(x + 1) & 3] + 0.5f && bd < 7) ++bd;
+    for (int x = xs; x <= xe; ++x, sv += dsv, ev += dev) {
+      int32_t s16 = sv >> 8, e16 = ev >> 8;  // level * 16
+      s16 = s16 < 0 ? 0 : (s16 > 15 * 16 ? 15 * 16 : s16);
+      e16 = e16 < 0 ? 0 : (e16 > 7 * 16 ? 7 * 16 : e16);
+      int sh = s16 >> 4, bd = e16 >> 4;
+      if ((s16 & 15) > bay[x & 3]) ++sh;
+      if ((e16 & 15) > bay2[(x + 1) & 3]) ++bd;
+      if (sh > 15) sh = 15;
+      if (bd > 7) bd = 7;
       row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
     }
   }
@@ -1007,7 +1016,10 @@ void drawMap(const Cam& c) {
       const float x = ox + xi * 0.01f;
       const float y = oy + yi * 0.01f;
       float sx, sy;
-      if (x * x + y * y > r2 || !project(c, x, y, groundZ(c, x, y), &sx, &sy)) {
+      // Coast lines at sea level, exactly on the edge of the (flat) sea fill; lake
+      // shores and roads follow the terrain like the lakes do.
+      const float z = type == 0 ? 0.0f : groundZ(c, x, y);
+      if (x * x + y * y > r2 || !project(c, x, y, z, &sx, &sy)) {
         have_prev = false;
         continue;
       }
@@ -1027,15 +1039,19 @@ void drawMap(const Cam& c) {
 }
 
 void ringPath(const Cam& c, float r, uint8_t color, bool dashed) {
-  constexpr int kSeg = 72;
+  constexpr int kSeg = 120;
+  // The outer ring is the rim of the (flat) disc the relief is clipped to: at ground
+  // level, two pixels wide. Inner rings follow the terrain.
+  const bool rim = !dashed;
   float px = 0, py = 0;
   for (int i = 0; i <= kSeg; ++i) {
     const float t = static_cast<float>(i) / kSeg * 6.2831853f;
     float sx, sy;
     const float rx = r * cosf(t), ry = r * sinf(t);
-    if (!project(c, rx, ry, groundZ(c, rx, ry), &sx, &sy)) continue;
-    if (i > 0 && (!dashed || (i % 2) == 0)) {
+    if (!project(c, rx, ry, rim ? 0.0f : groundZ(c, rx, ry), &sx, &sy)) continue;
+    if (i > 0 && (!dashed || (i % 3) != 0)) {
       s_spr.drawLine(ri(px), ri(py), ri(sx), ri(sy), color);
+      if (rim) s_spr.drawLine(ri(px), ri(py) - 1, ri(sx), ri(sy) - 1, color);
     }
     px = sx;
     py = sy;
@@ -1276,6 +1292,7 @@ void drawPlaneModel(const Cam& c, const services::adsb::Aircraft& a, float sx, f
     const int ox = o == 0 ? -1 : o == 1 ? 1 : 0, oy = o == 2 ? -1 : o == 3 ? 1 : 0;
     for (int i = 0; i < s_mesh_nf; ++i) {
       const Face& fc = s_mesh_f[i];
+      if (fc.part == 3) continue;  // engines sit inside the wing's outline
       s_spr.fillTriangle(px[fc.a] + ox, py[fc.a] + oy, px[fc.b] + ox, py[fc.b] + oy, px[fc.c] + ox,
                          py[fc.c] + oy, kBg);
     }
@@ -1314,7 +1331,8 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     if (b < 0) b += 360.0f;
     bearing_deg[i] = b;
     if (dist_km[i] > c.R * 1.05f) continue;
-    const float z = static_cast<float>(std::max<int32_t>(0, s_planes[i].alt_ft)) * c.zscale;
+    // Ground point: depth for sorting; the altitude is added on screen (below).
+    const float z = groundZ(c, x, y);
     float sx, sy, d;
     if (!project(c, x, y, z, &sx, &sy, &d)) continue;
     s_items[n_items++] = {static_cast<uint8_t>(i), x, y, z, d};
@@ -1330,32 +1348,28 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     s_items[j] = t;
   }
 
-  // Altitude scale follows the traffic: the aircraft highest on screen is brought just
-  // under the legend, whatever its altitude. Only low (orange) traffic is stretched
-  // tall; with high traffic too, everything is scaled so the highest one fits. The
-  // height above its ground point is close to linear in z, so the target is one ratio;
-  // eased in so aircraft entering or leaving do not make the view jump.
+  // Altitude is drawn as a screen height above the aircraft's ground point, the same
+  // number of pixels per foot near and far, so an aircraft holding its altitude keeps
+  // the same height as it crosses the disc (perspective would shrink it with distance).
+  // The scale follows the traffic: the highest aircraft is brought just under the
+  // legend, so all-low traffic stands tall and mixed traffic still fits; eased so
+  // aircraft entering or leaving do not make the view jump.
   {
-    float best_y = 1e9f, best_h = 0.0f, best_gy = 0.0f;
-    for (size_t k = 0; k < n_items; ++k) {
-      if (dist_km[s_items[k].idx] > c.R) continue;
-      float sx, sy, gx, gy;
-      if (!project(c, s_items[k].x_km, s_items[k].y_km, s_items[k].z, &sx, &sy)) continue;
-      if (!project(c, s_items[k].x_km, s_items[k].y_km, groundZ(c, s_items[k].x_km, s_items[k].y_km), &gx, &gy)) continue;
-      if (sy < best_y) {
-        best_y = sy;
-        best_h = gy - sy;
-        best_gy = gy;
-      }
-    }
     constexpr float kTopLimit = kTopBarH + kStripH + ui::Sf(26.0f);  // room for the model
-    if (best_h > ui::Sf(4.0f)) {
-      const float want_h = std::max(ui::Sf(20.0f), best_gy - kTopLimit);
-      const float target = std::max(0.12f, std::min(12.0f, s_zfit * want_h / best_h));
-      // Shrink quickly (never out of the top), grow gently.
-      const float k = target < s_zfit ? ease(0.12f) : ease(0.9f);
-      s_zfit += (target - s_zfit) * k;
+    float target = 1e9f;
+    for (size_t k = 0; k < n_items; ++k) {
+      const int32_t alt = s_planes[s_items[k].idx].alt_ft;
+      if (dist_km[s_items[k].idx] > c.R || alt < 500) continue;
+      float gx, gy;
+      if (!project(c, s_items[k].x_km, s_items[k].y_km, s_items[k].z, &gx, &gy)) continue;
+      target = std::min(target, std::max(ui::Sf(16.0f), gy - kTopLimit) / static_cast<float>(alt));
     }
+    // Upper bound: a lone low aircraft is not stretched beyond ~120 px per 3000 ft.
+    const float kMaxPxPerFt = ui::Sf(0.04f) * services::display_prefs::get().exag / 2.0f;
+    if (target > kMaxPxPerFt) target = kMaxPxPerFt;
+    if (s_alt_px <= 0.0f) s_alt_px = target;
+    // Shrink quickly (never out of the top), grow gently.
+    s_alt_px += (target - s_alt_px) * (target < s_alt_px ? ease(0.12f) : ease(0.9f));
   }
 
   s_item_count = n_items;
@@ -1369,9 +1383,10 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     const DrawItem& it = s_items[k];
     const auto& a = s_planes[it.idx];
     const uint8_t col = altitudeColor(a.alt_ft);
-    float sx, sy, gx, gy, d;
-    project(c, it.x_km, it.y_km, it.z, &sx, &sy, &d);
-    project(c, it.x_km, it.y_km, groundZ(c, it.x_km, it.y_km), &gx, &gy);
+    float gx, gy, d;
+    project(c, it.x_km, it.y_km, it.z, &gx, &gy, &d);
+    const float lift = static_cast<float>(std::max<int32_t>(0, a.alt_ft)) * s_alt_px;
+    const float sx = gx, sy = gy - lift;
 
     // Trail: where it was over the last minute (straight track).
     const float tr = a.track_deg * kDegToRad;
@@ -1379,10 +1394,9 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     float lx = sx, ly = sy;
     for (int s = 1; s <= 5; ++s) {
       float tx, ty;
-      if (!project(c, it.x_km - sinf(tr) * back_km * s, it.y_km - cosf(tr) * back_km * s, it.z,
-                   &tx, &ty)) {
-        break;
-      }
+      const float bx = it.x_km - sinf(tr) * back_km * s, by = it.y_km - cosf(tr) * back_km * s;
+      if (!project(c, bx, by, groundZ(c, bx, by), &tx, &ty)) break;
+      ty -= lift;
       dottedLine(ri(lx), ri(ly), ri(tx), ri(ty), col, 1, 3);
       lx = tx;
       ly = ty;
@@ -1397,6 +1411,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     float heading = 0.0f;
     if (project(c, it.x_km + sinf(tr) * 2.0f * unit, it.y_km + cosf(tr) * 2.0f * unit, it.z, &ax,
                 &ay)) {
+      ay -= lift;
       heading = atan2f(ax - sx, -(ay - sy)) / kDegToRad;
     }
     float size = ui::Sf(16.0f) * 100.0f / (d / unit);
@@ -1746,6 +1761,7 @@ void applyPalette() {
   const bool hc = services::display_prefs::get().high_contrast;
   const Rgb* pal = hc ? kPaletteHighContrast : kPalette;
   for (int i = 0; i < 16; ++i) s_spr.setPaletteColor(i, pal[i].r, pal[i].g, pal[i].b);
+  if (s_palette_set && s_palette_hc == hc) return;  // ramps unchanged
   auto clamp8 = [](float v) { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
   auto luma = [](const Rgb& c) { return 0.3f * c.r + 0.59f * c.g + 0.11f * c.b + 1.0f; };
   // Terrain: band 0 shade 8 is exactly the flat land colour; darker / lighter shades
@@ -1795,7 +1811,7 @@ void animateYaw() {
     // Ease with a capped turn rate: a long swing (selecting an aircraft behind)
     // turns at a steady pace instead of a jump, then settles softly.
     float step = diff * ease(0.28f);
-    const float max_step = 140.0f * s_dt;
+    const float max_step = 75.0f * s_dt;  // deg per second: small steps per frame
     step = std::max(-max_step, std::min(max_step, step));
     s_yaw_cur = fmodf(s_yaw_cur + step + 360.0f, 360.0f);
   }
@@ -1854,6 +1870,10 @@ void drawFrame() {
 #ifdef RADAR3D_HOST_TEST
     s_dt = 0.1f;  // the preview's clock does not run
 #endif
+  }
+  if (s_prefs_dirty_ms != 0 && millis() - s_prefs_dirty_ms > 4000) {
+    services::display_prefs::save(services::display_prefs::get());
+    s_prefs_dirty_ms = 0;
   }
   applyPalette();
   unsigned long fetched_ms = 0;
@@ -1952,11 +1972,15 @@ bool handleTap(int x, int y) {
         s_yaw_target = fmodf(s_yaw_target + 360.0f, 360.0f);
         p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_target)) % 360;
       } else if (i == 2) {
-        p.pitch_deg = static_cast<uint8_t>(std::min(62, p.pitch_deg + kPitchStepDeg));
+        p.pitch_deg = static_cast<uint8_t>(std::min(kPitchMaxDeg, std::max(kPitchMinDeg, p.pitch_deg + kPitchStepDeg)));
       } else {
-        p.pitch_deg = static_cast<uint8_t>(std::max(10, p.pitch_deg - kPitchStepDeg));
+        p.pitch_deg = static_cast<uint8_t>(std::max(kPitchMinDeg, std::min(kPitchMaxDeg, p.pitch_deg - kPitchStepDeg)));
       }
-      services::display_prefs::save(p);
+      // Kept in RAM now, written to flash once the buttons have been left alone for a
+      // few seconds: a flash write stalls the drawing for a moment, which made every
+      // tap of the arrows stutter.
+      services::display_prefs::setNoSave(p);
+      s_prefs_dirty_ms = millis();
       return true;
     }
   }

@@ -37,6 +37,8 @@ void init() {
 
 const Prefs& get() { return s_prefs; }
 
+void setNoSave(const Prefs& np) { s_prefs = np; }
+
 void save(const Prefs& np) {
   s_prefs = np;
   Preferences p;
