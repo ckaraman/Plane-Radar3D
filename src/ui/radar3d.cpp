@@ -1320,12 +1320,54 @@ void drawPlaneModel(const Cam& c, const services::adsb::Aircraft& a, float sx, f
   }
 }
 
+// When a new position report arrives, the dead-reckoned position usually differs a
+// little from where the aircraft was being drawn (feed delay, turns): it would jump,
+// often backwards. Each aircraft keeps that difference as an offset that fades out
+// over about a second, so it glides onto the reported track instead.
+struct Glide {
+  char callsign[9];
+  float x, y;    // last drawn position (km)
+  float ox, oy;  // offset still to fade out
+  unsigned long fetched_ms, seen_ms;
+};
+Glide s_glide[services::adsb::kMaxAircraft];
+
+void glidePosition(const services::adsb::Aircraft& a, unsigned long fetched_ms, float* x, float* y) {
+  const unsigned long now = millis();
+  Glide* g = nullptr;
+  Glide* oldest = &s_glide[0];
+  for (auto& e : s_glide) {
+    if (strncmp(e.callsign, a.callsign, sizeof(e.callsign)) == 0 && e.callsign[0]) { g = &e; break; }
+    if (e.seen_ms < oldest->seen_ms) oldest = &e;
+  }
+  if (g == nullptr || now - g->seen_ms > 15000) {
+    if (g == nullptr) g = oldest;
+    memcpy(g->callsign, a.callsign, sizeof(g->callsign));
+    g->ox = g->oy = 0.0f;
+    g->fetched_ms = fetched_ms;
+  } else if (g->fetched_ms != fetched_ms) {  // new report: start from where it was drawn
+    g->ox = g->x - *x;
+    g->oy = g->y - *y;
+    if (g->ox * g->ox + g->oy * g->oy > 4.0f) g->ox = g->oy = 0.0f;  // > 2 km: just move
+    g->fetched_ms = fetched_ms;
+  }
+  const float k = 1.0f - ease(0.7f);
+  g->ox *= k;
+  g->oy *= k;
+  *x += g->ox;
+  *y += g->oy;
+  g->x = *x;
+  g->y = *y;
+  g->seen_ms = now;
+}
+
 void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* dist_km,
                   float* bearing_deg, int card_idx_out[1]) {
   size_t n_items = 0;
   for (size_t i = 0; i < count; ++i) {
     float x, y;
     currentPositionKm(s_planes[i], fetched_ms, &x, &y);
+    glidePosition(s_planes[i], fetched_ms, &x, &y);
     dist_km[i] = sqrtf(x * x + y * y);
     float b = atan2f(x, y) / kDegToRad;
     if (b < 0) b += 360.0f;
@@ -1394,8 +1436,10 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     float lx = sx, ly = sy;
     for (int s = 1; s <= 5; ++s) {
       float tx, ty;
+      // Straight track: all points at the aircraft's own ground level (following the
+      // terrain under them made the line wavy).
       const float bx = it.x_km - sinf(tr) * back_km * s, by = it.y_km - cosf(tr) * back_km * s;
-      if (!project(c, bx, by, groundZ(c, bx, by), &tx, &ty)) break;
+      if (!project(c, bx, by, it.z, &tx, &ty)) break;
       ty -= lift;
       dottedLine(ri(lx), ri(ly), ri(tx), ri(ty), col, 1, 3);
       lx = tx;
@@ -1886,12 +1930,17 @@ void drawFrame() {
   static float dist_km[services::adsb::kMaxAircraft];
   static float bearing[services::adsb::kMaxAircraft];
 
+  static uint32_t st[5];  // us per stage, summed for the serial report
+  uint32_t t = micros();
   drawGround(c);
   drawSurface(c);
+  st[0] += micros() - t; t = micros();
   drawMap(c);
   drawRings(c);
+  st[1] += micros() - t; t = micros();
   int card_idx = -1;
   drawAircraft(c, count, fetched_ms, dist_km, bearing, &card_idx);
+  st[2] += micros() - t; t = micros();
   size_t in_range = 0;
   for (size_t i = 0; i < count; ++i) {
     if (dist_km[i] <= c.R) ++in_range;
@@ -1905,27 +1954,30 @@ void drawFrame() {
     drawInfoPanels(card_idx, dist_km, bearing);
   }
 
-  {  // frame-rate report on the serial log every 30 s
-    static unsigned long t0 = 0, busy = 0;
-    static uint32_t n = 0;
-    busy += millis() - s_last_frame_ms;
-    ++n;
-    if (millis() - t0 >= 30000) {
-      if (t0 != 0) {
-        Serial.printf("radar3d: %.1f fps, draw %lu ms/frame\n", n * 1000.0f / (millis() - t0),
-                      busy / (n ? n : 1));
-      }
-      t0 = millis();
-      busy = 0;
-      n = 0;
-    }
-  }
+  st[3] += micros() - t;
 #ifdef RADAR3D_HOST_TEST
   extern void hostCaptureFrame(LGFX_Sprite & spr);  // desktop preview harness
   hostCaptureFrame(s_spr);
 #else
+  t = micros();
   pushFrame(s_spr);
+  st[4] += micros() - t;
 #endif
+  {  // frame-rate report on the serial log every 30 s
+    static unsigned long t0 = 0;
+    static uint32_t n = 0;
+    ++n;
+    if (millis() - t0 >= 30000) {
+      if (t0 != 0 && n) {
+        Serial.printf("radar3d: %.1f fps; ms/frame: ground %lu, lines %lu, aircraft %lu, ui %lu, push %lu\n",
+                      n * 1000.0f / (millis() - t0), st[0] / n / 1000, st[1] / n / 1000,
+                      st[2] / n / 1000, st[3] / n / 1000, st[4] / n / 1000);
+      }
+      t0 = millis();
+      for (auto& v : st) v = 0;
+      n = 0;
+    }
+  }
 }
 
 LGFX_Sprite* frame() { return s_ready ? &s_spr : nullptr; }

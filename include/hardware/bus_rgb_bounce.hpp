@@ -79,9 +79,37 @@ class Bus_RGB_Bounce : public lgfx::IBus {
     for (int i = 0; i < 16; ++i) pc.data_gpio_nums[i ^ 8] = pins[i];
     pc.flags.fb_in_psram = 1;
 
-    if (esp_lcd_new_rgb_panel(&pc, &_handle) != ESP_OK) return false;
-    esp_lcd_panel_reset(_handle);
-    esp_lcd_panel_init(_handle);
+    // The driver refills the bounce buffers from an interrupt on the core that creates
+    // the panel; that copying (the whole frame, ~39 times a second) would take a large
+    // share of core 1, where the radar is drawn. Create it from a task on core 0
+    // (Wi-Fi / network) instead.
+    struct Ctx {
+      esp_lcd_rgb_panel_config_t* pc;
+      esp_lcd_panel_handle_t* out;
+      esp_err_t err;
+      SemaphoreHandle_t done;
+    } ctx{&pc, &_handle, ESP_FAIL, xSemaphoreCreateBinary()};
+    auto task = [](void* arg) {
+      auto* c = static_cast<Ctx*>(arg);
+      c->err = esp_lcd_new_rgb_panel(c->pc, c->out);
+      if (c->err == ESP_OK) {
+        esp_lcd_panel_reset(*c->out);
+        esp_lcd_panel_init(*c->out);
+      }
+      xSemaphoreGive(c->done);
+      vTaskDelete(nullptr);
+    };
+    if (xTaskCreatePinnedToCore(task, "lcdinit", 4096, &ctx, 5, nullptr, 0) != pdPASS) {
+      ctx.err = esp_lcd_new_rgb_panel(&pc, &_handle);  // fall back to this core
+      if (ctx.err == ESP_OK) {
+        esp_lcd_panel_reset(_handle);
+        esp_lcd_panel_init(_handle);
+      }
+    } else {
+      xSemaphoreTake(ctx.done, portMAX_DELAY);
+    }
+    vSemaphoreDelete(ctx.done);
+    if (ctx.err != ESP_OK) return false;
     void* fb0 = nullptr;
     void* fb1 = nullptr;
     if (esp_lcd_rgb_panel_get_frame_buffer(_handle, 2, &fb0, &fb1) != ESP_OK || fb0 == nullptr ||
