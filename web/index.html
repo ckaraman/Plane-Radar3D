@@ -928,12 +928,15 @@
   // Map blob entries (firmware radar3d.cpp loadPois): type 4 = runway centre line
   // (2 points); type 5 = place: word 0 position, word 1 [kind, name length, 0, 0],
   // then the UTF-8 name padded to 4 bytes. Older firmware skips both types.
+  const AIRPORT_KM = 60;   // airports are shown at every range, beyond the map's area too
+  const bboxFor = (lat, lon, km) => {
+    const dLat = km / KM_PER_DEG, dLon = km / (KM_PER_DEG * Math.cos(lat * Math.PI / 180));
+    return '(' + [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map((v) => v.toFixed(5)).join(',') + ')';
+  };
   async function fetchPlaces(lat, lon, radiusKm) {
-    const dLat = radiusKm / KM_PER_DEG, dLon = radiusKm / (KM_PER_DEG * Math.cos(lat * Math.PI / 180));
-    const bbox = [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map((v) => v.toFixed(5)).join(',');
-    const b = '(' + bbox + ')';
-    const q = '[out:json][timeout:25];way["aeroway"="runway"]' + b + ';out geom;(' +
-      'nwr["aeroway"="aerodrome"]["iata"]' + b + ';' +
+    const b = bboxFor(lat, lon, radiusKm), ab = bboxFor(lat, lon, Math.max(radiusKm, AIRPORT_KM));
+    const q = '[out:json][timeout:25];way["aeroway"="runway"]' + ab + ';out geom;(' +
+      'nwr["aeroway"="aerodrome"]["iata"]' + ab + ';' +
       'nwr["tourism"="attraction"]["wikidata"]["name"]' + b + ';' +
       'nwr["man_made"~"^(tower|lighthouse)$"]["wikidata"]["name"]' + b + ';' +
       'nwr["leisure"="stadium"]["wikidata"]["name"]' + b + ';' +
@@ -948,18 +951,23 @@
     const cosL = Math.cos(lat * Math.PI / 180);
     const xy = (la, lo) => [(lo - lon) * KM_PER_DEG * cosL, (la - lat) * KM_PER_DEG];
     const inside = ([x, y]) => x * x + y * y <= radiusKm * radiusKm;
+    const insideAp = ([x, y]) => x * x + y * y <= Math.max(radiusKm, AIRPORT_KM) ** 2;
     const pos = (el) => el.type === 'node' ? xy(el.lat, el.lon) : (el.center ? xy(el.center.lat, el.center.lon) : null);
     const runways = [], airports = [], landmarks = [], towns = [];
     for (const el of elements) {
       const t = el.tags || {};
       if (t.aeroway === 'runway' && el.geometry && el.geometry.length >= 2) {
         const a = xy(el.geometry[0].lat, el.geometry[0].lon), z = xy(el.geometry[el.geometry.length - 1].lat, el.geometry[el.geometry.length - 1].lon);
-        if (Math.hypot(z[0] - a[0], z[1] - a[1]) >= 0.8 && (inside(a) || inside(z))) runways.push([a, z]);
+        if (Math.hypot(z[0] - a[0], z[1] - a[1]) >= 0.8 && (insideAp(a) || insideAp(z))) runways.push([a, z]);
         continue;
       }
       const p = pos(el);
-      if (!p || !inside(p)) continue;
-      if (t.aeroway === 'aerodrome' && /^[A-Z]{3}$/.test(t.iata || '')) airports.push({ p, name: t.iata, kind: 0 });
+      if (!p) continue;
+      if (t.aeroway === 'aerodrome') {
+        if (/^[A-Z]{3}$/.test(t.iata || '') && insideAp(p)) airports.push({ p, name: t.iata, kind: 0 });
+        continue;
+      }
+      if (!inside(p)) continue;
       else if (t.place) towns.push({ p, name: t.name, kind: 2, rank: t.place === 'city' ? 0 : t.place === 'town' ? 1 : 2 });
       else if (t.name) landmarks.push({ p, name: t.name, kind: 1, rank: t.wikipedia ? 0 : 1 });
     }
@@ -981,7 +989,9 @@
     const enc = new TextEncoder();
     const entries = [];
     const q = (v) => Math.max(-32767, Math.min(32767, Math.round(v * 100)));   // 10 m units
-    for (const [a, z] of runways.slice(0, 16)) {
+    // Runways of the airports kept (within 5 km of one), nearest airports first.
+    const rwys = runways.filter(([a, z]) => ap.some((o) => Math.hypot(o.p[0] - (a[0] + z[0]) / 2, o.p[1] - (a[1] + z[1]) / 2) < 5));
+    for (const [a, z] of rwys.slice(0, 16)) {
       const raw = new Uint8Array(8), dv = new DataView(raw.buffer);
       dv.setInt16(0, q(a[0]), true); dv.setInt16(2, q(a[1]), true); dv.setInt16(4, q(z[0]), true); dv.setInt16(6, q(z[1]), true);
       entries.push({ type: 4, n: 2, raw });
@@ -1001,6 +1011,43 @@
       entries.push({ type: 5, n: words, raw });
     }
     return entries;
+  }
+
+  // Built-up areas for the 5" map: OSM residential / commercial / industrial land use,
+  // only their bounding boxes, rasterised into a coarse grid of how much of each cell
+  // is town (0..15). Map entry type 6: word 0 = [N, 0, radius x10 (u16)], then N*N
+  // nibbles, low nibble first, rows south to north, cells west to east.
+  async function fetchUrban(lat, lon, radiusKm) {
+    const b = bboxFor(lat, lon, radiusKm);
+    const q = '[out:json][timeout:30];way["landuse"~"^(residential|commercial|industrial|retail)$"]' + b + ';out bb;';
+    try { return await overpassRace(q, 35000, null); } catch (_) { return null; }
+  }
+  function buildUrbanEntry(elements, lat, lon, radiusKm) {
+    const N = 48, R = radiusKm, cell = 2 * R / N, cosL = Math.cos(lat * Math.PI / 180);
+    const cov = new Float32Array(N * N);
+    for (const el of elements) {
+      const bb = el.bounds;
+      if (!bb) continue;
+      const x0 = (bb.minlon - lon) * KM_PER_DEG * cosL, x1 = (bb.maxlon - lon) * KM_PER_DEG * cosL;
+      const y0 = (bb.minlat - lat) * KM_PER_DEG, y1 = (bb.maxlat - lat) * KM_PER_DEG;
+      if ((x1 - x0) * (y1 - y0) > 25) continue;              // huge boxes (whole districts) are not town density
+      const i0 = Math.max(0, Math.floor((x0 + R) / cell)), i1 = Math.min(N - 1, Math.floor((x1 + R) / cell));
+      const j0 = Math.max(0, Math.floor((y0 + R) / cell)), j1 = Math.min(N - 1, Math.floor((y1 + R) / cell));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const cx0 = -R + i * cell, cy0 = -R + j * cell;
+        const ox = Math.min(x1, cx0 + cell) - Math.max(x0, cx0), oy = Math.min(y1, cy0 + cell) - Math.max(y0, cy0);
+        if (ox > 0 && oy > 0) cov[j * N + i] += (ox * oy) / (cell * cell);
+      }
+    }
+    const raw = new Uint8Array(4 + N * N / 2), dv = new DataView(raw.buffer);
+    raw[0] = N; dv.setUint16(2, Math.round(R * 10), true);
+    let any = false;
+    for (let k = 0; k < N * N; k++) {
+      const v = Math.max(0, Math.min(15, Math.round(cov[k] / 0.6 * 15)));   // 60 % covered = fully town
+      if (v) any = true;
+      raw[4 + (k >> 1)] |= v << ((k & 1) * 4);
+    }
+    return any ? { type: 6, n: raw.length / 4, raw } : null;
   }
 
   // Appends extra entries to a map blob (count at offset 12).
@@ -1354,6 +1401,7 @@
       // 5" board: places are fetched at the same time as the map.
       const wantPlaces = dev.hw === 'ws5' || dev.hw === 'ws5b';
       const placesP = wantPlaces ? fetchPlaces(lat, lon, radius) : Promise.resolve(null);
+      const urbanP = wantPlaces ? fetchUrban(lat, lon, radius) : Promise.resolve(null);
       const elements = await fetchOverpass(lat, lon, radius, (t) => setMsg(msg, 'info', t));
       const water = (dev.mapv || 1) >= 2;
       let blob = buildMapBlob(elements, lat, lon, water, radius);
@@ -1361,8 +1409,11 @@
       // 5" board: airports, landmarks and town names on the map too.
       if (wantPlaces) {
         setMsg(msg, 'info', 'Önemli yerler ekleniyor…');
-        const places = await placesP;
-        if (places) blob = appendEntries(blob, buildPlaceEntries(places, lat, lon, radius));
+        const [places, urban] = await Promise.all([placesP, urbanP]);
+        const extra = places ? buildPlaceEntries(places, lat, lon, radius) : [];
+        const town = urban ? buildUrbanEntry(urban, lat, lon, radius) : null;
+        if (town) extra.unshift(town);
+        if (extra.length) blob = appendEntries(blob, extra);
       }
       await uploadMap(blob, (p) => setMsg(msg, 'info', 'Harita cihaza yazılıyor… %' + p));
       dev.map = blob.length;
