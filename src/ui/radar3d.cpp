@@ -2,6 +2,9 @@
 
 #include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
+#if !defined(RADAR3D_HOST_TEST)
+#include <esp_heap_caps.h>
+#endif
 
 #include <algorithm>
 #include <climits>
@@ -112,7 +115,26 @@ constexpr int kInfoRX = kW - kInfoRW - S(4);
 constexpr int kTapRadiusPx = S(38);
 constexpr float kYawStepDeg = 30.0f;
 
+// The radar is drawn in horizontal bands into a small buffer in internal RAM (fast,
+// no cache misses) and each band is copied straight into the panel's frame buffer:
+// PSRAM is written once per frame instead of drawing a whole frame in PSRAM, reading
+// it back and writing it again. s_spr is a full-screen "view" whose buffer pointer is
+// moved so that the current band's rows land in the band buffer; drawing is clipped
+// to those rows. The forecast and water screens keep a whole-frame sprite (s_frame).
 LGFX_Sprite s_spr(&tft);
+LGFX_Sprite s_frame(&tft);
+constexpr int kBandH = 40;  // 800 x 40 x 8 bits = 32 KB of internal RAM
+uint8_t* s_band_mem = nullptr;
+int s_band_y0 = 0, s_band_y1 = kH;  // rows of the current band [y0, y1)
+bool s_first_band = true;           // per-frame state is updated in the first band only
+
+void selectBand(int y0) {
+  s_band_y0 = y0;
+  s_band_y1 = std::min(kH, y0 + kBandH);
+  // Rows y0..y1-1 of the full-screen view map onto the band buffer.
+  s_spr.setBuffer(s_band_mem - static_cast<ptrdiff_t>(y0) * kW, kW, kH);
+  s_spr.setClipRect(0, y0, kW, s_band_y1 - y0);
+}
 /** How the selected aircraft's details are shown (display_prefs info_style). */
 bool infoInLabel() { return services::display_prefs::get().info_style == 1; }
 bool s_ready = false;
@@ -170,6 +192,8 @@ constexpr int kTerrainBands = 8;
 constexpr uint8_t kSeaBase = 144;      // 16 sea tones, far (hazy) .. near (deep)
 constexpr uint8_t kPlaneBase = 160;    // 3 altitude colours x 24 shades
 constexpr int kPlaneShades = 24;
+constexpr uint8_t kAsphalt = 232;      // runway surface
+constexpr uint8_t kMarking = 233;      // runway markings
 struct LabelPos {
   int x, y, size;
 };
@@ -419,6 +443,96 @@ bool claimLabel(const Box& b) {
     s_label_boxes[s_label_box_count++] = b;
   }
   return true;
+}
+
+// ---------------------------------------------------------------- places
+// Points of interest and runways from the map download (map blob entry types 5 and
+// 4, written by the setup page for the 5" board). Kept quiet so they read as
+// background: airports as an airport badge with their three-letter code over their
+// runways, landmarks as a small diamond, district names as dim text only. Drawn on
+// the ground before the aircraft; names only where aircraft labels leave room.
+struct Poi {
+  float x, y;     // km from home
+  uint8_t kind;   // 0 airport, 1 landmark, 2 district / town
+  char name[24];
+};
+struct Runway {
+  float x0, y0, x1, y1;  // centre line ends, km from home
+};
+Poi s_pois[24];
+size_t s_poi_count = 0;
+Runway s_rwys[16];
+size_t s_rwy_count = 0;
+uint32_t s_poi_gen = 0xFFFFFFFFu;
+
+void loadPois() {
+#if defined(RADAR3D_HOST_TEST) && defined(POI_PREVIEW)
+  if (s_poi_gen == 1) return;
+  s_poi_gen = 1;
+  const Poi sample[] = {{-3, 27, 0, "IST"}, {14, -6, 0, "ISL"}, {19, 9, 1, "Çamlıca Kulesi"},
+                        {9, -13, 1, "Köprü"}, {-24, 34, 1, "Baraj Gölü"}, {-33, -4, 2, "Beylikdüzü"},
+                        {-12, 13, 2, "Başakşehir"}, {28, 24, 2, "Sarıyer"}};
+  s_poi_count = sizeof(sample) / sizeof(sample[0]);
+  memcpy(s_pois, sample, sizeof(sample));
+  const Runway rw[] = {{-4.2f, 29.6f, -3.6f, 25.2f}, {-2.4f, 29.8f, -1.8f, 25.4f}, {-6.0f, 28.5f, -5.5f, 24.8f},
+                       {12.4f, -7.0f, 15.6f, -5.0f}};
+  s_rwy_count = sizeof(rw) / sizeof(rw[0]);
+  memcpy(s_rwys, rw, sizeof(rw));
+  const float k = ui::radar::rangeCurrent().outer_km / 50.0f;  // sample laid out for 50 km
+  for (size_t i = 0; i < s_poi_count; ++i) { s_pois[i].x *= k; s_pois[i].y *= k; }
+  for (size_t i = 0; i < s_rwy_count; ++i) {
+    // keep real runway length (~4 km) while moving the airport with the scale
+    Runway& r = s_rwys[i];
+    const float mx = 0.5f * (r.x0 + r.x1), my = 0.5f * (r.y0 + r.y1);
+    r.x0 += mx * (k - 1); r.x1 += mx * (k - 1); r.y0 += my * (k - 1); r.y1 += my * (k - 1);
+  }
+#else
+  const uint32_t gen = services::map::generation();
+  if (gen == s_poi_gen) return;
+  s_poi_gen = gen;
+  s_poi_count = s_rwy_count = 0;
+  const uint8_t* m = services::map::data();
+  const size_t size = services::map::size();
+  if (m == nullptr || size < services::map::kHeaderBytes) return;
+  int32_t lat_e7, lon_e7;
+  uint16_t count;
+  memcpy(&lat_e7, m + 4, 4);
+  memcpy(&lon_e7, m + 8, 4);
+  memcpy(&count, m + 12, 2);
+  float ox, oy;
+  offsetKm(lat_e7 / 1e7f, lon_e7 / 1e7f, &ox, &oy);
+  size_t pos = services::map::kHeaderBytes;
+  for (uint16_t pl = 0; pl < count && pos + 3 <= size; ++pl) {
+    const uint8_t type = m[pos];
+    uint16_t n;
+    memcpy(&n, m + pos + 1, 2);
+    pos += 3;
+    if (pos + static_cast<size_t>(n) * 4 > size) return;
+    const uint8_t* e = m + pos;
+    pos += static_cast<size_t>(n) * 4;
+    auto pt = [&](int k, float* x, float* y) {
+      int16_t xi, yi;
+      memcpy(&xi, e + k * 4, 2);
+      memcpy(&yi, e + k * 4 + 2, 2);
+      *x = ox + xi * 0.01f;
+      *y = oy + yi * 0.01f;
+    };
+    if (type == 4 && n >= 2 && s_rwy_count < sizeof(s_rwys) / sizeof(s_rwys[0])) {
+      Runway& r = s_rwys[s_rwy_count++];
+      pt(0, &r.x0, &r.y0);
+      pt(n - 1, &r.x1, &r.y1);
+    } else if (type == 5 && n >= 2 && s_poi_count < sizeof(s_pois) / sizeof(s_pois[0])) {
+      // word 0: position; word 1: kind, name length; then the UTF-8 name.
+      Poi& p = s_pois[s_poi_count];
+      pt(0, &p.x, &p.y);
+      p.kind = e[4];
+      const size_t len = std::min<size_t>({e[5], sizeof(p.name) - 1, (static_cast<size_t>(n) - 2) * 4});
+      memcpy(p.name, e + 8, len);
+      p.name[len] = '\0';
+      if (p.kind <= 2 && len > 0) ++s_poi_count;
+    }
+  }
+#endif
 }
 
 // ---------------------------------------------------------------- layers
@@ -881,8 +995,9 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float x
   if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); std::swap(e0, e2); }
   if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); std::swap(e1, e2); }
   if (y2 - y0 < 0.5f) return;
-  const int ya = std::max(kTopBarH + 1, static_cast<int>(ceilf(y0 - 0.5f)));
-  const int yb = std::min(kH - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
+  const int ya = std::max(std::max(kTopBarH + 1, s_band_y0), static_cast<int>(ceilf(y0 - 0.5f)));
+  const int yb = std::min(s_band_y1 - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
+  if (yb < ya) return;
   for (int y = ya; y <= yb; ++y) {
     const float yc = y + 0.5f;
     const float t = (yc - y0) / (y2 - y0);
@@ -1365,9 +1480,18 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
                   float* bearing_deg, int card_idx_out[1]) {
   size_t n_items = 0;
   for (size_t i = 0; i < count; ++i) {
+    // Positions (and their glide state) are worked out once per frame, in the first band.
+    static float fx[services::adsb::kMaxAircraft], fy[services::adsb::kMaxAircraft];
     float x, y;
-    currentPositionKm(s_planes[i], fetched_ms, &x, &y);
-    glidePosition(s_planes[i], fetched_ms, &x, &y);
+    if (s_first_band) {
+      currentPositionKm(s_planes[i], fetched_ms, &x, &y);
+      glidePosition(s_planes[i], fetched_ms, &x, &y);
+      fx[i] = x;
+      fy[i] = y;
+    } else {
+      x = fx[i];
+      y = fy[i];
+    }
     dist_km[i] = sqrtf(x * x + y * y);
     float b = atan2f(x, y) / kDegToRad;
     if (b < 0) b += 360.0f;
@@ -1410,8 +1534,8 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     const float kMaxPxPerFt = ui::Sf(0.04f) * services::display_prefs::get().exag / 2.0f;
     if (target > kMaxPxPerFt) target = kMaxPxPerFt;
     if (s_alt_px <= 0.0f) s_alt_px = target;
-    // Shrink quickly (never out of the top), grow gently.
-    s_alt_px += (target - s_alt_px) * (target < s_alt_px ? ease(0.12f) : ease(0.9f));
+    // Shrink quickly (never out of the top), grow gently. Once per frame.
+    if (s_first_band) s_alt_px += (target - s_alt_px) * (target < s_alt_px ? ease(0.12f) : ease(0.9f));
   }
 
   s_item_count = n_items;
@@ -1485,6 +1609,7 @@ void drawAircraft(const Cam& c, size_t count, unsigned long fetched_ms, float* d
     }
   }
 
+  s_label_box_count = 0;  // aircraft labels claim first; place names fill in after
   if (!labels) return;
   // Labels last, nearest aircraft first (the one in the card before all), each
   // to the right of its icon, else to the left, else left out. Callsign in bold
@@ -1800,12 +1925,12 @@ void drawEmptyNote(unsigned long fetched_ms) {
   }
 }
 
-void applyPalette() {
+void applyPaletteTo(LGFX_Sprite& g, bool force) {
   // Set every frame: the forecast screen shares the sprite with its own palette.
   const bool hc = services::display_prefs::get().high_contrast;
   const Rgb* pal = hc ? kPaletteHighContrast : kPalette;
-  for (int i = 0; i < 16; ++i) s_spr.setPaletteColor(i, pal[i].r, pal[i].g, pal[i].b);
-  if (s_palette_set && s_palette_hc == hc) return;  // ramps unchanged
+  for (int i = 0; i < 16; ++i) g.setPaletteColor(i, pal[i].r, pal[i].g, pal[i].b);
+  if (!force && s_palette_set && s_palette_hc == hc) return;  // ramps unchanged
   auto clamp8 = [](float v) { return static_cast<uint8_t>(v < 0 ? 0 : (v > 255 ? 255 : v)); };
   auto luma = [](const Rgb& c) { return 0.3f * c.r + 0.59f * c.g + 0.11f * c.b + 1.0f; };
   // Terrain: band 0 shade 8 is exactly the flat land colour; darker / lighter shades
@@ -1820,7 +1945,7 @@ void applyPalette() {
                 bb = land.b + (high.b - land.b) * t;
     for (int sh = 0; sh < kTerrainShades; ++sh) {
       const float f = sh < 8 ? kd + (1.0f - kd) * sh / 8.0f : 1.0f + (kl - 1.0f) * (sh - 8) / 7.0f;
-      s_spr.setPaletteColor(kTerrainBase + b * kTerrainShades + sh, clamp8(br * f), clamp8(bg * f),
+      g.setPaletteColor(kTerrainBase + b * kTerrainShades + sh, clamp8(br * f), clamp8(bg * f),
                             clamp8(bb * f));
     }
   }
@@ -1829,7 +1954,7 @@ void applyPalette() {
   for (int i = 0; i < 16; ++i) {
     const float t = i / 15.0f;  // 0 far .. 1 near
     const float hz = (1.0f - t) * 0.35f, dk = 1.08f - 0.22f * t;
-    s_spr.setPaletteColor(kSeaBase + i, clamp8((sea.r + (haze.r - sea.r) * hz) * dk),
+    g.setPaletteColor(kSeaBase + i, clamp8((sea.r + (haze.r - sea.r) * hz) * dk),
                           clamp8((sea.g + (haze.g - sea.g) * hz) * dk),
                           clamp8((sea.b + (haze.b - sea.b) * hz) * dk));
   }
@@ -1839,13 +1964,17 @@ void applyPalette() {
     const Rgb c = pal[alt_cols[a]];
     for (int j = 0; j < kPlaneShades; ++j) {
       const float f = 0.32f + 0.78f * j / (kPlaneShades - 1);
-      s_spr.setPaletteColor(kPlaneBase + a * kPlaneShades + j, clamp8(c.r * f), clamp8(c.g * f),
+      g.setPaletteColor(kPlaneBase + a * kPlaneShades + j, clamp8(c.r * f), clamp8(c.g * f),
                             clamp8(c.b * f));
     }
   }
+  g.setPaletteColor(kAsphalt, 70, 74, 78);
+  g.setPaletteColor(kMarking, 236, 236, 228);
   s_palette_hc = hc;
   s_palette_set = true;
 }
+
+void applyPalette() { applyPaletteTo(s_spr, false); }
 
 void animateYaw() {
   float diff = fmodf(s_yaw_target - s_yaw_cur + 540.0f, 360.0f) - 180.0f;
@@ -1864,12 +1993,28 @@ void animateYaw() {
 }  // namespace
 
 bool init() {
-  s_spr.setColorDepth(8);
-  s_spr.setPsram(true);  // 800x480 at 8 bits (palette) = 384 KB: in the 8 MB PSRAM
-  if (s_spr.createSprite(kW, kH) == nullptr) {
+  // Whole-frame sprite for the forecast / water screens: 384 KB in PSRAM.
+  s_frame.setColorDepth(8);
+  s_frame.setPsram(true);
+  if (s_frame.createSprite(kW, kH) == nullptr) {
     Serial.println("radar3d: sprite allocation failed");
     return false;
   }
+  s_frame.createPalette();  // 8-bit with a palette (setColorDepth(8) alone is RGB332)
+  // Band buffer in internal RAM (PSRAM if that fails: slower, still correct).
+  const size_t band_bytes = static_cast<size_t>(kW) * kBandH;
+#if defined(RADAR3D_HOST_TEST)
+  s_band_mem = static_cast<uint8_t*>(malloc(band_bytes));
+#else
+  s_band_mem = static_cast<uint8_t*>(heap_caps_malloc(band_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  if (s_band_mem == nullptr) {
+    Serial.println("radar3d: band buffer in PSRAM (internal RAM short)");
+    s_band_mem = static_cast<uint8_t*>(heap_caps_malloc(band_bytes, MALLOC_CAP_SPIRAM));
+  }
+#endif
+  if (s_band_mem == nullptr) return false;
+  s_spr.setColorDepth(8);
+  selectBand(0);
   s_spr.createPalette();
   applyPalette();
   s_yaw_cur = s_yaw_target = static_cast<float>(services::display_prefs::get().yaw_deg);
@@ -1905,6 +2050,111 @@ void followSelected(size_t count, unsigned long fetched_ms) {
   }
 }
 
+// Markers before the aircraft (so they pass over them); names after the aircraft
+// labels, only where they leave room (aircraft names always win).
+void drawRunway(const Cam& c, const Runway& r) {
+  // A strip lying on the ground: asphalt with a dark edge, white threshold bars at
+  // both ends and a dashed centre line. Wider than life so it reads at radar scale.
+  const float dx = r.x1 - r.x0, dy = r.y1 - r.y0, len = sqrtf(dx * dx + dy * dy);
+  if (len < 0.2f) return;
+  const float ux = dx / len, uy = dy / len, half_w = std::max(0.06f, c.R * 0.0045f);
+  const float px = -uy * half_w, py = ux * half_w;
+  const float gz = groundZ(c, 0.5f * (r.x0 + r.x1), 0.5f * (r.y0 + r.y1));
+  float sx[4], sy[4];
+  const float cx[4] = {r.x0 + px, r.x1 + px, r.x1 - px, r.x0 - px};
+  const float cy[4] = {r.y0 + py, r.y1 + py, r.y1 - py, r.y0 - py};
+  for (int k = 0; k < 4; ++k) {
+    if (!project(c, cx[k], cy[k], gz, &sx[k], &sy[k])) return;
+  }
+  for (int k = 0; k < 4; ++k) s_spr.drawLine(ri(sx[k]), ri(sy[k]), ri(sx[(k + 1) % 4]), ri(sy[(k + 1) % 4]), kBg);
+  s_spr.fillTriangle(ri(sx[0]), ri(sy[0]), ri(sx[1]), ri(sy[1]), ri(sx[2]), ri(sy[2]), kAsphalt);
+  s_spr.fillTriangle(ri(sx[0]), ri(sy[0]), ri(sx[2]), ri(sy[2]), ri(sx[3]), ri(sy[3]), kAsphalt);
+  // Threshold bars (across each end) and the centre line, dashed.
+  for (int end = 0; end < 2; ++end) {
+    const float t = end == 0 ? 0.06f : 0.94f;
+    float ax, ay, bx, by;
+    const float mx = r.x0 + dx * t, my = r.y0 + dy * t;
+    if (project(c, mx + px * 0.7f, my + py * 0.7f, gz, &ax, &ay) &&
+        project(c, mx - px * 0.7f, my - py * 0.7f, gz, &bx, &by)) {
+      s_spr.drawLine(ri(ax), ri(ay), ri(bx), ri(by), kMarking);
+    }
+  }
+  float ax, ay, bx, by;
+  if (project(c, r.x0 + dx * 0.12f, r.y0 + dy * 0.12f, gz, &ax, &ay) &&
+      project(c, r.x0 + dx * 0.88f, r.y0 + dy * 0.88f, gz, &bx, &by)) {
+    dottedLine(ri(ax), ri(ay), ri(bx), ri(by), kMarking, 3, 3);
+  }
+}
+
+/** Airport badge: dark disc with a light ring and a small aircraft in it, raised on a
+ *  short stem above the airport so its runways stay visible underneath. */
+constexpr int kBadgeLift = S(16);
+void drawAirportBadge(int x, int gy) {
+  const int r = S(8), y = gy - kBadgeLift;
+  s_spr.drawLine(x, y + r, x, gy, kBg);
+  s_spr.drawLine(x + 1, y + r, x + 1, gy, kText);
+  s_spr.fillCircle(x + 1, gy, S(1), kText);
+  s_spr.fillCircle(x, y, r + 1, kBg);
+  s_spr.fillCircle(x, y, r, kPanel);
+  s_spr.drawCircle(x, y, r, kText);
+  drawPlaneShape(x, y, 45.0f, ui::Sf(0.62f), kText);
+}
+
+void drawPois(const Cam& c, bool names) {
+  loadPois();
+  if (!names) {
+    for (size_t i = 0; i < s_rwy_count; ++i) {
+      const Runway& r = s_rwys[i];
+      const float mx = 0.5f * (r.x0 + r.x1), my = 0.5f * (r.y0 + r.y1);
+      if (mx * mx + my * my <= c.R * c.R * 0.95f) drawRunway(c, r);
+    }
+  }
+  for (int pass = 0; pass < 3; ++pass) {  // airports first, then landmarks, then towns
+    for (size_t i = 0; i < s_poi_count; ++i) {
+      const Poi& p = s_pois[i];
+      if (p.kind != pass || p.x * p.x + p.y * p.y > c.R * c.R * 0.95f) continue;
+      if (fabsf(p.x) < 0.3f && fabsf(p.y) < 0.3f) continue;  // home has its own marker
+      float sx, sy;
+      if (!project(c, p.x, p.y, groundZ(c, p.x, p.y), &sx, &sy)) continue;
+      const int x = ri(sx), y = ri(sy);
+      if (p.kind == 0) {
+        if (!names) {
+          drawAirportBadge(x, y);
+          continue;
+        }
+        setFont(&ui::font::SansBold9);
+        const int w = s_spr.textWidth(p.name);
+        const int by = y - kBadgeLift;
+        const Box b{x + S(11), by - S(8), w + S(2), S(16)};
+        if (claimLabel(b)) haloText(p.name, x + S(12), by - S(8), kText);
+      } else if (p.kind == 1) {
+        const int d = S(4);
+        if (!names) {
+          s_spr.fillTriangle(x, y - d - 1, x - d - 1, y, x + d + 1, y, kBg);
+          s_spr.fillTriangle(x, y + d + 1, x - d - 1, y, x + d + 1, y, kBg);
+          s_spr.fillTriangle(x, y - d, x - d, y, x + d, y, kCream);
+          s_spr.fillTriangle(x, y + d, x - d, y, x + d, y, kCream);
+          continue;
+        }
+        setFont(&ui::font::Sans8);
+        const int w = s_spr.textWidth(p.name);
+        const Box b{x + d + S(3), y - S(7), w + S(2), S(14)};
+        if (claimLabel(b)) haloText(p.name, x + d + S(4), y - S(6), kTextDim);
+      } else if (names) {
+        setFont(&ui::font::Sans8);
+        const int w = s_spr.textWidth(p.name);
+        const Box b{x - w / 2, y - S(6), w, S(12)};
+        if (claimLabel(b)) {
+          s_spr.setTextDatum(textdatum_t::middle_center);
+          s_spr.setTextColor(kTextDim);
+          s_spr.drawString(p.name, x, y);
+        }
+      }
+    }
+  }
+  s_spr.setTextDatum(textdatum_t::top_left);
+}
+
 void drawFrame() {
   if (!s_ready) return;
   {
@@ -1931,37 +2181,55 @@ void drawFrame() {
   static float bearing[services::adsb::kMaxAircraft];
 
   static uint32_t st[5];  // us per stage, summed for the serial report
-  uint32_t t = micros();
-  drawGround(c);
-  drawSurface(c);
-  st[0] += micros() - t; t = micros();
-  drawMap(c);
-  drawRings(c);
-  st[1] += micros() - t; t = micros();
-  int card_idx = -1;
-  drawAircraft(c, count, fetched_ms, dist_km, bearing, &card_idx);
-  st[2] += micros() - t; t = micros();
-  size_t in_range = 0;
-  for (size_t i = 0; i < count; ++i) {
-    if (dist_km[i] <= c.R) ++in_range;
+#if !defined(RADAR3D_HOST_TEST)
+  tft.beginHiddenFrame();  // bands go straight into the hidden frame buffer
+#endif
+  for (int y0 = 0; y0 < kH; y0 += kBandH) {
+    s_first_band = y0 == 0;
+    selectBand(y0);
+    uint32_t t = micros();
+    drawGround(c);
+    drawSurface(c);
+    st[0] += micros() - t; t = micros();
+    drawMap(c);
+    drawRings(c);
+    drawPois(c, false);
+    st[1] += micros() - t; t = micros();
+    int card_idx = -1;
+    drawAircraft(c, count, fetched_ms, dist_km, bearing, &card_idx);
+    drawPois(c, true);
+    st[2] += micros() - t; t = micros();
+    size_t in_range = 0;
+    for (size_t i = 0; i < count; ++i) {
+      if (dist_km[i] <= c.R) ++in_range;
+    }
+    drawTopBar(in_range, fetched_ms);
+    if (in_range == 0) drawEmptyNote(fetched_ms);
+    drawControls();
+    if (s_selected[0] == '\0') {
+      drawLegendStrip();  // nothing selected: legend strip, no card
+    } else if (!infoInLabel()) {
+      drawInfoPanels(card_idx, dist_km, bearing);
+    }
+    st[3] += micros() - t; t = micros();
+#if !defined(RADAR3D_HOST_TEST)
+    // Copy the band's rows (the clip makes the push read only those) to the panel.
+    tft.setClipRect(0, y0, kW, s_band_y1 - y0);
+    s_spr.pushSprite(0, 0);
+    tft.clearClipRect();
+    st[4] += micros() - t;
+#else
+    memcpy(static_cast<uint8_t*>(s_frame.getBuffer()) + static_cast<size_t>(y0) * kW, s_band_mem,
+           static_cast<size_t>(s_band_y1 - y0) * kW);
+#endif
   }
-  drawTopBar(in_range, fetched_ms);
-  if (in_range == 0) drawEmptyNote(fetched_ms);
-  drawControls();
-  if (s_selected[0] == '\0') {
-    drawLegendStrip();  // nothing selected: legend strip, no card
-  } else if (!infoInLabel()) {
-    drawInfoPanels(card_idx, dist_km, bearing);
-  }
-
-  st[3] += micros() - t;
+  s_first_band = true;
 #ifdef RADAR3D_HOST_TEST
   extern void hostCaptureFrame(LGFX_Sprite & spr);  // desktop preview harness
-  hostCaptureFrame(s_spr);
+  applyPaletteTo(s_frame, true);
+  hostCaptureFrame(s_frame);
 #else
-  t = micros();
-  pushFrame(s_spr);
-  st[4] += micros() - t;
+  tft.presentHiddenFrame();
 #endif
   {  // frame-rate report on the serial log every 30 s
     static unsigned long t0 = 0;
@@ -1980,24 +2248,10 @@ void drawFrame() {
   }
 }
 
-LGFX_Sprite* frame() { return s_ready ? &s_spr : nullptr; }
+LGFX_Sprite* frame() { return s_ready ? &s_frame : nullptr; }
 
-void releaseFrame() {
-  s_ready = false;
-  s_spr.deleteSprite();
-}
-
-bool reacquireFrame() {
-  if (s_spr.createSprite(kW, kH) == nullptr) {
-    Serial.println("radar3d: frame re-allocation failed");
-    return false;
-  }
-  s_spr.createPalette();
-  s_palette_set = false;
-  applyPalette();
-  s_ready = true;
-  return true;
-}
+void releaseFrame() {}
+bool reacquireFrame() { return true; }
 
 #ifdef RADAR3D_HOST_TEST
 bool hostHitPos(const char* callsign, int* x, int* y) {
