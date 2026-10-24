@@ -2397,9 +2397,11 @@ void drawLandmarkIcon(int x, int gy, uint8_t cat) {
       s_spr.fillRect(X(-5.5f), Y(4), L(11), L(1.4f), k);
       break;
     case 7:  // park: tree
-      s_spr.fillCircle(x, Y(-1.5f), L(3.8f), k);
-      s_spr.fillRect(X(-0.7f), Y(2), L(1.5f), L(3.5f), k);
-      s_spr.fillCircle(x, Y(-1.5f), L(1.2f), kPanel);
+      s_spr.fillCircle(X(-2.2f), Y(-0.5f), L(2.6f), k);
+      s_spr.fillCircle(X(2.2f), Y(-0.5f), L(2.6f), k);
+      s_spr.fillCircle(x, Y(-3), L(2.9f), k);
+      s_spr.fillRect(X(-0.8f), Y(1.5f), L(1.7f), L(4), k);
+      s_spr.fillRect(X(-3), Y(5), L(6), L(1.2f), k);
       break;
     case 8:  // place of worship: dome, finial and a minaret
       s_spr.fillCircle(X(-1), Y(1), L(3.5f), k);
