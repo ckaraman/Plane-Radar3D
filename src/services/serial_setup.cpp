@@ -311,6 +311,23 @@ void handleSet(const char* json) {
     return;
   }
 
+  // Same network as the saved one and no new password: the page only showed the
+  // current name back. Keep the connection (or reuse the saved password) instead
+  // of rejoining with an empty password, which would drop a working link.
+  char saved_pass[65] = {};
+  if (pass[0] == '\0') {
+    wifi_config_t saved = {};
+    if (esp_wifi_get_config(WIFI_IF_STA, &saved) == ESP_OK &&
+        strncmp(reinterpret_cast<const char*>(saved.sta.ssid), ssid, 32) == 0) {
+      if (WiFi.status() == WL_CONNECTED) {
+        sendOk(false);
+        return;
+      }
+      memcpy(saved_pass, saved.sta.password, 64);
+      pass = saved_pass;
+    }
+  }
+
   const JoinResult joined = tryJoin(ssid, pass);
   if (!joined.ok) {
     sendError(joined.reason);

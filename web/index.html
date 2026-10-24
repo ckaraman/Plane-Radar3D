@@ -941,10 +941,27 @@
       'nwr["man_made"~"^(tower|lighthouse)$"]["wikidata"]["name"]' + b + ';' +
       'nwr["leisure"="stadium"]["wikidata"]["name"]' + b + ';' +
       'nwr["historic"~"^(castle|monument|fort|palace)$"]["wikidata"]["name"]' + b + ';' +
+      'nwr["tourism"~"^(zoo|museum|theme_park)$"]["wikidata"]["name"]' + b + ';' +
+      'nwr["leisure"="park"]["wikipedia"]["name"]' + b + ';' +
+      'nwr["amenity"="place_of_worship"]["wikipedia"]["name"]' + b + ';' +
       'way["bridge"="yes"]["highway"~"^(motorway|trunk)$"]["wikidata"]["name"]' + b + ';' +
       ');out center tags;';
     try { return await overpassRace(q, 25000, null); } catch (_) { /* optional */ }
     return null;   // places are optional
+  }
+
+  // Landmark symbol on the 5" map: 1 stadium, 2 zoo, 3 tower, 4 castle / historic,
+  // 5 bridge, 6 museum, 7 park, 8 place of worship, 0 other (plain diamond).
+  function landmarkCategory(t) {
+    if (t.leisure === 'stadium') return 1;
+    if (t.tourism === 'zoo') return 2;
+    if (t.man_made === 'tower' || t.man_made === 'lighthouse') return 3;
+    if (t.historic) return 4;
+    if (t.bridge) return 5;
+    if (t.tourism === 'museum') return 6;
+    if (t.leisure === 'park' || t.tourism === 'theme_park') return 7;
+    if (t.amenity === 'place_of_worship') return 8;
+    return 0;
   }
 
   function buildPlaceEntries(elements, lat, lon, radiusKm) {
@@ -969,7 +986,11 @@
       }
       if (!inside(p)) continue;
       else if (t.place) towns.push({ p, name: t.name, kind: 2, rank: t.place === 'city' ? 0 : t.place === 'town' ? 1 : 2 });
-      else if (t.name) landmarks.push({ p, name: t.name, kind: 1, rank: t.wikipedia ? 0 : 1 });
+      else if (t.name) {
+        const cat = landmarkCategory(t);
+        // Places with their own symbol first, then the better known ones.
+        landmarks.push({ p, name: t.name, kind: 1, cat, rank: (cat ? 0 : 2) + (t.wikipedia ? 0 : 1) });
+      }
     }
     // Spread out: a place closer than `gap` km to one already taken is skipped.
     const pick = (list, max, gap, taken) => {
@@ -1006,7 +1027,7 @@
       const words = 2 + Math.ceil(name.length / 4);
       const raw = new Uint8Array(words * 4), dv = new DataView(raw.buffer);
       dv.setInt16(0, q(it.p[0]), true); dv.setInt16(2, q(it.p[1]), true);
-      raw[4] = it.kind; raw[5] = name.length;
+      raw[4] = it.kind; raw[5] = name.length; raw[6] = it.cat || 0;
       raw.set(name, 8);
       entries.push({ type: 5, n: words, raw });
     }
@@ -1022,6 +1043,72 @@
     const q = '[out:json][timeout:30];way["landuse"~"^(residential|commercial|industrial|retail)$"]' + b + ';out bb;';
     try { return await overpassRace(q, 35000, null); } catch (_) { return null; }
   }
+  // Forest and woodland (map entry type 7, same grid as type 6): the polygons are
+  // rasterised properly (even-odd, 4x4 samples per cell), forests are large and their
+  // bounding boxes would paint whole valleys green.
+  async function fetchForest(lat, lon, radiusKm) {
+    const b = bboxFor(lat, lon, radiusKm);
+    const q = '[out:json][timeout:40];(way["landuse"="forest"]' + b + ';way["natural"="wood"]' + b +
+      ';relation["landuse"="forest"]' + b + ';relation["natural"="wood"]' + b + ';);out skel geom qt;';
+    try { return await overpassRace(q, 45000, null); } catch (_) { return null; }
+  }
+  function buildForestEntry(elements, lat, lon, radiusKm) {
+    const N = 48, SS = 4, M = N * SS, R = radiusKm, cosL = Math.cos(lat * Math.PI / 180);
+    const toX = (lo) => ((lo - lon) * KM_PER_DEG * cosL + R) / (2 * R) * M;
+    const toY = (la) => ((la - lat) * KM_PER_DEG + R) / (2 * R) * M;
+    const edges = [];   // [x0, y0, x1, y1] in sample units
+    const addLine = (g) => {
+      if (!g || g.length < 2) return;
+      for (let i = 1; i < g.length; i++) {
+        const a = g[i - 1], z = g[i];
+        if (!a || !z) continue;
+        const y0 = toY(a.lat), y1 = toY(z.lat);
+        if (y0 === y1) continue;
+        edges.push([toX(a.lon), y0, toX(z.lon), y1]);
+      }
+    };
+    // A way that is also a member of a forest relation would cancel itself out (even-odd).
+    const inRel = new Set();
+    for (const el of elements) if (el.type === 'relation' && el.members) for (const m of el.members) if (m.type === 'way') inRel.add(m.ref);
+    for (const el of elements) {
+      if (el.type === 'way') {
+        const g = el.geometry;
+        if (inRel.has(el.id)) continue;
+        if (g && g.length > 2 && g[0].lat === g[g.length - 1].lat && g[0].lon === g[g.length - 1].lon) addLine(g);
+      } else if (el.type === 'relation' && el.members) {
+        for (const m of el.members) if (m.type === 'way') addLine(m.geometry);
+      }
+    }
+    if (!edges.length) return null;
+    // Bucket edges by sample row so each row only looks at the edges crossing it.
+    const rows = Array.from({ length: M }, () => []);
+    for (const e of edges) {
+      const lo = Math.max(0, Math.ceil(Math.min(e[1], e[3]) - 0.5)), hi = Math.min(M - 1, Math.ceil(Math.max(e[1], e[3]) - 0.5) - 1);
+      for (let r = lo; r <= hi; r++) rows[r].push(e);
+    }
+    const cov = new Float32Array(N * N);
+    for (let r = 0; r < M; r++) {
+      const yc = r + 0.5, xs = [];
+      for (const [x0, y0, x1, y1] of rows[r]) {
+        if ((y0 <= yc) !== (y1 <= yc)) xs.push(x0 + (yc - y0) * (x1 - x0) / (y1 - y0));
+      }
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const a = Math.max(0, Math.ceil(xs[k] - 0.5)), z = Math.min(M - 1, Math.ceil(xs[k + 1] - 0.5) - 1);
+        for (let c = a; c <= z; c++) cov[((r / SS) | 0) * N + ((c / SS) | 0)] += 1 / (SS * SS);
+      }
+    }
+    const raw = new Uint8Array(4 + N * N / 2), dv = new DataView(raw.buffer);
+    raw[0] = N; dv.setUint16(2, Math.round(R * 10), true);
+    let any = false;
+    for (let k = 0; k < N * N; k++) {
+      const v = Math.max(0, Math.min(15, Math.round(cov[k] / 0.7 * 15)));   // 70 % wooded = full forest
+      if (v) any = true;
+      raw[4 + (k >> 1)] |= v << ((k & 1) * 4);
+    }
+    return any ? { type: 7, n: raw.length / 4, raw } : null;
+  }
+
   function buildUrbanEntry(elements, lat, lon, radiusKm) {
     const N = 48, R = radiusKm, cell = 2 * R / N, cosL = Math.cos(lat * Math.PI / 180);
     const cov = new Float32Array(N * N);
@@ -1402,6 +1489,7 @@
       const wantPlaces = dev.hw === 'ws5' || dev.hw === 'ws5b';
       const placesP = wantPlaces ? fetchPlaces(lat, lon, radius) : Promise.resolve(null);
       const urbanP = wantPlaces ? fetchUrban(lat, lon, radius) : Promise.resolve(null);
+      const forestP = wantPlaces ? fetchForest(lat, lon, radius) : Promise.resolve(null);
       const elements = await fetchOverpass(lat, lon, radius, (t) => setMsg(msg, 'info', t));
       const water = (dev.mapv || 1) >= 2;
       let blob = buildMapBlob(elements, lat, lon, water, radius);
@@ -1409,16 +1497,19 @@
       // 5" board: airports, landmarks and town names on the map too.
       if (wantPlaces) {
         setMsg(msg, 'info', 'Önemli yerler ekleniyor…');
-        const [places, urban] = await Promise.all([placesP, urbanP]);
+        const [places, urban, forest] = await Promise.all([placesP, urbanP, forestP]);
         const extra = places ? buildPlaceEntries(places, lat, lon, radius) : [];
         const town = urban ? buildUrbanEntry(urban, lat, lon, radius) : null;
         if (town) extra.unshift(town);
+        let woods = null;
+        try { woods = forest ? buildForestEntry(forest, lat, lon, radius) : null; } catch (_) { /* optional */ }
+        if (woods) extra.unshift(woods);
         if (extra.length) blob = appendEntries(blob, extra);
       }
       await uploadMap(blob, (p) => setMsg(msg, 'info', 'Harita cihaza yazılıyor… %' + p));
       dev.map = blob.length;
       const lakeNote = !water ? '' : (blob.lakes ? ', ' + blob.lakes + ' göl' : ', bu alanda göl yok');
-      const placeNote = blob.places ? ', ' + blob.places + ' yer adı' : '';
+      const placeNote = blob.places ? ', ' + blob.places + ' önemli yer' : '';
       return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB' + lakeNote + placeNote + ').' +
         (water ? '' : ' Deniz dolgusu için önce 3. adımdan yazılımı güncelleyin.');
     } catch (e) {
@@ -1562,7 +1653,9 @@
     };
     if (!$('#opt-weather').disabled) payload.weather = $('#opt-weather').checked;
     if (!$('#opt-rings').disabled) payload.rings = $('#opt-rings').checked;
-    if (ssid.trim()) { payload.ssid = ssid; payload.pass = pass; }
+    // Unchanged network and no new password: leave WiFi alone (the field only shows the current name).
+    const sameNet = state.device && state.device.wifi && ssid === state.device.ssid && !pass;
+    if (ssid.trim() && !sameNet) { payload.ssid = ssid; payload.pass = pass; }
 
     btn.disabled = true;
     let mapNote = '';
