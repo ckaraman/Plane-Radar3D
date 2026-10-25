@@ -116,6 +116,16 @@ float heightM(float x_km, float y_km) {
     inv_step = static_cast<float>(s_hdr.n - 1) / (2.0f * s_hdr.half_km);
   }
   const int n = s_hdr.n;
+  // The grid covers a square; towards its edge the heights fade out over a ring, so
+  // the relief ends on a smooth circle instead of on the square's steps.
+  const float dx = x_km - gx, dy = y_km - gy, r2 = dx * dx + dy * dy;
+  const float r_out = half, r_in = half * 0.82f;
+  if (r2 >= r_out * r_out) return 0.0f;
+  float fade = 1.0f;
+  if (r2 > r_in * r_in) {
+    const float t = (r_out - sqrtf(r2)) / (r_out - r_in);  // 1 inside .. 0 at the edge
+    fade = t * t * (3.0f - 2.0f * t);                       // smoothstep
+  }
   const float fx = (x_km - gx + half) * inv_step;
   const float fy = (y_km - gy + half) * inv_step;
   if (fx < 0.0f || fy < 0.0f || fx > n - 1 || fy > n - 1) return 0.0f;
@@ -125,7 +135,7 @@ float heightM(float x_km, float y_km) {
   const int16_t* row = s_h + iy * n + ix;
   const float h00 = row[0], h10 = row[1], h01 = row[n], h11 = row[n + 1];
   const float h = (h00 * (1 - tx) + h10 * tx) * (1 - ty) + (h01 * (1 - tx) + h11 * tx) * ty;
-  return h > 0.0f ? h : 0.0f;  // sea and below-sea-level land drawn at sea level
+  return h > 0.0f ? h * fade : 0.0f;  // sea and below-sea-level land drawn at sea level
 }
 
 void handleBegin(const char* json) {

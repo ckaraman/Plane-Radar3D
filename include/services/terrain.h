@@ -28,7 +28,8 @@ uint32_t generation();
 /** Highest point of the loaded grid in metres (0 without data). */
 float maxHeightM();
 
-/** Height in metres at x km east / y km north of the radar centre (0 outside the grid). */
+/** Height in metres at x km east / y km north of the radar centre (0 outside the grid;
+ *  fades out over the outer part of the grid's inscribed circle). */
 float heightM(float x_km, float y_km);
 
 // USB setup handlers (called from serial_setup).

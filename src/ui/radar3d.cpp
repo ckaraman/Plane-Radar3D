@@ -1164,8 +1164,14 @@ float gridAt(const uint8_t* g, int n, float r, float ox, float oy, float x, floa
     if (i < 0 || j < 0 || i >= n || j >= n) return 0.0f;
     return g[j * n + i] / 15.0f;
   };
-  return (at(i0, j0) * (1 - tx) + at(i0 + 1, j0) * tx) * (1 - ty) +
-         (at(i0, j0 + 1) * (1 - tx) + at(i0 + 1, j0 + 1) * tx) * ty;
+  const float v = (at(i0, j0) * (1 - tx) + at(i0 + 1, j0) * tx) * (1 - ty) +
+                  (at(i0, j0 + 1) * (1 - tx) + at(i0 + 1, j0 + 1) * tx) * ty;
+  // Faded out towards the edge of the grid's circle: no square border of town or forest.
+  const float dx = x - ox, dy = y - oy, d2 = dx * dx + dy * dy, r_in = r * 0.85f;
+  if (d2 >= r * r) return 0.0f;
+  if (d2 <= r_in * r_in) return v;
+  const float t = (r - sqrtf(d2)) / (r - r_in);
+  return v * t * t * (3.0f - 2.0f * t);
 }
 float urbanAt(float x, float y) { return gridAt(s_urban, s_urban_n, s_urban_r, s_urban_ox, s_urban_oy, x, y); }
 float forestAt(float x, float y) { return gridAt(s_forest, s_forest_n, s_forest_r, s_forest_ox, s_forest_oy, x, y); }
