@@ -1271,6 +1271,13 @@ void buildRelief(const Cam& c) {
 // While the camera turns, the relief shading is worked out for every second pixel
 // only (each value written twice); the frame drawn once it stops is full detail.
 bool s_relief_half = false;
+unsigned long s_follow_step_ms = 0;  // last follow step (see followSelected)
+bool s_bg_lowq = false;              // the cached static layer was drawn in reduced detail
+/** Camera in motion: turning, or following an aircraft whose steps come close together. */
+bool reducedDetail() {
+  if (fabsf(s_yaw_cur - s_yaw_target) > 0.01f) return true;
+  return s_follow && millis() - s_follow_step_ms < 700;
+}
 
 // 4x4 ordered-dither thresholds (0..15).
 constexpr uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
@@ -1293,7 +1300,9 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
   const float inv02 = 1.0f / (y2 - y0);
   const float inv01 = (y1 - y0) > 1e-3f ? 1.0f / (y1 - y0) : 0.0f;
   const float inv12 = (y2 - y1) > 1e-3f ? 1.0f / (y2 - y1) : 0.0f;
-  for (int y = ya; y <= yb; ++y) {
+  // Reduced detail: even rows only; each band copies them down to the odd rows.
+  const int ystep = s_relief_half ? 2 : 1;
+  for (int y = s_relief_half ? (ya + (ya & 1)) : ya; y <= yb; y += ystep) {
     const float yc = y + 0.5f;
     const float t = (yc - y0) * inv02;
     float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0), ea = e0 + t * (e2 - e0), ua = u0 + t * (u2 - u0);
@@ -1327,19 +1336,20 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
     const bool half = s_relief_half;
     for (int x = xs, adv = 1; x <= xe; x += adv, sv += dsv * adv, ev += dev * adv, uv += duv * adv) {
       adv = (half && !(x & 1) && x < xe) ? 2 : 1;
+      const int xd = half ? (x & ~1) : x;  // dither by pixel pair in reduced detail
       int32_t s16 = sv >> 8, e16 = ev >> 8;  // level * 16
       s16 = s16 < 0 ? 0 : (s16 > 15 * 16 ? 15 * 16 : s16);
       e16 = e16 < 0 ? 0 : (e16 > 7 * 16 ? 7 * 16 : e16);
       int sh = s16 >> 4, bd = e16 >> 4;
-      if ((s16 & 15) > bay[x & 3]) ++sh;
-      if ((e16 & 15) > bay2[(x + 1) & 3]) ++bd;
+      if ((s16 & 15) > bay[xd & 3]) ++sh;
+      if ((e16 & 15) > bay2[(xd + 1) & 3]) ++bd;
       if (sh > 15) sh = 15;
       if (bd > 7) bd = 7;
       // Land cover share (x16 here, + town, - forest) against the dither: tint or terrain.
       int32_t cov = urban ? (uv >> 12) : 0;
       const bool forest = cov < 0;
       if (forest) cov = -cov;
-      if (cov > kBayer[(y + 1) & 3][(x + 3) & 3]) {
+      if (cov > kBayer[(y + 1) & 3][(xd + 3) & 3]) {
         row[x] = static_cast<uint8_t>((forest ? kForestBase : kUrbanBase) + (sh >> 1));
       } else {
         row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
@@ -1409,7 +1419,7 @@ void drawSurface(const Cam& c) {
   }
   const uint32_t t_bands = micros();
   uint32_t t_relief = 0;
-  s_relief_half = fabsf(s_yaw_cur - s_yaw_target) > 0.01f;  // still turning
+  s_relief_half = reducedDetail();
   if (!s_gband_tried) {
     s_gband_tried = true;
 #if defined(RADAR3D_HOST_TEST)
@@ -1443,6 +1453,15 @@ void drawSurface(const Cam& c) {
     }
     const uint32_t tr = micros();
     drawRelief(band - static_cast<ptrdiff_t>(y0) * kW, y0, y1);
+    if (s_relief_half && s_rc_count > 0) {  // odd rows: copy of the row above (land + relief)
+      for (int y = std::max(y0 + 1, kTopBarH + 1) | 1; y < y1; y += 2) {
+        if (s_disc_l[y] > s_disc_r[y] || s_disc_l[y - 1] > s_disc_r[y - 1]) continue;
+        const int xa = std::max(s_disc_l[y], s_disc_l[y - 1]), xb = std::min(s_disc_r[y], s_disc_r[y - 1]);
+        if (xb >= xa) {
+          memcpy(band + static_cast<size_t>(y - y0) * kW + xa, band + static_cast<size_t>(y - 1 - y0) * kW + xa, xb - xa + 1);
+        }
+      }
+    }
     t_relief += micros() - tr;
     fillRows(s_fill_sea, y1, band, y0);
     fillRows(s_fill_lake, y1, band, y0);
@@ -2499,7 +2518,10 @@ void followSelected(size_t count, unsigned long fetched_ms) {
     // once: it reads as a smooth follow, and between steps the camera stands still so
     // the frames come from the cached ground instead of being redrawn every time.
     const float off = fabsf(fmodf(b - s_yaw_target + 540.0f, 360.0f) - 180.0f);
-    if (off >= 0.3f) s_yaw_target = b;
+    if (off >= 0.3f) {
+      s_yaw_target = b;
+      s_follow_step_ms = millis();
+    }
     return;
   }
 }
@@ -2898,6 +2920,9 @@ void drawFrame() {
   selectBand(0);
   uint32_t t = micros();
   const BgKey bk = bgKeyFor(c);
+  // A static layer kept in reduced detail is redrawn in full once the camera has
+  // really settled.
+  if (s_bg_valid && s_bg_lowq && !reducedDetail()) s_bg_valid = false;
   const bool same = s_bg_valid && memcmp(&bk, &s_bg_key, sizeof(bk)) == 0;
   if (same) {
 #if defined(RADAR3D_NO_RESTORE)
@@ -2932,6 +2957,7 @@ void drawFrame() {
       hashTiles(s_bg, s_bg_hash);
       s_bg_key = bk;
       s_bg_valid = true;
+      s_bg_lowq = s_relief_half;
     } else {
       s_bg_valid = false;
     }
