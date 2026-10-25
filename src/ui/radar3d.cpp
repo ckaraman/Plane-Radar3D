@@ -2320,11 +2320,15 @@ void followSelected(size_t count, unsigned long fetched_ms) {
     // brings it to the front, between home and the viewer.
     float b = atan2f(x, y) / kDegToRad + 180.0f;
     if (b >= 360.0f) b -= 360.0f;
-    // Move in steps of a few degrees, so the cached ground is not rebuilt every frame
-    // while the aircraft creeps across the sky.
-    // At the 5" frame rate the ground is cheap enough to rebuild every frame, so the
-    // camera follows continuously instead of in steps.
-    s_yaw_target = b;
+    // Turn in steps of a few degrees: between steps the camera stands still and the
+    // ground comes from the cache (fast frames), instead of being redrawn on every
+    // frame while the aircraft creeps across the sky. A new selection turns at once.
+    static char followed[sizeof(s_selected)] = "";
+    const float off = fabsf(fmodf(b - s_yaw_target + 540.0f, 360.0f) - 180.0f);
+    if (strcmp(followed, s_selected) != 0 || off > 8.0f) {
+      memcpy(followed, s_selected, sizeof(followed));
+      s_yaw_target = b;
+    }
     return;
   }
 }
@@ -2743,7 +2747,12 @@ void drawFrame() {
       s_bg = static_cast<uint8_t*>(malloc(static_cast<size_t>(kW) * kH));  // large: lands in PSRAM
     }
     // Kept only once the camera has settled: while it turns every frame differs.
-    if (s_bg != nullptr && s_tiles_ok && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
+    // Kept only when the camera stood still since the previous frame too: saving costs
+    // a copy and a hash (~25 ms), wasted if it moves on in the next frame.
+    static BgKey prev_key;
+    const bool settled = memcmp(&bk, &prev_key, sizeof(bk)) == 0;
+    prev_key = bk;
+    if (s_bg != nullptr && s_tiles_ok && settled && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
       memcpy(s_bg, s_band_mem, static_cast<size_t>(kW) * kH);
       hashTiles(s_bg, s_bg_hash);
       s_bg_key = bk;
