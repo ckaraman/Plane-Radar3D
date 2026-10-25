@@ -385,7 +385,111 @@ void setFont(const lgfx::IFont* f) {
 }
 
 /** Text with a dark halo (top-left datum), readable over any background. */
+// ---------------------------------------------------------------- outlined blits
+//
+// Aircraft models and labels have a one-pixel dark outline. Drawing it as four
+// offset copies (4 x the triangles, 4 x the text) made the aircraft the slowest part
+// of a still frame. Instead each is drawn once into a small scratch buffer (0 =
+// empty) and copied to the frame, the outline added on the way (empty pixels next to
+// a drawn one).
+uint8_t* scratchBuf(size_t bytes) {
+  static uint8_t* buf = nullptr;
+  static size_t cap = 0;
+  if (cap < bytes) {
+    free(buf);
+#if defined(RADAR3D_HOST_TEST)
+    buf = static_cast<uint8_t*>(malloc(bytes));
+#else
+    buf = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM));
+#endif
+    cap = buf ? bytes : 0;
+  }
+  return buf;
+}
+
+/** Copy a w x h scratch image (stride w) to the frame at (x, y), outlining it in kBg.
+ *  The scratch has a one-pixel empty border for the outline. */
+void blitOutlined(const uint8_t* src, int w, int h, int x, int y, int clip_top) {
+  uint8_t* frame = s_band_mem;
+  for (int r = 0; r < h; ++r) {
+    const int fy = y + r;
+    if (fy < clip_top || fy >= kH) continue;
+    const uint8_t* row = src + r * w;
+    const uint8_t* up = r > 0 ? row - w : nullptr;
+    const uint8_t* dn = r + 1 < h ? row + w : nullptr;
+    uint8_t* out = frame + static_cast<size_t>(fy) * kW;
+    const int c0 = std::max(0, -x), c1 = std::min(w, kW - x);
+    for (int c = c0; c < c1; ++c) {
+      const uint8_t v = row[c];
+      if (v) {
+        out[x + c] = v;
+      } else if ((c > 0 && row[c - 1]) || (c + 1 < w && row[c + 1]) || (up && up[c]) || (dn && dn[c])) {
+        out[x + c] = kBg;
+      }
+    }
+  }
+}
+
+/** Filled triangle into a scratch buffer (inclusive spans, like LovyanGFX's). */
+void scratchTriangle(uint8_t* buf, int w, int h, int x0, int y0, int x1, int y1, int x2, int y2, uint8_t col) {
+  if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); }
+  if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); }
+  if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); }
+  auto span = [&](int y, int a, int b) {
+    if (y < 0 || y >= h) return;
+    if (a > b) std::swap(a, b);
+    a = std::max(a, 0);
+    b = std::min(b, w - 1);
+    if (a <= b) memset(buf + y * w + a, col, b - a + 1);
+  };
+  if (y0 == y2) {
+    span(y0, std::min({x0, x1, x2}), std::max({x0, x1, x2}));
+    return;
+  }
+  for (int y = y0; y <= y2; ++y) {
+    const int xa = x0 + (x2 - x0) * (y - y0) / (y2 - y0);
+    int xb;
+    if (y < y1 || (y == y1 && y1 == y0)) {
+      xb = y1 == y0 ? x1 : x0 + (x1 - x0) * (y - y0) / (y1 - y0);
+    } else {
+      xb = y2 == y1 ? x2 : x1 + (x2 - x1) * (y - y1) / (y2 - y1);
+    }
+    span(y, xa, xb);
+  }
+}
+
+LGFX_Sprite s_txt;  // scratch for one line of label text (palette index 1 on 0)
+bool s_txt_ok = false;
+
 void haloText(const char* t, int x, int y, uint8_t color) {
+  const int tw = s_spr.textWidth(t), th = s_spr.fontHeight();
+  if (!s_txt_ok) {
+    s_txt.setColorDepth(8);
+    s_txt.setPsram(true);
+    s_txt_ok = s_txt.createSprite(kW / 2, S(40)) != nullptr;
+    if (s_txt_ok) s_txt.createPalette();
+  }
+  if (s_txt_ok && tw + 2 <= s_txt.width() && th + 2 <= s_txt.height() && tw > 0) {
+    s_txt.setFont(s_spr.getFont());
+    s_txt.setTextSize(1);
+    s_txt.setTextDatum(textdatum_t::top_left);
+    s_txt.fillRect(0, 0, tw + 2, th + 2, 0);
+    s_txt.setTextColor(1);
+    s_txt.drawString(t, 1, 1);
+    // Scratch rows are s_txt.width() apart: copy the used part into a packed block.
+    const int w = tw + 2, h = th + 2;
+    uint8_t* sb = scratchBuf(static_cast<size_t>(w) * h);
+    if (sb != nullptr) {
+      const uint8_t* src = static_cast<const uint8_t*>(s_txt.getBuffer());
+      for (int r = 0; r < h; ++r) {
+        const uint8_t* in = src + r * s_txt.width();
+        uint8_t* o = sb + r * w;
+        for (int c = 0; c < w; ++c) o[c] = in[c] ? color : 0;
+      }
+      blitOutlined(sb, w, h, x - 1, y - 1, 0);
+      return;
+    }
+  }
   s_spr.setTextDatum(textdatum_t::top_left);
   s_spr.setTextColor(kBg);
   s_spr.drawString(t, x - 1, y);
@@ -1248,6 +1352,7 @@ void drawRelief(uint8_t* buf, int y0, int y1) {
 }
 
 bool s_rebuilt = false;  // drawSurface re-projected the ground this frame (camera moved)
+uint32_t s_gt[3];        // us in drawSurface: re-projection, relief, everything else (log)
 
 /**
  * Background, land, terrain, sea and lakes: everything on the ground below the map
@@ -1267,6 +1372,7 @@ void drawSurface(const Cam& c) {
       key.lon != s_sea_key.lon) {
     s_sea_key = key;
     s_rebuilt = true;
+    const uint32_t t0 = micros();
     buildDiscSpans(c);
     const bool sea_ok = buildRings(c, 2, false, &s_sea);
     const bool lakes_ok = buildRings(c, 3, true, &s_lakes);
@@ -1274,7 +1380,10 @@ void drawSurface(const Cam& c) {
     // A fill that could not get its memory is retried on the next frame instead of
     // staying missing until the camera moves again.
     if (!sea_ok || !lakes_ok) s_sea_key.gen = 0xFFFFFFFFu;
+    s_gt[0] += micros() - t0;
   }
+  const uint32_t t_bands = micros();
+  uint32_t t_relief = 0;
   if (!s_gband_tried) {
     s_gband_tried = true;
 #if defined(RADAR3D_HOST_TEST)
@@ -1306,13 +1415,17 @@ void drawSurface(const Cam& c) {
         memset(band + static_cast<size_t>(y - y0) * kW + s_disc_l[y], kLand, s_disc_r[y] - s_disc_l[y] + 1);
       }
     }
+    const uint32_t tr = micros();
     drawRelief(band - static_cast<ptrdiff_t>(y0) * kW, y0, y1);
+    t_relief += micros() - tr;
     fillRows(s_fill_sea, y1, band, y0);
     fillRows(s_fill_lake, y1, band, y0);
     if (s_gband != nullptr) memcpy(s_band_mem + static_cast<size_t>(y0) * kW, band, static_cast<size_t>(y1 - y0) * kW);
   }
   s_band_y0 = 0;
   s_band_y1 = kH;
+  s_gt[1] += t_relief;
+  s_gt[2] += micros() - t_bands - t_relief;
 }
 
 // Projected map points, kept while the camera stays put (re-projecting every point
@@ -1675,7 +1788,42 @@ void drawPlaneModel(const Cam& c, const services::adsb::Aircraft& a, float sx, f
     order[i] = static_cast<uint8_t>(i);
   }
   std::sort(order, order + s_mesh_nf, [](uint8_t l, uint8_t r) { return fdepth[l] < fdepth[r]; });
-  for (int o = 0; o < 4; ++o) {  // outline
+  const uint8_t col0 = altitudeColor(a.alt_ft);
+  const int ramp0 = kPlaneBase + (col0 == kOrange ? 0 : col0 == kCream ? 1 : 2) * kPlaneShades;
+  {  // drawn once into a scratch buffer, outlined on the copy to the frame
+    int x0 = INT16_MAX, y0 = INT16_MAX, x1 = INT16_MIN, y1 = INT16_MIN;
+    for (int i = 0; i < s_mesh_nv; ++i) {
+      x0 = std::min<int>(x0, px[i]); x1 = std::max<int>(x1, px[i]);
+      y0 = std::min<int>(y0, py[i]); y1 = std::max<int>(y1, py[i]);
+    }
+    const int w = x1 - x0 + 3, h = y1 - y0 + 3;  // one empty pixel all round
+    uint8_t* sb = (w > 0 && h > 0 && w <= 400 && h <= 400) ? scratchBuf(static_cast<size_t>(w) * h) : nullptr;
+    if (sb != nullptr) {
+      memset(sb, 0, static_cast<size_t>(w) * h);
+      const int ox = 1 - x0, oy = 1 - y0;
+      for (int n = 0; n < s_mesh_nf; ++n) {
+        const Face& fc = s_mesh_f[order[n]];
+        const V3 &A = vv[fc.a], &B = vv[fc.b], &C = vv[fc.c];
+        const float ux = B.x - A.x, uy = B.y - A.y, uz = B.z - A.z;
+        const float qx = C.x - A.x, qy = C.y - A.y, qz = C.z - A.z;
+        float nx = uy * qz - uz * qy, ny = uz * qx - ux * qz, nz = ux * qy - uy * qx;
+        const float len = sqrtf(nx * nx + ny * ny + nz * nz);
+        if (len <= 0) continue;
+        nx /= len; ny /= len; nz /= len;
+        if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        float lit = 0.42f + 0.58f * std::max(0.0f, nx * lx + ny * ly + nz * lz);
+        if (fc.part == 3) lit *= 0.7f;
+        if (fc.part == 2) lit *= 0.93f;
+        int j = static_cast<int>(lroundf((lit - 0.32f) / 0.78f * (kPlaneShades - 1)));
+        j = std::max(0, std::min(kPlaneShades - 1, j));
+        scratchTriangle(sb, w, h, px[fc.a] + ox, py[fc.a] + oy, px[fc.b] + ox, py[fc.b] + oy,
+                        px[fc.c] + ox, py[fc.c] + oy, static_cast<uint8_t>(ramp0 + j));
+      }
+      blitOutlined(sb, w, h, x0 - 1, y0 - 1, 0);
+      return;
+    }
+  }
+  for (int o = 0; o < 4; ++o) {  // outline (fallback: no scratch memory)
     const int ox = o == 0 ? -1 : o == 1 ? 1 : 0, oy = o == 2 ? -1 : o == 3 ? 1 : 0;
     for (int i = 0; i < s_mesh_nf; ++i) {
       const Face& fc = s_mesh_f[i];
@@ -2824,16 +2972,19 @@ void drawFrame() {
         const uint32_t nc = std::max<uint32_t>(1, n_cached);
         Serial.printf("radar3d: %.1f fps; still %lu/%lu frames (camera moving %lu); "
                       "drawn frames ms: ground %lu, lines %lu, bg-save %lu | still frames ms: restore %lu | "
-                      "all ms: aircraft %lu, ui %lu, hash %lu, push %lu (%lu tiles of %d)\n",
+                      "all ms: aircraft %lu, ui %lu, hash %lu, push %lu (%lu tiles of %d) | "
+                      "ground split ms: reproject %lu, relief %lu, fill %lu\n",
                       n * 1000.0f / (millis() - t0), (unsigned long)n_cached, (unsigned long)n,
                       (unsigned long)n_moving, st[0] / nd / 1000, st[1] / nd / 1000, st[2] / nd / 1000,
                       st[3] / nc / 1000, st[4] / n / 1000, st[5] / n / 1000, st[6] / n / 1000,
-                      st[7] / n / 1000, (unsigned long)(n_tiles / n), kTiles);
+                      st[7] / n / 1000, (unsigned long)(n_tiles / n), kTiles,
+                      s_gt[0] / std::max<uint32_t>(1, n_moving) / 1000, s_gt[1] / nd / 1000, s_gt[2] / nd / 1000);
       }
       t0 = millis();
       for (auto& v : st) v = 0;
       n = 0;
       n_cached = n_moving = n_tiles = 0;
+      s_gt[0] = s_gt[1] = s_gt[2] = 0;
     }
   }
 }
