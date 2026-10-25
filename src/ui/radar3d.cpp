@@ -4,6 +4,11 @@
 #include <lgfx/v1/lgfx_fonts.hpp>
 #if !defined(RADAR3D_HOST_TEST)
 #include <esp_heap_caps.h>
+#if !defined(RADAR3D_HOST_TEST)
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+#endif
 #endif
 
 #include <algorithm>
@@ -929,9 +934,11 @@ struct FillState {
   size_t ne = 0, next = 0;
   int na = 0, y = 0;
   uint16_t active[256];
+  uint16_t fillpos[kH + 1];  // scratch while sorting (per fill: both cores set up fills)
   uint8_t color = 0;
 };
 FillState s_fill_sea, s_fill_lake;
+FillState s_fill_sea2, s_fill_lake2;  // the second core's share
 
 void fillBegin(FillState& st, const RingSet& set, uint8_t color) {
   st.ne = 0;
@@ -980,12 +987,27 @@ void fillBegin(FillState& st, const RingSet& set, uint8_t color) {
   {  // bucket start offsets, then place the edges
     uint16_t sum = 0;
     for (int y = 0; y <= kH; ++y) { const uint16_t c = st.bucket[y]; st.bucket[y] = sum; sum += c; }
-    static uint16_t fillpos[kH + 1];
-    memcpy(fillpos, st.bucket, sizeof(fillpos));
-    for (size_t e = 0; e < ne; ++e) st.order[fillpos[st.edges[e].r0]++] = static_cast<uint16_t>(e);
+    memcpy(st.fillpos, st.bucket, sizeof(st.fillpos));
+    for (size_t e = 0; e < ne; ++e) st.order[st.fillpos[st.edges[e].r0]++] = static_cast<uint16_t>(e);
   }
   st.ne = ne;
   st.next = st.bucket[kTopBarH];
+}
+
+/** As fillBegin, but ready to fill from row ystart on (edges already under way are
+ *  advanced to it): the second core starts its share of the ground in mid screen. */
+void fillBeginAt(FillState& st, const RingSet& set, uint8_t color, int ystart) {
+  fillBegin(st, set, color);
+  if (st.ne < 2 || ystart <= kTopBarH) return;
+  st.na = 0;
+  for (size_t k = 0; k < st.bucket[std::min(ystart, kH)]; ++k) {
+    FillEdge& e = st.edges[st.order[k]];
+    if (e.r1 < ystart) continue;  // finished above
+    e.x += (ystart - e.r0) * e.dx;
+    if (st.na < 256) st.active[st.na++] = st.order[k];
+  }
+  st.next = st.bucket[std::min(ystart, kH)];
+  st.y = ystart;
 }
 
 /** Fill rows st.y .. y_end - 1 into a band buffer whose first row is y0. */
@@ -1268,17 +1290,6 @@ void buildRelief(const Cam& c) {
   });
 }
 
-// While the camera turns, the relief shading is worked out for every second pixel
-// only (each value written twice); the frame drawn once it stops is full detail.
-bool s_relief_half = false;
-unsigned long s_follow_step_ms = 0;  // last follow step (see followSelected)
-bool s_bg_lowq = false;              // the cached static layer was drawn in reduced detail
-/** Camera in motion: turning, or following an aircraft whose steps come close together. */
-bool reducedDetail() {
-  if (fabsf(s_yaw_cur - s_yaw_target) > 0.01f) return true;
-  return s_follow && millis() - s_follow_step_ms < 700;
-}
-
 // 4x4 ordered-dither thresholds (0..15).
 constexpr uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
 
@@ -1287,74 +1298,105 @@ constexpr uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, 
  * frame: 16 shades x 8 elevation bands, a light ordered dither between neighbours so
  * no steps show.
  */
-void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u0, float x1, float y1,
-                   float s1, float e1, float u1, float x2, float y2, float s2, float e2, float u2) {
+/** ceil() for screen coordinates, without the library call (it was a large share of
+ *  the per-row cost). */
+inline int ceilToInt(float v) {
+  const int i = static_cast<int>(v);
+  return i + (v > static_cast<float>(i) ? 1 : 0);
+}
+
+/**
+ * One row of a relief triangle: shade, band and (with kCover) land cover stepped in
+ * fixed point. Four pixels per round, so the four dither thresholds of the row stay
+ * in registers.
+ */
+template <bool kCover>
+inline void shadeSpan(uint8_t* row, int xs, int xe, int y, int32_t sv, int32_t ev, int32_t uv, int32_t dsv,
+                      int32_t dev, int32_t duv) {
+  const uint8_t* bay = kBayer[y & 3];
+  const uint8_t* bay2 = kBayer[(y + 2) & 3];
+  const uint8_t* bay3 = kBayer[(y + 1) & 3];
+  auto px = [&](int x, int ts, int te, int tc) {
+    const int32_t s16 = std::min<int32_t>(15 * 16, std::max<int32_t>(0, sv >> 8));  // level * 16
+    const int32_t e16 = std::min<int32_t>(7 * 16, std::max<int32_t>(0, ev >> 8));
+    int sh = (s16 >> 4) + ((s16 & 15) > ts ? 1 : 0);
+    int bd = (e16 >> 4) + ((e16 & 15) > te ? 1 : 0);
+    sh = std::min(sh, 15);
+    bd = std::min(bd, 7);
+    uint8_t out = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
+    if (kCover) {  // land cover share (x16, + town, - forest) against the dither
+      int32_t cov = uv >> 12;
+      const bool forest = cov < 0;
+      if (forest) cov = -cov;
+      if (cov > tc) out = static_cast<uint8_t>((forest ? kForestBase : kUrbanBase) + (sh >> 1));
+    }
+    row[x] = out;
+    sv += dsv;
+    ev += dev;
+    if (kCover) uv += duv;
+  };
+  const int ts0 = bay[xs & 3], ts1 = bay[(xs + 1) & 3], ts2 = bay[(xs + 2) & 3], ts3 = bay[(xs + 3) & 3];
+  const int te0 = bay2[(xs + 1) & 3], te1 = bay2[(xs + 2) & 3], te2 = bay2[(xs + 3) & 3], te3 = bay2[xs & 3];
+  const int tc0 = bay3[(xs + 3) & 3], tc1 = bay3[xs & 3], tc2 = bay3[(xs + 1) & 3], tc3 = bay3[(xs + 2) & 3];
+  int x = xs;
+  for (; x + 3 <= xe; x += 4) {
+    px(x, ts0, te0, tc0);
+    px(x + 1, ts1, te1, tc1);
+    px(x + 2, ts2, te2, tc2);
+    px(x + 3, ts3, te3, tc3);
+  }
+  if (x <= xe) px(x, ts0, te0, tc0);
+  if (x + 1 <= xe) px(x + 1, ts1, te1, tc1);
+  if (x + 2 <= xe) px(x + 2, ts2, te2, tc2);
+}
+
+void shadeTriangle(uint8_t* buf, int clip_y0, int clip_y1, float x0, float y0, float s0, float e0, float u0,
+                   float x1, float y1, float s1, float e1, float u1, float x2, float y2, float s2, float e2,
+                   float u2) {
   if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); std::swap(s0, s1); std::swap(e0, e1); std::swap(u0, u1); }
   if (y2 < y0) { std::swap(x0, x2); std::swap(y0, y2); std::swap(s0, s2); std::swap(e0, e2); std::swap(u0, u2); }
   if (y2 < y1) { std::swap(x1, x2); std::swap(y1, y2); std::swap(s1, s2); std::swap(e1, e2); std::swap(u1, u2); }
   const bool urban = u0 != 0.0f || u1 != 0.0f || u2 != 0.0f;  // any land cover
   if (y2 - y0 < 0.5f) return;
-  const int ya = std::max(std::max(kTopBarH + 1, s_band_y0), static_cast<int>(ceilf(y0 - 0.5f)));
-  const int yb = std::min(s_band_y1 - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
+  const int ya = std::max(std::max(kTopBarH + 1, clip_y0), ceilToInt(y0 - 0.5f));
+  const int yb = std::min(clip_y1 - 1, ceilToInt(y2 - 0.5f) - 1);
   if (yb < ya) return;
-  const float inv02 = 1.0f / (y2 - y0);
-  const float inv01 = (y1 - y0) > 1e-3f ? 1.0f / (y1 - y0) : 0.0f;
-  const float inv12 = (y2 - y1) > 1e-3f ? 1.0f / (y2 - y1) : 0.0f;
-  // Reduced detail: even rows only; each band copies them down to the odd rows.
-  const int ystep = s_relief_half ? 2 : 1;
-  for (int y = s_relief_half ? (ya + (ya & 1)) : ya; y <= yb; y += ystep) {
-    const float yc = y + 0.5f;
-    const float t = (yc - y0) * inv02;
-    float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0), ea = e0 + t * (e2 - e0), ua = u0 + t * (u2 - u0);
-    float xb, sb, eb, ub;
-    if (yc < y1) {
-      const float u = (y1 - y0) > 1e-3f ? (yc - y0) * inv01 : 1.0f;
-      xb = x0 + u * (x1 - x0); sb = s0 + u * (s1 - s0); eb = e0 + u * (e1 - e0); ub = u0 + u * (u1 - u0);
-    } else {
-      const float u = (y2 - y1) > 1e-3f ? (yc - y1) * inv12 : 0.0f;
-      xb = x1 + u * (x2 - x1); sb = s1 + u * (s2 - s1); eb = e1 + u * (e2 - e1); ub = u1 + u * (u2 - u1);
-    }
-    if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); std::swap(ea, eb); std::swap(ua, ub); }
+  // Shade, band and cover are linear over the triangle: their steps along x and y are
+  // worked out once here (one division), so each row costs a few multiply-adds instead
+  // of the three divisions and four library calls it took before.
+  const float ex1 = x1 - x0, ey1 = y1 - y0, ex2 = x2 - x0, ey2 = y2 - y0;
+  const float den = ex1 * ey2 - ex2 * ey1;
+  if (fabsf(den) < 1e-6f) return;  // no area
+  const float id = 1.0f / den;
+  const float dsdx = ((s1 - s0) * ey2 - (s2 - s0) * ey1) * id, dsdy = ((s2 - s0) * ex1 - (s1 - s0) * ex2) * id;
+  const float dedx = ((e1 - e0) * ey2 - (e2 - e0) * ey1) * id, dedy = ((e2 - e0) * ex1 - (e1 - e0) * ex2) * id;
+  const float dudx = ((u1 - u0) * ey2 - (u2 - u0) * ey1) * id, dudy = ((u2 - u0) * ex1 - (u1 - u0) * ex2) * id;
+  // Fixed point (8.8, in 16ths of a level for the dither): the inner loop is integer
+  // only. Shade is clamped to 0..15, band to 0..7.
+  const int32_t dsv = static_cast<int32_t>(dsdx * 4096.0f), dev = static_cast<int32_t>(dedx * 4096.0f);
+  const int32_t duv = static_cast<int32_t>(dudx * 4096.0f * 16.0f);
+  const float k02 = ex2 / ey2;
+  const bool flat01 = !(ey1 > 1e-3f), flat12 = !((y2 - y1) > 1e-3f);
+  const float k01 = flat01 ? 0.0f : ex1 / ey1;
+  const float k12 = flat12 ? 0.0f : (x2 - x1) / (y2 - y1);
+  for (int y = ya; y <= yb; ++y) {
+    const float yc = y + 0.5f, py = yc - y0;
+    float xa = x0 + py * k02;
+    float xb = yc < y1 ? (flat01 ? x1 : x0 + py * k01) : (flat12 ? x1 : x1 + (yc - y1) * k12);
+    if (xb < xa) std::swap(xa, xb);
     // Clipped to the disc, so the relief ends on its smooth rim, not on cell edges.
-    const int xs = std::max<int>(s_disc_l[y], static_cast<int>(ceilf(xa - 0.5f)));
-    const int xe = std::min<int>(s_disc_r[y], static_cast<int>(ceilf(xb - 0.5f)) - 1);
+    const int xs = std::max<int>(s_disc_l[y], ceilToInt(xa - 0.5f));
+    const int xe = std::min<int>(s_disc_r[y], ceilToInt(xb - 0.5f) - 1);
     if (xe < xs) continue;
-    const float inv = (xb - xa) > 1e-3f ? 1.0f / (xb - xa) : 0.0f;
-    const float ds = (sb - sa) * inv, de = (eb - ea) * inv;
-    const float sv0 = sa + (xs + 0.5f - xa) * ds, ev0 = ea + (xs + 0.5f - xa) * de;
-    const float du = (ub - ua) * inv, uv0 = ua + (xs + 0.5f - xa) * du;
-    // Fixed point (8.8, in 16ths of a level for the dither): the inner loop is integer
-    // only. Shade is clamped to 0..15, band to 0..7.
-    int32_t sv = static_cast<int32_t>(sv0 * 4096.0f), ev = static_cast<int32_t>(ev0 * 4096.0f);
-    const int32_t dsv = static_cast<int32_t>(ds * 4096.0f), dev = static_cast<int32_t>(de * 4096.0f);
-    const uint8_t* bay = kBayer[y & 3];
-    const uint8_t* bay2 = kBayer[(y + 2) & 3];
+    const float px = xs + 0.5f - x0;
+    int32_t sv = static_cast<int32_t>((s0 + px * dsdx + py * dsdy) * 4096.0f);
+    int32_t ev = static_cast<int32_t>((e0 + px * dedx + py * dedy) * 4096.0f);
+    int32_t uv = static_cast<int32_t>((u0 + px * dudx + py * dudy) * 4096.0f * 16.0f);
     uint8_t* row = buf + y * kW;
-    int32_t uv = static_cast<int32_t>(uv0 * 4096.0f * 16.0f), duv = static_cast<int32_t>(du * 4096.0f * 16.0f);
-    // Half detail: pairs of pixels start on even screen columns (the same columns in
-    // every row and frame), so the coarser shading does not crawl as the view turns.
-    const bool half = s_relief_half;
-    for (int x = xs, adv = 1; x <= xe; x += adv, sv += dsv * adv, ev += dev * adv, uv += duv * adv) {
-      adv = (half && !(x & 1) && x < xe) ? 2 : 1;
-      const int xd = half ? (x & ~1) : x;  // dither by pixel pair in reduced detail
-      int32_t s16 = sv >> 8, e16 = ev >> 8;  // level * 16
-      s16 = s16 < 0 ? 0 : (s16 > 15 * 16 ? 15 * 16 : s16);
-      e16 = e16 < 0 ? 0 : (e16 > 7 * 16 ? 7 * 16 : e16);
-      int sh = s16 >> 4, bd = e16 >> 4;
-      if ((s16 & 15) > bay[xd & 3]) ++sh;
-      if ((e16 & 15) > bay2[(xd + 1) & 3]) ++bd;
-      if (sh > 15) sh = 15;
-      if (bd > 7) bd = 7;
-      // Land cover share (x16 here, + town, - forest) against the dither: tint or terrain.
-      int32_t cov = urban ? (uv >> 12) : 0;
-      const bool forest = cov < 0;
-      if (forest) cov = -cov;
-      if (cov > kBayer[(y + 1) & 3][(xd + 3) & 3]) {
-        row[x] = static_cast<uint8_t>((forest ? kForestBase : kUrbanBase) + (sh >> 1));
-      } else {
-        row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
-      }
-      if (adv == 2) row[x + 1] = row[x];
+    if (urban) {
+      shadeSpan<true>(row, xs, xe, y, sv, ev, uv, dsv, dev, duv);
+    } else {
+      shadeSpan<false>(row, xs, xe, y, sv, ev, uv, dsv, dev, duv);
     }
   }
 }
@@ -1363,8 +1405,6 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
 void drawRelief(uint8_t* buf, int y0, int y1) {
   constexpr int N = kReliefN;
   if (buf == nullptr) return;
-  s_band_y0 = y0;
-  s_band_y1 = y1;
   constexpr float kShadeScale = 16.0f / 256.0f;  // 128 (flat) -> shade 8
   constexpr float kElevScale = 7.0f / 255.0f;
   for (uint16_t n = 0; n < s_rc_count; ++n) {
@@ -1379,9 +1419,9 @@ void drawRelief(uint8_t* buf, int y0, int y1) {
     constexpr float kU = 1.0f / 127.0f;
     const float u0 = s_rv_urban[k00] * kU, u1 = s_rv_urban[k10] * kU, u2 = s_rv_urban[k11] * kU,
                 u3 = s_rv_urban[k01] * kU;
-    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, u0, s_rv_x[k10], s_rv_y[k10], a1, e1, u1,
+    shadeTriangle(buf, y0, y1, s_rv_x[k00], s_rv_y[k00], a0, e0, u0, s_rv_x[k10], s_rv_y[k10], a1, e1, u1,
                   s_rv_x[k11], s_rv_y[k11], a2, e2, u2);
-    shadeTriangle(buf, s_rv_x[k00], s_rv_y[k00], a0, e0, u0, s_rv_x[k11], s_rv_y[k11], a2, e2, u2,
+    shadeTriangle(buf, y0, y1, s_rv_x[k00], s_rv_y[k00], a0, e0, u0, s_rv_x[k11], s_rv_y[k11], a2, e2, u2,
                   s_rv_x[k01], s_rv_y[k01], a3, e3, u3);
   }
 }
@@ -1389,15 +1429,99 @@ void drawRelief(uint8_t* buf, int y0, int y1) {
 bool s_rebuilt = false;  // drawSurface re-projected the ground this frame (camera moved)
 uint32_t s_gt[3];        // us in drawSurface: re-projection, relief, everything else (log)
 
+constexpr int kGroundBandH = 16;
+uint8_t* s_gband = nullptr;
+bool s_gband_tried = false;
+
+/** Ground rows [ya, yb) (band aligned) through a band buffer; returns us in the relief. */
+uint32_t drawGroundRows(int ya, int yb, int hy, uint8_t* bandbuf, FillState& sea, FillState& lake) {
+  uint32_t t_relief = 0;
+  for (int y0 = ya; y0 < yb; y0 += kGroundBandH) {
+    const int y1 = std::min(yb, y0 + kGroundBandH);
+    uint8_t* band = bandbuf != nullptr ? bandbuf : s_band_mem + static_cast<size_t>(y0) * kW;
+    memset(band, kBg, static_cast<size_t>(y1 - y0) * kW);
+    if (hy >= y0 && hy < y1) memset(band + static_cast<size_t>(hy - y0) * kW, kRingDim, kW);
+    for (int y = std::max(y0, kTopBarH); y < y1; ++y) {  // flat land
+      if (s_disc_l[y] <= s_disc_r[y]) {
+        memset(band + static_cast<size_t>(y - y0) * kW + s_disc_l[y], kLand, s_disc_r[y] - s_disc_l[y] + 1);
+      }
+    }
+    const uint32_t tr = micros();
+    drawRelief(band - static_cast<ptrdiff_t>(y0) * kW, y0, y1);
+    t_relief += micros() - tr;
+    fillRows(sea, y1, band, y0);
+    fillRows(lake, y1, band, y0);
+    if (bandbuf != nullptr) memcpy(s_band_mem + static_cast<size_t>(y0) * kW, band, static_cast<size_t>(y1 - y0) * kW);
+  }
+  return t_relief;
+}
+
+// ---------------------------------------------------------------- second core
+uint8_t* s_gband2 = nullptr;
+float s_split_frac = 0.35f;
+struct GroundJob {
+  int ya, yb, hy;
+  uint32_t us;
+};
+GroundJob s_job;
+void groundJobRun() {
+  const uint32_t t = micros();
+  fillBegin(s_fill_sea2, s_sea, kSea);
+  fillBegin(s_fill_lake2, s_lakes, kSea);
+  drawGroundRows(s_job.ya, s_job.yb, s_job.hy, s_gband2, s_fill_sea2, s_fill_lake2);
+  s_job.us = micros() - t;
+}
+#if defined(RADAR3D_HOST_TEST)
+// Host preview: the second core's share is drawn when it is waited for.
+bool groundWorkerReady() {
+  if (!s_gband2) s_gband2 = static_cast<uint8_t*>(malloc(static_cast<size_t>(kW) * kGroundBandH));
+  return s_gband2 != nullptr;
+}
+void groundWorkerStart(int ya, int yb, int hy) { s_job = {ya, yb, hy, 0}; }
+uint32_t groundWorkerWait() {
+  groundJobRun();
+  return s_job.us;
+}
+#else
+SemaphoreHandle_t s_job_go = nullptr, s_job_done = nullptr;
+bool s_worker_tried = false, s_worker_ok = false;
+void groundWorkerTask(void*) {
+  for (;;) {
+    xSemaphoreTake(s_job_go, portMAX_DELAY);
+    groundJobRun();
+    xSemaphoreGive(s_job_done);
+  }
+}
+bool groundWorkerReady() {
+  if (!s_worker_tried) {
+    s_worker_tried = true;
+    // Its band buffer lives in PSRAM (small enough to stay in the cache): internal RAM
+    // is kept for the network.
+    s_gband2 = static_cast<uint8_t*>(heap_caps_malloc(static_cast<size_t>(kW) * kGroundBandH, MALLOC_CAP_SPIRAM));
+    s_job_go = xSemaphoreCreateBinary();
+    s_job_done = xSemaphoreCreateBinary();
+    s_worker_ok = s_gband2 && s_job_go && s_job_done &&
+                  xTaskCreatePinnedToCore(groundWorkerTask, "ground", 6144, nullptr, 3, nullptr, 0) == pdPASS;
+    Serial.printf("radar3d: second-core ground drawing %s\n", s_worker_ok ? "on" : "off");
+  }
+  return s_worker_ok;
+}
+void groundWorkerStart(int ya, int yb, int hy) {
+  s_job = {ya, yb, hy, 0};
+  xSemaphoreGive(s_job_go);
+}
+uint32_t groundWorkerWait() {
+  xSemaphoreTake(s_job_done, portMAX_DELAY);
+  return s_job.us;
+}
+#endif
+
 /**
  * Background, land, terrain, sea and lakes: everything on the ground below the map
  * lines. Drawn band by band into a small buffer in internal RAM and copied out once
  * per band: drawing the many small relief triangles straight into the PSRAM frame
  * kept reloading cache lines and cost ~140 ms per frame.
  */
-constexpr int kGroundBandH = 16;
-uint8_t* s_gband = nullptr;
-bool s_gband_tried = false;
 
 void drawSurface(const Cam& c) {
   const SeaKey key{services::map::generation(), services::terrain::generation(), s_yaw_cur, c.R,
@@ -1419,7 +1543,6 @@ void drawSurface(const Cam& c) {
   }
   const uint32_t t_bands = micros();
   uint32_t t_relief = 0;
-  s_relief_half = reducedDetail();
   if (!s_gband_tried) {
     s_gband_tried = true;
 #if defined(RADAR3D_HOST_TEST)
@@ -1439,33 +1562,33 @@ void drawSurface(const Cam& c) {
       s_disc_bottom = std::max(s_disc_bottom, y);
     }
   }
-  fillBegin(s_fill_sea, s_sea, kSea);  // over the relief: the map's coastline cuts it cleanly
-  fillBegin(s_fill_lake, s_lakes, kSea);
-  for (int y0 = 0; y0 < kH; y0 += kGroundBandH) {
-    const int y1 = std::min(kH, y0 + kGroundBandH);
-    uint8_t* band = s_gband != nullptr ? s_gband : s_band_mem + static_cast<size_t>(y0) * kW;
-    memset(band, kBg, static_cast<size_t>(y1 - y0) * kW);
-    if (hy >= y0 && hy < y1) memset(band + static_cast<size_t>(hy - y0) * kW, kRingDim, kW);
-    for (int y = std::max(y0, kTopBarH); y < y1; ++y) {  // flat land
-      if (s_disc_l[y] <= s_disc_r[y]) {
-        memset(band + static_cast<size_t>(y - y0) * kW + s_disc_l[y], kLand, s_disc_r[y] - s_disc_l[y] + 1);
-      }
-    }
-    const uint32_t tr = micros();
-    drawRelief(band - static_cast<ptrdiff_t>(y0) * kW, y0, y1);
-    if (s_relief_half && s_rc_count > 0) {  // odd rows: copy of the row above (land + relief)
-      for (int y = std::max(y0 + 1, kTopBarH + 1) | 1; y < y1; y += 2) {
-        if (s_disc_l[y] > s_disc_r[y] || s_disc_l[y - 1] > s_disc_r[y - 1]) continue;
-        const int xa = std::max(s_disc_l[y], s_disc_l[y - 1]), xb = std::min(s_disc_r[y], s_disc_r[y - 1]);
-        if (xb >= xa) {
-          memcpy(band + static_cast<size_t>(y - y0) * kW + xa, band + static_cast<size_t>(y - 1 - y0) * kW + xa, xb - xa + 1);
-        }
-      }
-    }
-    t_relief += micros() - tr;
-    fillRows(s_fill_sea, y1, band, y0);
-    fillRows(s_fill_lake, y1, band, y0);
-    if (s_gband != nullptr) memcpy(s_band_mem + static_cast<size_t>(y0) * kW, band, static_cast<size_t>(y1 - y0) * kW);
+  // Split between the two cores: the second core (which also refills the panel's
+  // bounce buffers) takes the rows from the top down to y_split, this core the rest.
+  // The split follows the measured times of both so they finish together.
+  int y_split = kTopBarH;
+  if (groundWorkerReady()) {
+    int64_t total = 0;
+    for (int y = kTopBarH; y < kH; ++y) if (s_disc_l[y] <= s_disc_r[y]) total += s_disc_r[y] - s_disc_l[y] + 1;
+    int64_t acc = 0;
+    const int64_t want = static_cast<int64_t>(total * s_split_frac);
+    int y = kTopBarH;
+    for (; y < kH && acc < want; ++y) if (s_disc_l[y] <= s_disc_r[y]) acc += s_disc_r[y] - s_disc_l[y] + 1;
+    y_split = std::min(kH, (y + kGroundBandH - 1) / kGroundBandH * kGroundBandH);  // band aligned
+  }
+  if (y_split > kTopBarH) {
+    groundWorkerStart(0, y_split, hy);
+    fillBeginAt(s_fill_sea, s_sea, kSea, y_split);  // over the relief: the map's coastline cuts it cleanly
+    fillBeginAt(s_fill_lake, s_lakes, kSea, y_split);
+    t_relief = drawGroundRows(y_split, kH, hy, s_gband, s_fill_sea, s_fill_lake);
+    const uint32_t main_us = micros() - t_bands;
+    const uint32_t worker_us = groundWorkerWait();
+    // Move the split towards equal times (small steps, so it settles without hunting).
+    if (worker_us > main_us + main_us / 10) s_split_frac = std::max(0.05f, s_split_frac - 0.02f);
+    else if (worker_us + worker_us / 10 < main_us) s_split_frac = std::min(0.7f, s_split_frac + 0.02f);
+  } else {
+    fillBegin(s_fill_sea, s_sea, kSea);
+    fillBegin(s_fill_lake, s_lakes, kSea);
+    t_relief = drawGroundRows(0, kH, hy, s_gband, s_fill_sea, s_fill_lake);
   }
   s_band_y0 = 0;
   s_band_y1 = kH;
@@ -2518,10 +2641,7 @@ void followSelected(size_t count, unsigned long fetched_ms) {
     // once: it reads as a smooth follow, and between steps the camera stands still so
     // the frames come from the cached ground instead of being redrawn every time.
     const float off = fabsf(fmodf(b - s_yaw_target + 540.0f, 360.0f) - 180.0f);
-    if (off >= 0.3f) {
-      s_yaw_target = b;
-      s_follow_step_ms = millis();
-    }
+    if (off >= 0.3f) s_yaw_target = b;
     return;
   }
 }
@@ -2920,9 +3040,6 @@ void drawFrame() {
   selectBand(0);
   uint32_t t = micros();
   const BgKey bk = bgKeyFor(c);
-  // A static layer kept in reduced detail is redrawn in full once the camera has
-  // really settled.
-  if (s_bg_valid && s_bg_lowq && !reducedDetail()) s_bg_valid = false;
   const bool same = s_bg_valid && memcmp(&bk, &s_bg_key, sizeof(bk)) == 0;
   if (same) {
 #if defined(RADAR3D_NO_RESTORE)
@@ -2957,7 +3074,6 @@ void drawFrame() {
       hashTiles(s_bg, s_bg_hash);
       s_bg_key = bk;
       s_bg_valid = true;
-      s_bg_lowq = s_relief_half;
     } else {
       s_bg_valid = false;
     }

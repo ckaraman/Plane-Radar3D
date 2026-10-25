@@ -57,7 +57,7 @@ Ekrana 1,5 sn basılı tutunca açılır: Ekranı 180° çevir, Uçak etiketleri
   - Kamera dururken zemin, harita, halkalar ve simgeler ayrı bir tamponda saklanır; her karede yalnızca uçakların ve yazıların değiştirdiği bölgeler geri yüklenir.
   - Ekran 32×24 piksellik parçalara bölünür; yalnızca değişen parçalar ekran tamponuna yazılır.
   - Zemin 16 satırlık şeritler halinde hızlı iç bellekte çizilir.
-  - Kamera dönerken arazi gölgelemesi yarım yatay ayrıntıyla hesaplanır; durunca tam ayrıntıyla yeniden çizilir.
+  - Zemin iki çekirdekte birlikte çizilir (üst kısmı ikinci çekirdek); paylaşım ölçülen sürelere göre kendiliğinden ayarlanır. Görüntü kalitesi hareket sırasında da düşmez.
 - Seri logda 30 saniyede bir `radar3d:` satırı: kare hızı, sabit/dönen kare sayısı, aşama süreleri (zemin, çizgiler, uçaklar, arayüz, aktarım), panel tazeleme hızı.
 - Panel zamanlaması: 800×480 için Waveshare'in kendi değerleri (16 MHz), 1024×600 için 14 MHz. Ayar: `include/hardware/lgfx_config.hpp`.
 - Kartta BOOT tuşu kısayolu yok (GPIO0 ekran veri hattı).
