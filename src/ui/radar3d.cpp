@@ -738,18 +738,27 @@ void buildDiscSpans(const Cam& c) {
     px[i] = static_cast<int16_t>(ri(sx));
     py[i] = static_cast<int16_t>(ri(sy));
   }
-  for (int y = 0; y < kH; ++y) {
-    const float ys = y + 0.5f;
-    float lo = 1e9f, hi = -1e9f;
-    for (int i = 0; i < kSeg; ++i) {
-      const int j = (i + 1) % kSeg;
-      const float y0 = py[i], y1 = py[j];
-      if ((y0 <= ys) != (y1 <= ys)) {
-        const float x = px[i] + (ys - y0) * (px[j] - px[i]) / (y1 - y0);
-        lo = std::min(lo, x);
-        hi = std::max(hi, x);
-      }
+  // Each rim edge is walked over the rows it crosses (testing all 144 edges on all
+  // 480 rows took several ms on every camera move).
+  static float span_lo[kH], span_hi[kH];
+  for (int y = 0; y < kH; ++y) { span_lo[y] = 1e9f; span_hi[y] = -1e9f; }
+  for (int i = 0; i < kSeg; ++i) {
+    const int j = (i + 1) % kSeg;
+    float x0 = px[i], y0 = py[i], x1 = px[j], y1 = py[j];
+    if (y0 == y1) continue;
+    if (y1 < y0) { std::swap(x0, x1); std::swap(y0, y1); }
+    // rows whose centre lies in [y0, y1)
+    const int r0 = std::max(0, static_cast<int>(ceilf(y0 - 0.5f)));
+    const int r1 = std::min(kH - 1, static_cast<int>(ceilf(y1 - 0.5f)) - 1);
+    const float dx = (x1 - x0) / (y1 - y0);
+    for (int y = r0; y <= r1; ++y) {
+      const float x = x0 + (y + 0.5f - y0) * dx;
+      span_lo[y] = std::min(span_lo[y], x);
+      span_hi[y] = std::max(span_hi[y], x);
     }
+  }
+  for (int y = 0; y < kH; ++y) {
+    const float lo = span_lo[y], hi = span_hi[y];
     // Kept on screen: the disc's tips may run past the edges, and a span starting at a
     // negative x would write into the row before (or before the band buffer).
     s_disc_l[y] = lo > hi ? 1 : static_cast<int16_t>(std::max(0.0f, ceilf(lo)));
@@ -1238,6 +1247,10 @@ void buildRelief(const Cam& c) {
       auto gone = [&](int k) { return lowVertex(k) || (s_sea.count > 0 && seaVertex(k)); };
       const bool covered = s_rv_urban[k00] | s_rv_urban[k10] | s_rv_urban[k01] | s_rv_urban[k11];
       if (gone(k00) && gone(k10) && gone(k01) && gone(k11) && !covered) continue;
+      // Flat, low and bare everywhere: the cell would come out as the plain land fill
+      // underneath (band 0, middle shade; band 1 is within 2 % of it), so it is skipped.
+      auto plain = [&](int k) { return s_rv_shade[k] == 128 && s_rv_elev[k] < 36 && s_rv_urban[k] == 0; };
+      if (plain(k00) && plain(k10) && plain(k01) && plain(k11)) continue;
       if (s_rv_x[k00] == kOff || s_rv_x[k10] == kOff || s_rv_x[k01] == kOff || s_rv_x[k11] == kOff) continue;
       s_rc_order[s_rc_count++] = static_cast<uint16_t>(j * N + i);
       s_rc_ymin[j * N + i] = std::min(std::min(s_rv_y[k00], s_rv_y[k10]), std::min(s_rv_y[k01], s_rv_y[k11]));
@@ -1273,16 +1286,19 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
   const int ya = std::max(std::max(kTopBarH + 1, s_band_y0), static_cast<int>(ceilf(y0 - 0.5f)));
   const int yb = std::min(s_band_y1 - 1, static_cast<int>(ceilf(y2 - 0.5f)) - 1);
   if (yb < ya) return;
+  const float inv02 = 1.0f / (y2 - y0);
+  const float inv01 = (y1 - y0) > 1e-3f ? 1.0f / (y1 - y0) : 0.0f;
+  const float inv12 = (y2 - y1) > 1e-3f ? 1.0f / (y2 - y1) : 0.0f;
   for (int y = ya; y <= yb; ++y) {
     const float yc = y + 0.5f;
-    const float t = (yc - y0) / (y2 - y0);
+    const float t = (yc - y0) * inv02;
     float xa = x0 + t * (x2 - x0), sa = s0 + t * (s2 - s0), ea = e0 + t * (e2 - e0), ua = u0 + t * (u2 - u0);
     float xb, sb, eb, ub;
     if (yc < y1) {
-      const float u = (y1 - y0) > 1e-3f ? (yc - y0) / (y1 - y0) : 1.0f;
+      const float u = (y1 - y0) > 1e-3f ? (yc - y0) * inv01 : 1.0f;
       xb = x0 + u * (x1 - x0); sb = s0 + u * (s1 - s0); eb = e0 + u * (e1 - e0); ub = u0 + u * (u1 - u0);
     } else {
-      const float u = (y2 - y1) > 1e-3f ? (yc - y1) / (y2 - y1) : 0.0f;
+      const float u = (y2 - y1) > 1e-3f ? (yc - y1) * inv12 : 0.0f;
       xb = x1 + u * (x2 - x1); sb = s1 + u * (s2 - s1); eb = e1 + u * (e2 - e1); ub = u1 + u * (u2 - u1);
     }
     if (xb < xa) { std::swap(xa, xb); std::swap(sa, sb); std::swap(ea, eb); std::swap(ua, ub); }
@@ -2468,15 +2484,8 @@ void followSelected(size_t count, unsigned long fetched_ms) {
     // brings it to the front, between home and the viewer.
     float b = atan2f(x, y) / kDegToRad + 180.0f;
     if (b >= 360.0f) b -= 360.0f;
-    // Turn in steps of a few degrees: between steps the camera stands still and the
-    // ground comes from the cache (fast frames), instead of being redrawn on every
-    // frame while the aircraft creeps across the sky. A new selection turns at once.
-    static char followed[sizeof(s_selected)] = "";
-    const float off = fabsf(fmodf(b - s_yaw_target + 540.0f, 360.0f) - 180.0f);
-    if (strcmp(followed, s_selected) != 0 || off > 8.0f) {
-      memcpy(followed, s_selected, sizeof(followed));
-      s_yaw_target = b;
-    }
+    // Followed continuously (smooth), as the aircraft moves across the sky.
+    s_yaw_target = b;
     return;
   }
 }
