@@ -1268,6 +1268,10 @@ void buildRelief(const Cam& c) {
   });
 }
 
+// While the camera turns, the relief shading is worked out for every second pixel
+// only (each value written twice); the frame drawn once it stops is full detail.
+bool s_relief_half = false;
+
 // 4x4 ordered-dither thresholds (0..15).
 constexpr uint8_t kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
 
@@ -1318,7 +1322,9 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
     const uint8_t* bay2 = kBayer[(y + 2) & 3];
     uint8_t* row = buf + y * kW;
     int32_t uv = static_cast<int32_t>(uv0 * 4096.0f * 16.0f), duv = static_cast<int32_t>(du * 4096.0f * 16.0f);
-    for (int x = xs; x <= xe; ++x, sv += dsv, ev += dev, uv += duv) {
+    const int step = s_relief_half ? 2 : 1;
+    const int32_t dsv_s = dsv * step, dev_s = dev * step, duv_s = duv * step;
+    for (int x = xs; x <= xe; x += step, sv += dsv_s, ev += dev_s, uv += duv_s) {
       int32_t s16 = sv >> 8, e16 = ev >> 8;  // level * 16
       s16 = s16 < 0 ? 0 : (s16 > 15 * 16 ? 15 * 16 : s16);
       e16 = e16 < 0 ? 0 : (e16 > 7 * 16 ? 7 * 16 : e16);
@@ -1336,6 +1342,7 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
       } else {
         row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
       }
+      if (step == 2 && x < xe) row[x + 1] = row[x];
     }
   }
 }
@@ -1400,6 +1407,7 @@ void drawSurface(const Cam& c) {
   }
   const uint32_t t_bands = micros();
   uint32_t t_relief = 0;
+  s_relief_half = fabsf(s_yaw_cur - s_yaw_target) > 0.01f;  // still turning
   if (!s_gband_tried) {
     s_gband_tried = true;
 #if defined(RADAR3D_HOST_TEST)
@@ -2431,7 +2439,8 @@ void applyPalette() { applyPaletteTo(s_spr, false); }
 
 void animateYaw() {
   float diff = fmodf(s_yaw_target - s_yaw_cur + 540.0f, 360.0f) - 180.0f;
-  if (fabsf(diff) < 0.05f) {
+  // Following: small corrections are taken in one go (see followSelected).
+  if (fabsf(diff) < 0.05f || (s_follow && fabsf(diff) < 1.5f)) {
     s_yaw_cur = s_yaw_target;
   } else {
     // Ease with a capped turn rate: a long swing (selecting an aircraft behind)
@@ -2484,8 +2493,11 @@ void followSelected(size_t count, unsigned long fetched_ms) {
     // brings it to the front, between home and the viewer.
     float b = atan2f(x, y) / kDegToRad + 180.0f;
     if (b >= 360.0f) b -= 360.0f;
-    // Followed continuously (smooth), as the aircraft moves across the sky.
-    s_yaw_target = b;
+    // Followed in very small steps (~0.3 deg, a pixel or two at the rim), taken at
+    // once: it reads as a smooth follow, and between steps the camera stands still so
+    // the frames come from the cached ground instead of being redrawn every time.
+    const float off = fabsf(fmodf(b - s_yaw_target + 540.0f, 360.0f) - 180.0f);
+    if (off >= 0.3f) s_yaw_target = b;
     return;
   }
 }
@@ -2776,8 +2788,14 @@ void hashTiles(const uint8_t* f, uint32_t* out) {
       const uint32_t* w = reinterpret_cast<const uint32_t*>(f + static_cast<size_t>(ty * kTileH + r) * kW);
       for (int tx = 0; tx < kTilesX; ++tx, w += kTileW / 4) {
         uint32_t h = acc[tx];
-        for (int k = 0; k < kTileW / 4; ++k) h = ((h << 5) | (h >> 27)) ^ w[k];
-        acc[tx] = h * 16777619u;
+        // Multiply-and-rotate per word. (A plain rotate-xor hash gave every tile of one
+        // colour the same value as an all-black tile when the colour had an even number
+        // of set bits, so such tiles were never updated: leftover blocks on screen.)
+        for (int k = 0; k < kTileW / 4; ++k) {
+          h = (h ^ w[k]) * 0x9E3779B1u;
+          h = (h << 13) | (h >> 19);
+        }
+        acc[tx] = h;
       }
     }
     for (int tx = 0; tx < kTilesX; ++tx) out[ty * kTilesX + tx] = acc[tx];
@@ -2802,7 +2820,7 @@ void copyTileRuns(uint8_t* dst, const uint8_t* src, Pred flagged) {
   }
 }
 
-#if !defined(RADAR3D_HOST_TEST)
+#if !defined(RADAR3D_HOST_TEST) || defined(RADAR3D_HOST_FBCHECK)
 /** Convert the flagged tiles through the colour table into a panel buffer. */
 template <typename Pred>
 int pushTileRuns(uint16_t* fb, bool flip, Pred flagged) {
@@ -2906,10 +2924,8 @@ void drawFrame() {
     // Kept only once the camera has settled: while it turns every frame differs.
     // Kept only when the camera stood still since the previous frame too: saving costs
     // a copy and a hash (~25 ms), wasted if it moves on in the next frame.
-    static BgKey prev_key;
-    const bool settled = memcmp(&bk, &prev_key, sizeof(bk)) == 0;
-    prev_key = bk;
-    if (s_bg != nullptr && s_tiles_ok && settled && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
+    // Kept once the camera has reached its target (it stands still from here on).
+    if (s_bg != nullptr && s_tiles_ok && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
       memcpy(s_bg, s_band_mem, static_cast<size_t>(kW) * kH);
       hashTiles(s_bg, s_bg_hash);
       s_bg_key = bk;
@@ -2947,10 +2963,21 @@ void drawFrame() {
     s_restore_known = false;
   }
   st[6] += micros() - t; t = micros();
-#if !defined(RADAR3D_HOST_TEST)
+#if defined(RADAR3D_HOST_FBCHECK)
+  // Host check: three emulated panel buffers, used in turn, compared with the frame.
+  static uint16_t* host_fb[3] = {nullptr, nullptr, nullptr};
+  static int host_n = 0;
+  for (auto& b : host_fb) if (!b) b = static_cast<uint16_t*>(calloc(kW * kH, 2));
+  fbi = host_n++ % 3;
+  {
+    uint16_t* fb = host_fb[fbi];
+    const bool flip = false;
+#elif !defined(RADAR3D_HOST_TEST)
   {
     uint16_t* fb = tft.hiddenBuffer();
     const bool flip = tft.getRotation() == 2;
+#endif
+#if defined(RADAR3D_HOST_FBCHECK) || !defined(RADAR3D_HOST_TEST)
     if (tiles) {
       const bool known = s_fb_valid[fbi];
       uint32_t* fh = s_fb_hash[fbi];
@@ -2961,6 +2988,11 @@ void drawFrame() {
       n_tiles += pushTileRuns(fb, flip, [](int) { return true; });
       s_fb_valid[fbi] = false;
     }
+#if defined(RADAR3D_HOST_FBCHECK)
+    int bad = 0;
+    for (int i = 0; i < kW * kH; ++i) bad += fb[i] != s_lut565[s_band_mem[i]];
+    if (bad) fprintf(stderr, "FBCHECK: frame %d buffer %d: %d stale pixels\n", host_n, fbi, bad);
+#endif
   }
   st[7] += micros() - t;
 #endif
