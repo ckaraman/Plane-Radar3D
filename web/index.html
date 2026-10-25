@@ -991,7 +991,7 @@
       else if (t.name) {
         const cat = landmarkCategory(t);
         // Places with their own symbol first, then the better known ones.
-        landmarks.push({ p, name: t.name, kind: 1, cat, rank: (cat ? 0 : 2) + (t.wikipedia ? 0 : 1) });
+        if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.wikipedia ? 0 : 1 });   // no symbol: left out
       }
     }
     // Spread out: a place closer than `gap` km to one already taken is skipped.
@@ -1007,7 +1007,25 @@
     };
     const near = (a, b) => Math.hypot(a.p[0], a.p[1]) - Math.hypot(b.p[0], b.p[1]);
     const ap = pick(airports.sort(near), 4, 2, []);
-    const lm = pick(landmarks.sort((a, b) => a.rank - b.rank || near(a, b)), 6, radiusKm * 0.12, ap);
+    // Landmarks: one of each kind first, in this order of kinds (bridge, tower, stadium,
+    // place of worship, historic, museum, zoo, park), then a second of each, and so on,
+    // so two stadiums never push out the only tower.
+    const CAT_ORDER = [5, 3, 1, 8, 4, 6, 2, 7];
+    const byCat = CAT_ORDER.map((c) => landmarks.filter((l) => l.cat === c).sort((a, b) => a.rank - b.rank || near(a, b)));
+    const lm = [];
+    const gap = radiusKm * 0.12;
+    for (let round = 0; lm.length < 6 && byCat.some((l) => l.length); round++) {
+      for (const list of byCat) {
+        if (lm.length >= 6) break;
+        while (list.length) {   // the best one of this kind that is not too close to one taken
+          const it = list.shift();
+          if (Math.hypot(it.p[0], it.p[1]) < 0.6) continue;
+          if (ap.concat(lm).some((o) => Math.hypot(o.p[0] - it.p[0], o.p[1] - it.p[1]) < gap)) continue;
+          lm.push(it);
+          break;
+        }
+      }
+    }
     const tw = [];   // town / district names: left out, they crowded the screen
     const enc = new TextEncoder();
     const entries = [];
