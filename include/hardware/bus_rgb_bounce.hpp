@@ -6,6 +6,7 @@
 #include <LovyanGFX.hpp>
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
 
+#include <Arduino.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_rgb.h>
 #include <freertos/FreeRTOS.h>
@@ -145,6 +146,8 @@ class Bus_RGB_Bounce : public lgfx::IBus {
    * complete). Requesting again before that replaces the earlier request.
    */
   void present() {
+    _prev_shown = _shown;
+    _req_vsync = _vsync;
     esp_lcd_panel_draw_bitmap(_handle, 0, 0, _cfg.panel->config().panel_width,
                               _cfg.panel->config().panel_height, _fbs[_draw]);
     // Set after the request: if the frame interrupt comes in between, _shown stays on
@@ -154,14 +157,27 @@ class Bus_RGB_Bounce : public lgfx::IBus {
   }
   /** Pick the buffer for the next frame: neither on screen nor waiting to be. */
   void waitHidden() {
-    const int shown = _shown, req = _req;
-    int pick = -1;
-    for (int k = 1; k <= 3; ++k) {  // prefer the one drawn longest ago
-      const int i = (_draw + k) % 3;
-      if (i != shown && i != req) { pick = i; break; }
+    // Until the panel has started a new frame since the last request, the buffer it
+    // showed before that request is treated as still on screen too. With all three
+    // ruled out, wait (briefly) for the panel to reach the next frame.
+    const unsigned long t0 = millis();
+    for (;;) {
+      const int shown = _shown, req = _req;
+      const bool unconfirmed = _vsync == _req_vsync;
+      int pick = -1;
+      for (int k = 1; k <= 3; ++k) {  // prefer the one drawn longest ago
+        const int i = (_draw + k) % 3;
+        if (i != shown && i != req && !(unconfirmed && i == _prev_shown)) { pick = i; break; }
+      }
+      if (pick >= 0) { _draw = pick; return; }
+      ++_waits;
+      if (millis() - t0 > 60) { _draw = (req + 1) % 3; return; }
+      delayMicroseconds(200);
     }
-    _draw = pick < 0 ? (req + 1) % 3 : pick;
   }
+  /** Panel frames started so far, and frames that had to wait for a free buffer (log). */
+  uint32_t vsyncCount() const { return _vsync; }
+  uint32_t waitCount() const { return _waits; }
   void release() override {}
 
   void beginTransaction() override {}
@@ -189,6 +205,7 @@ class Bus_RGB_Bounce : public lgfx::IBus {
                                     void* ctx) {
     auto* self = static_cast<Bus_RGB_Bounce*>(ctx);
     self->_shown = self->_req;  // the driver has switched to the buffer last requested
+    ++self->_vsync;
     return false;
   }
 
@@ -200,6 +217,10 @@ class Bus_RGB_Bounce : public lgfx::IBus {
   volatile int _shown = 0;  // buffer the panel reads now
   volatile int _req = 0;    // buffer requested last
   int _draw = 1;            // buffer being drawn
+  volatile uint32_t _vsync = 0;  // frame-complete events seen
+  volatile uint32_t _req_vsync = 0;
+  int _prev_shown = 0;
+  uint32_t _waits = 0;
 };
 
 /** Panel_RGB whose drawing target can be moved between the two frame buffers. */

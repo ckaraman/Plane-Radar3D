@@ -47,6 +47,8 @@ class LGFX : public lgfx::LGFX_Device {
   uint16_t* hiddenBuffer() { return reinterpret_cast<uint16_t*>(_bus.hidden()); }
   /** Which of the three frame buffers hiddenBuffer() is (0..2). */
   int hiddenIndex() const { return _bus.hiddenIndex(); }
+  uint32_t vsyncCount() const { return _bus.vsyncCount(); }
+  uint32_t bufferWaits() const { return _bus.waitCount(); }
   void presentHiddenFrame() {
     _bus.present();
     _panel.setTarget(_bus.visible());

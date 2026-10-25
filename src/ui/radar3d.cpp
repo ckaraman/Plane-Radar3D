@@ -1322,9 +1322,11 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
     const uint8_t* bay2 = kBayer[(y + 2) & 3];
     uint8_t* row = buf + y * kW;
     int32_t uv = static_cast<int32_t>(uv0 * 4096.0f * 16.0f), duv = static_cast<int32_t>(du * 4096.0f * 16.0f);
-    const int step = s_relief_half ? 2 : 1;
-    const int32_t dsv_s = dsv * step, dev_s = dev * step, duv_s = duv * step;
-    for (int x = xs; x <= xe; x += step, sv += dsv_s, ev += dev_s, uv += duv_s) {
+    // Half detail: pairs of pixels start on even screen columns (the same columns in
+    // every row and frame), so the coarser shading does not crawl as the view turns.
+    const bool half = s_relief_half;
+    for (int x = xs, adv = 1; x <= xe; x += adv, sv += dsv * adv, ev += dev * adv, uv += duv * adv) {
+      adv = (half && !(x & 1) && x < xe) ? 2 : 1;
       int32_t s16 = sv >> 8, e16 = ev >> 8;  // level * 16
       s16 = s16 < 0 ? 0 : (s16 > 15 * 16 ? 15 * 16 : s16);
       e16 = e16 < 0 ? 0 : (e16 > 7 * 16 ? 7 * 16 : e16);
@@ -1342,7 +1344,7 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
       } else {
         row[x] = static_cast<uint8_t>(kTerrainBase + bd * kTerrainShades + sh);
       }
-      if (step == 2 && x < xe) row[x + 1] = row[x];
+      if (adv == 2) row[x + 1] = row[x];
     }
   }
 }
@@ -3008,18 +3010,28 @@ void drawFrame() {
     static uint32_t n = 0;
     ++n;
     if (millis() - t0 >= 30000) {
+      uint32_t panel_hz = 0, panel_waits = 0;
+#if !defined(RADAR3D_HOST_TEST)
+      {  // panel refresh rate and frames that waited for a free buffer, since the last report
+        static uint32_t v0 = 0, w0 = 0;
+        const uint32_t v = tft.vsyncCount(), w = tft.bufferWaits();
+        if (t0 != 0) { panel_hz = (v - v0) * 1000 / std::max<unsigned long>(1, millis() - t0); panel_waits = w - w0; }
+        v0 = v; w0 = w;
+      }
+#endif
       if (t0 != 0 && n) {
         const uint32_t nd = std::max<uint32_t>(1, n - n_cached);  // frames that drew the ground
         const uint32_t nc = std::max<uint32_t>(1, n_cached);
         Serial.printf("radar3d: %.1f fps; still %lu/%lu frames (camera moving %lu); "
                       "drawn frames ms: ground %lu, lines %lu, bg-save %lu | still frames ms: restore %lu | "
                       "all ms: aircraft %lu, ui %lu, hash %lu, push %lu (%lu tiles of %d) | "
-                      "ground split ms: reproject %lu, relief %lu, fill %lu\n",
+                      "ground split ms: reproject %lu, relief %lu, fill %lu | panel %lu Hz, waits %lu\n",
                       n * 1000.0f / (millis() - t0), (unsigned long)n_cached, (unsigned long)n,
                       (unsigned long)n_moving, st[0] / nd / 1000, st[1] / nd / 1000, st[2] / nd / 1000,
                       st[3] / nc / 1000, st[4] / n / 1000, st[5] / n / 1000, st[6] / n / 1000,
                       st[7] / n / 1000, (unsigned long)(n_tiles / n), kTiles,
-                      s_gt[0] / std::max<uint32_t>(1, n_moving) / 1000, s_gt[1] / nd / 1000, s_gt[2] / nd / 1000);
+                      s_gt[0] / std::max<uint32_t>(1, n_moving) / 1000, s_gt[1] / nd / 1000, s_gt[2] / nd / 1000,
+                      (unsigned long)panel_hz, (unsigned long)panel_waits);
       }
       t0 = millis();
       for (auto& v : st) v = 0;
@@ -3036,6 +3048,7 @@ void releaseFrame() {}
 bool reacquireFrame() { return true; }
 
 #ifdef RADAR3D_HOST_TEST
+void hostTurn(float deg) { s_follow = false; s_yaw_target = fmodf(s_yaw_target + deg + 360.0f, 360.0f); }
 bool hostHitPos(const char* callsign, int* x, int* y) {
   for (size_t i = 0; i < s_hit_count; ++i) {
     if (strcmp(s_hits[i].callsign, callsign) == 0) {
