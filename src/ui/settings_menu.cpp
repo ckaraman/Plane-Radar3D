@@ -32,13 +32,14 @@ enum Item {
   kBrightness,
   kContrast,
   kInfo,
+  kPlaces,
   kItemCount
 };
 
 // Buttons shown, in order. The 5" board has a factory-calibrated capacitive IPS panel
 // (no calibration, inversion or red/blue options) and an on/off backlight.
 #if defined(BOARD_WS5)
-constexpr Item kVisible[] = {kFlip, kLabels, kExag, kRange, kContrast, kInfo};
+constexpr Item kVisible[] = {kFlip, kLabels, kExag, kRange, kContrast, kInfo, kPlaces};
 #else
 constexpr Item kVisible[] = {kCalibrate, kInvert, kBgr,        kFlip,     kLabels,
                              kExag,      kRange,  kBrightness, kContrast, kInfo};
@@ -98,6 +99,10 @@ void itemText(int item, char* title, char* value, size_t n) {
     case kInfo:
       snprintf(title, n, "Uçak bilgisi");
       snprintf(value, n, p.info_style == 1 ? "Etikette" : "Köşelerde");
+      break;
+    case kPlaces:
+      snprintf(title, n, "Önemli yerler");
+      snprintf(value, n, p.places ? "Göster" : "Gizle");
       break;
     case kBrightness:
       snprintf(title, n, "Parlaklık");
@@ -252,6 +257,9 @@ void settingsMenuRun() {
         break;
       case kInfo:
         p.info_style = p.info_style == 1 ? 0 : 1;
+        break;
+      case kPlaces:
+        p.places = !p.places;
         break;
       case kBrightness:
         p.brightness = p.brightness >= 250 ? 60 : static_cast<uint8_t>(std::min(255, p.brightness + 65));

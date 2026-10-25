@@ -24,9 +24,11 @@
  *
  * Takes the same config as lgfx::Bus_RGB, so the board setup code stays the same.
  *
- * Two frame buffers: full-screen frames are drawn into the hidden one and shown at the
- * next frame boundary (present()), so a moving picture never shows half old, half new
- * (tearing). Direct drawing always goes to the visible buffer.
+ * Three frame buffers: full-screen frames are drawn into one the panel is neither
+ * showing nor about to show, and shown from the next frame boundary on (present()), so
+ * a moving picture never tears and drawing never waits for the panel's refresh (with
+ * two buffers every frame was rounded up to a whole number of refreshes). Direct
+ * drawing goes to the buffer presented last.
  */
 class Bus_RGB_Bounce : public lgfx::IBus {
  public:
@@ -62,7 +64,7 @@ class Bus_RGB_Bounce : public lgfx::IBus {
     pc.timings.flags.pclk_idle_high = _cfg.pclk_idle_high;
     pc.data_width = 16;
     pc.bits_per_pixel = 16;
-    pc.num_fbs = 2;
+    pc.num_fbs = 3;
     pc.bounce_buffer_size_px = static_cast<size_t>(w) * kBounceLines;
     pc.dma_burst_size = 64;
     pc.hsync_gpio_num = _cfg.pin_hsync;
@@ -112,16 +114,18 @@ class Bus_RGB_Bounce : public lgfx::IBus {
     if (ctx.err != ESP_OK) return false;
     void* fb0 = nullptr;
     void* fb1 = nullptr;
-    if (esp_lcd_rgb_panel_get_frame_buffer(_handle, 2, &fb0, &fb1) != ESP_OK || fb0 == nullptr ||
-        fb1 == nullptr) {
+    void* fb2 = nullptr;
+    if (esp_lcd_rgb_panel_get_frame_buffer(_handle, 3, &fb0, &fb1, &fb2) != ESP_OK || fb0 == nullptr ||
+        fb1 == nullptr || fb2 == nullptr) {
       return false;
     }
     _fbs[0] = static_cast<uint8_t*>(fb0);
     _fbs[1] = static_cast<uint8_t*>(fb1);
+    _fbs[2] = static_cast<uint8_t*>(fb2);
     _fb = _fbs[0];
     _fb_bytes = static_cast<size_t>(w) * h * 2;
     memset(_fbs[1], 0, _fb_bytes);
-    _swapped = xSemaphoreCreateBinary();
+    memset(_fbs[2], 0, _fb_bytes);
     esp_lcd_rgb_panel_event_callbacks_t cbs = {};
     cbs.on_frame_buf_complete = onFrameDone;
     esp_lcd_rgb_panel_register_event_callbacks(_handle, &cbs, this);
@@ -131,28 +135,32 @@ class Bus_RGB_Bounce : public lgfx::IBus {
   /** Pixel clock change (benchmark: measure memory speed without the panel's load). */
   void setPclk(uint32_t hz) { if (_handle) esp_lcd_rgb_panel_set_pclk(_handle, hz); }
 
-  /** The buffer not on screen. */
-  uint8_t* hidden() const { return _fb == _fbs[0] ? _fbs[1] : _fbs[0]; }
+  /** The buffer chosen by waitHidden() for the next frame. */
+  uint8_t* hidden() const { return _fbs[_draw]; }
+  int hiddenIndex() const { return _draw; }
   uint8_t* visible() const { return _fb; }
   /**
-   * Show the hidden buffer from the next frame on. Returns at once; the next
-   * waitHidden() blocks until the panel has really switched (the driver switches
-   * when it starts reading a new frame, right where it reports the previous one
-   * complete), so the next frame is rendered while the panel catches up.
+   * Show the hidden buffer from the next frame on. Returns at once: the driver
+   * switches when it starts reading a new frame (where it reports the previous one
+   * complete). Requesting again before that replaces the earlier request.
    */
   void present() {
-    uint8_t* next = hidden();
-    xSemaphoreTake(_swapped, 0);  // drop a stale signal
     esp_lcd_panel_draw_bitmap(_handle, 0, 0, _cfg.panel->config().panel_width,
-                              _cfg.panel->config().panel_height, next);
-    _fb = next;
-    _pending = true;
+                              _cfg.panel->config().panel_height, _fbs[_draw]);
+    // Set after the request: if the frame interrupt comes in between, _shown stays on
+    // the older buffer, which only makes the next choice more careful.
+    _req = _draw;
+    _fb = _fbs[_draw];
   }
-  /** Before drawing into hidden(): make sure the panel no longer reads it. */
+  /** Pick the buffer for the next frame: neither on screen nor waiting to be. */
   void waitHidden() {
-    if (!_pending) return;
-    xSemaphoreTake(_swapped, pdMS_TO_TICKS(60));
-    _pending = false;
+    const int shown = _shown, req = _req;
+    int pick = -1;
+    for (int k = 1; k <= 3; ++k) {  // prefer the one drawn longest ago
+      const int i = (_draw + k) % 3;
+      if (i != shown && i != req) { pick = i; break; }
+    }
+    _draw = pick < 0 ? (req + 1) % 3 : pick;
   }
   void release() override {}
 
@@ -179,18 +187,19 @@ class Bus_RGB_Bounce : public lgfx::IBus {
  private:
   static bool IRAM_ATTR onFrameDone(esp_lcd_panel_handle_t, const esp_lcd_rgb_panel_event_data_t*,
                                     void* ctx) {
-    BaseType_t woken = pdFALSE;
-    xSemaphoreGiveFromISR(static_cast<Bus_RGB_Bounce*>(ctx)->_swapped, &woken);
-    return woken == pdTRUE;
+    auto* self = static_cast<Bus_RGB_Bounce*>(ctx);
+    self->_shown = self->_req;  // the driver has switched to the buffer last requested
+    return false;
   }
 
   config_t _cfg;
   esp_lcd_panel_handle_t _handle = nullptr;
   uint8_t* _fb = nullptr;
-  uint8_t* _fbs[2] = {nullptr, nullptr};
+  uint8_t* _fbs[3] = {nullptr, nullptr, nullptr};
   size_t _fb_bytes = 0;
-  SemaphoreHandle_t _swapped = nullptr;
-  volatile bool _pending = false;
+  volatile int _shown = 0;  // buffer the panel reads now
+  volatile int _req = 0;    // buffer requested last
+  int _draw = 1;            // buffer being drawn
 };
 
 /** Panel_RGB whose drawing target can be moved between the two frame buffers. */

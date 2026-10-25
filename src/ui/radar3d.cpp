@@ -476,6 +476,11 @@ struct Runway {
 };
 Poi s_pois[24];
 size_t s_poi_count = 0;
+// Where each landmark symbol was drawn (centre of the badge), for taps.
+int16_t s_poi_sx[24], s_poi_sy[24];
+bool s_poi_vis[24];
+int s_poi_open = -1;                  // landmark whose name is shown (tapped)
+unsigned long s_poi_open_until = 0;
 Runway s_rwys[16];
 size_t s_rwy_count = 0;
 uint32_t s_poi_gen = 0xFFFFFFFFu;
@@ -513,6 +518,8 @@ void loadPois() {
         s_forest[j * 32 + i] = static_cast<uint8_t>(std::max(0.0f, std::min(15.0f, (0.38f - d) * 70.0f)));
       }
   }
+  s_poi_open = 2;  // preview: the tower's name as if it had been tapped
+  s_poi_open_until = 0xFFFFFFFFul;
   const float k = ui::radar::rangeCurrent().outer_km / 50.0f;  // sample laid out for 50 km
   for (size_t i = 0; i < s_poi_count; ++i) { s_pois[i].x *= k; s_pois[i].y *= k; }
   for (size_t i = 0; i < s_rwy_count; ++i) {
@@ -589,12 +596,6 @@ void loadPois() {
 
 // ---------------------------------------------------------------- layers
 
-void drawGround(const Cam& c) {
-  const float horizon = c.cy - c.f * tanf(c.pitch_deg * kDegToRad);
-  const int hy = std::max(kTopBarH, ri(horizon));
-  s_spr.fillScreen(kBg);
-  s_spr.drawFastHLine(0, hy, kW, kRingDim);
-}
 
 // ---------------------------------------------------------------- sea fill
 //
@@ -645,8 +646,11 @@ void buildDiscSpans(const Cam& c) {
         hi = std::max(hi, x);
       }
     }
-    s_disc_l[y] = lo > hi ? 1 : static_cast<int16_t>(ceilf(lo));
-    s_disc_r[y] = lo > hi ? 0 : static_cast<int16_t>(floorf(hi));
+    // Kept on screen: the disc's tips may run past the edges, and a span starting at a
+    // negative x would write into the row before (or before the band buffer).
+    s_disc_l[y] = lo > hi ? 1 : static_cast<int16_t>(std::max(0.0f, ceilf(lo)));
+    s_disc_r[y] = lo > hi ? 0 : static_cast<int16_t>(std::min<float>(kW - 1, floorf(hi)));
+    if (s_disc_l[y] > s_disc_r[y]) { s_disc_l[y] = 1; s_disc_r[y] = 0; }
   }
 }
 
@@ -802,31 +806,44 @@ struct FillEdge {
   int16_t r0, r1;  // first / last row it crosses
   float x, dx;     // x at row r0 (pixel centre), change per row
 };
-FillEdge* s_fill_edges = nullptr;
-size_t s_fill_cap = 0;
-uint16_t* s_fill_order = nullptr;
-uint16_t s_fill_bucket[kH + 1];
+// One fill in progress: edges set up once per frame, rows filled band by band in
+// increasing y (the active edge list carries over from one band to the next).
+struct FillState {
+  FillEdge* edges = nullptr;
+  uint16_t* order = nullptr;
+  size_t cap = 0;
+  uint16_t bucket[kH + 1];
+  size_t ne = 0, next = 0;
+  int na = 0, y = 0;
+  uint16_t active[256];
+  uint8_t color = 0;
+};
+FillState s_fill_sea, s_fill_lake;
 
-void fillRings(const RingSet& set, uint8_t color) {
+void fillBegin(FillState& st, const RingSet& set, uint8_t color) {
+  st.ne = 0;
+  st.na = 0;
+  st.y = kTopBarH;
+  st.color = color;
   if (set.count == 0 || set.points == 0) return;
-  if (s_fill_cap < set.points) {
-    free(s_fill_edges);
-    free(s_fill_order);
-    s_fill_cap = set.points + 256;
-    s_fill_edges = static_cast<FillEdge*>(malloc(s_fill_cap * sizeof(FillEdge)));
-    s_fill_order = static_cast<uint16_t*>(malloc(s_fill_cap * sizeof(uint16_t)));
-    if (s_fill_edges == nullptr || s_fill_order == nullptr || s_fill_cap > 65535) {
-      free(s_fill_edges);
-      free(s_fill_order);
-      s_fill_edges = nullptr;
-      s_fill_order = nullptr;
-      s_fill_cap = 0;
+  if (st.cap < set.points) {
+    free(st.edges);
+    free(st.order);
+    st.cap = set.points + 256;
+    st.edges = static_cast<FillEdge*>(malloc(st.cap * sizeof(FillEdge)));
+    st.order = static_cast<uint16_t*>(malloc(st.cap * sizeof(uint16_t)));
+    if (st.edges == nullptr || st.order == nullptr || st.cap > 65535) {
+      free(st.edges);
+      free(st.order);
+      st.edges = nullptr;
+      st.order = nullptr;
+      st.cap = 0;
       return;
     }
   }
   // Edges, bucketed by their first row (counting sort).
   size_t ne = 0;
-  memset(s_fill_bucket, 0, sizeof(s_fill_bucket));
+  memset(st.bucket, 0, sizeof(st.bucket));
   for (size_t r = 0; r < set.count; ++r) {
     const int16_t* p = set.xy + set.start[r] * 2;
     const int len = set.len[r];
@@ -841,40 +858,44 @@ void fillRings(const RingSet& set, uint8_t color) {
       r1 = std::min(r1, kH - 1);
       if (r1 < r0) continue;
       const float dx = (x1 - x0) / (y1 - y0);
-      s_fill_edges[ne] = {static_cast<int16_t>(r0), static_cast<int16_t>(r1), x0 + (r0 + 0.5f - y0) * dx, dx};
-      ++s_fill_bucket[r0];
+      st.edges[ne] = {static_cast<int16_t>(r0), static_cast<int16_t>(r1), x0 + (r0 + 0.5f - y0) * dx, dx};
+      ++st.bucket[r0];
       ++ne;
     }
   }
   if (ne < 2) return;
   {  // bucket start offsets, then place the edges
     uint16_t sum = 0;
-    for (int y = 0; y <= kH; ++y) { const uint16_t c = s_fill_bucket[y]; s_fill_bucket[y] = sum; sum += c; }
+    for (int y = 0; y <= kH; ++y) { const uint16_t c = st.bucket[y]; st.bucket[y] = sum; sum += c; }
     static uint16_t fillpos[kH + 1];
-    memcpy(fillpos, s_fill_bucket, sizeof(fillpos));
-    for (size_t e = 0; e < ne; ++e) s_fill_order[fillpos[s_fill_edges[e].r0]++] = static_cast<uint16_t>(e);
+    memcpy(fillpos, st.bucket, sizeof(fillpos));
+    for (size_t e = 0; e < ne; ++e) st.order[fillpos[st.edges[e].r0]++] = static_cast<uint16_t>(e);
   }
+  st.ne = ne;
+  st.next = st.bucket[kTopBarH];
+}
+
+/** Fill rows st.y .. y_end - 1 into a band buffer whose first row is y0. */
+void fillRows(FillState& st, int y_end, uint8_t* band, int y0) {
+  if (st.ne < 2) return;
   constexpr int kMaxActive = 256;
-  uint16_t active[kMaxActive];
-  int na = 0;
   float xs[kMaxActive];
-  size_t next = s_fill_bucket[kTopBarH];
-  for (int y = kTopBarH; y < kH; ++y) {
-    // Add edges starting here, drop finished ones.
-    const size_t end = s_fill_bucket[y + 1 <= kH ? y + 1 : kH];
-    for (; next < end && next < ne; ++next) {
-      if (na < kMaxActive) active[na++] = s_fill_order[next];
+  for (; st.y < y_end; ++st.y) {
+    const int y = st.y;
+    const size_t end = st.bucket[y + 1 <= kH ? y + 1 : kH];
+    for (; st.next < end && st.next < st.ne; ++st.next) {
+      if (st.na < kMaxActive) st.active[st.na++] = st.order[st.next];
     }
     int w = 0;
-    for (int k = 0; k < na; ++k) {
-      if (s_fill_edges[active[k]].r1 >= y) active[w++] = active[k];
+    for (int k = 0; k < st.na; ++k) {
+      if (st.edges[st.active[k]].r1 >= y) st.active[w++] = st.active[k];
     }
-    na = w;
-    if (na < 2) continue;
+    st.na = w;
+    if (st.na < 2) continue;
     const bool in_disc = s_disc_l[y] <= s_disc_r[y];
     int n = 0;
-    for (int k = 0; k < na; ++k) {
-      FillEdge& e = s_fill_edges[active[k]];
+    for (int k = 0; k < st.na; ++k) {
+      FillEdge& e = st.edges[st.active[k]];
       xs[n++] = e.x;
       e.x += e.dx;  // ready for the next row
     }
@@ -885,15 +906,16 @@ void fillRings(const RingSet& set, uint8_t color) {
       while (k > 0 && xs[k - 1] > v) { xs[k] = xs[k - 1]; --k; }
       xs[k] = v;
     }
-    uint8_t col = color;
-    if (color == kSea && s_disc_bottom > s_disc_top) {  // haze towards the horizon
+    uint8_t col = st.color;
+    if (st.color == kSea && s_disc_bottom > s_disc_top) {  // haze towards the horizon
       const int t = (y - s_disc_top) * 15 / (s_disc_bottom - s_disc_top);
       col = static_cast<uint8_t>(kSeaBase + std::max(0, std::min(15, t)));
     }
+    uint8_t* row = band + static_cast<size_t>(y - y0) * kW;
     for (int k = 0; k + 1 < n; k += 2) {
       const int xa = std::max<int>(static_cast<int>(ceilf(xs[k])), s_disc_l[y]);
       const int xb = std::min<int>(static_cast<int>(floorf(xs[k + 1])), s_disc_r[y]);
-      if (xb >= xa) s_spr.drawFastHLine(xa, y, xb - xa + 1, col);
+      if (xb >= xa) memset(row + xa, col, xb - xa + 1);
     }
   }
 }
@@ -910,6 +932,8 @@ constexpr int kReliefN = 40;  // cells per side over the disc's bounding square
 int16_t s_rv_x[(kReliefN + 1) * (kReliefN + 1)];
 int16_t s_rv_y[(kReliefN + 1) * (kReliefN + 1)];
 uint16_t s_rc_order[kReliefN * kReliefN];
+int16_t s_rc_ymin[kReliefN * kReliefN];  // screen rows each cell covers (band culling)
+int16_t s_rc_ymax[kReliefN * kReliefN];
 uint8_t s_rv_shade[(kReliefN + 1) * (kReliefN + 1)];  // 0 dark .. 128 flat .. 255 lit
 uint8_t s_rv_elev[(kReliefN + 1) * (kReliefN + 1)];   // 0 sea level .. 255 highest point
 int8_t s_rv_urban[(kReliefN + 1) * (kReliefN + 1)];  // land cover: -127 forest .. 0 open .. 127 built-up
@@ -1053,7 +1077,8 @@ void buildShade(const Cam& c) {
       {  // town wins over forest where both are mapped
         const float ux = -c.R + i * step, uy = -c.R + j * step;
         const float u = urbanAt(ux, uy);
-        const float cover = u > 0.15f ? u : -forestAt(ux, uy);
+        // Forest share counts more: a half wooded cell already reads as forest.
+        const float cover = u > 0.15f ? u : -std::min(1.0f, forestAt(ux, uy) * 1.6f);
         s_rv_urban[k] = static_cast<int8_t>(std::max(-127.0f, std::min(127.0f, cover * 127.0f)));
       }
     }
@@ -1111,6 +1136,8 @@ void buildRelief(const Cam& c) {
       if (gone(k00) && gone(k10) && gone(k01) && gone(k11) && !covered) continue;
       if (s_rv_x[k00] == kOff || s_rv_x[k10] == kOff || s_rv_x[k01] == kOff || s_rv_x[k11] == kOff) continue;
       s_rc_order[s_rc_count++] = static_cast<uint16_t>(j * N + i);
+      s_rc_ymin[j * N + i] = std::min(std::min(s_rv_y[k00], s_rv_y[k10]), std::min(s_rv_y[k01], s_rv_y[k11]));
+      s_rc_ymax[j * N + i] = std::max(std::max(s_rv_y[k00], s_rv_y[k10]), std::max(s_rv_y[k01], s_rv_y[k11]));
     }
   }
   // Far cells first (painter's algorithm): forward distance of the cell centre in
@@ -1193,14 +1220,17 @@ void shadeTriangle(uint8_t* buf, float x0, float y0, float s0, float e0, float u
   }
 }
 
-void drawRelief() {
+/** Relief cells overlapping rows [y0, y1), into buf (row y at buf + y * kW). */
+void drawRelief(uint8_t* buf, int y0, int y1) {
   constexpr int N = kReliefN;
-  uint8_t* buf = static_cast<uint8_t*>(s_spr.getBuffer());
   if (buf == nullptr) return;
+  s_band_y0 = y0;
+  s_band_y1 = y1;
   constexpr float kShadeScale = 16.0f / 256.0f;  // 128 (flat) -> shade 8
   constexpr float kElevScale = 7.0f / 255.0f;
   for (uint16_t n = 0; n < s_rc_count; ++n) {
     const uint16_t idx = s_rc_order[n];
+    if (s_rc_ymax[idx] < y0 || s_rc_ymin[idx] >= y1) continue;
     const int i = idx % N, j = idx / N;
     const int k00 = j * (N + 1) + i, k10 = k00 + 1, k01 = k00 + N + 1, k11 = k01 + 1;
     const float a0 = s_rv_shade[k00] * kShadeScale, a1 = s_rv_shade[k10] * kShadeScale;
@@ -1219,7 +1249,16 @@ void drawRelief() {
 
 bool s_rebuilt = false;  // drawSurface re-projected the ground this frame (camera moved)
 
-/** Land, sea, terrain and lakes: everything on the ground below the map lines. */
+/**
+ * Background, land, terrain, sea and lakes: everything on the ground below the map
+ * lines. Drawn band by band into a small buffer in internal RAM and copied out once
+ * per band: drawing the many small relief triangles straight into the PSRAM frame
+ * kept reloading cache lines and cost ~140 ms per frame.
+ */
+constexpr int kGroundBandH = 16;
+uint8_t* s_gband = nullptr;
+bool s_gband_tried = false;
+
 void drawSurface(const Cam& c) {
   const SeaKey key{services::map::generation(), services::terrain::generation(), s_yaw_cur, c.R,
                    c.pitch_deg, services::location::lat(), services::location::lon()};
@@ -1236,18 +1275,44 @@ void drawSurface(const Cam& c) {
     // staying missing until the camera moves again.
     if (!sea_ok || !lakes_ok) s_sea_key.gen = 0xFFFFFFFFu;
   }
+  if (!s_gband_tried) {
+    s_gband_tried = true;
+#if defined(RADAR3D_HOST_TEST)
+    s_gband = static_cast<uint8_t*>(malloc(static_cast<size_t>(kW) * kGroundBandH));
+#else
+    s_gband = static_cast<uint8_t*>(
+        heap_caps_malloc(static_cast<size_t>(kW) * kGroundBandH, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+#endif
+  }
+  const float horizon = c.cy - c.f * tanf(c.pitch_deg * kDegToRad);
+  const int hy = std::max(kTopBarH, ri(horizon));
   s_disc_top = kH;
   s_disc_bottom = 0;
-  for (int y = kTopBarH; y < kH; ++y) {  // flat land
+  for (int y = kTopBarH; y < kH; ++y) {
     if (s_disc_l[y] <= s_disc_r[y]) {
-      s_spr.drawFastHLine(s_disc_l[y], y, s_disc_r[y] - s_disc_l[y] + 1, kLand);
       s_disc_top = std::min(s_disc_top, y);
       s_disc_bottom = std::max(s_disc_bottom, y);
     }
   }
-  drawRelief();
-  fillRings(s_sea, kSea);  // over the relief: the map's coastline cuts it cleanly
-  fillRings(s_lakes, kSea);
+  fillBegin(s_fill_sea, s_sea, kSea);  // over the relief: the map's coastline cuts it cleanly
+  fillBegin(s_fill_lake, s_lakes, kSea);
+  for (int y0 = 0; y0 < kH; y0 += kGroundBandH) {
+    const int y1 = std::min(kH, y0 + kGroundBandH);
+    uint8_t* band = s_gband != nullptr ? s_gband : s_band_mem + static_cast<size_t>(y0) * kW;
+    memset(band, kBg, static_cast<size_t>(y1 - y0) * kW);
+    if (hy >= y0 && hy < y1) memset(band + static_cast<size_t>(hy - y0) * kW, kRingDim, kW);
+    for (int y = std::max(y0, kTopBarH); y < y1; ++y) {  // flat land
+      if (s_disc_l[y] <= s_disc_r[y]) {
+        memset(band + static_cast<size_t>(y - y0) * kW + s_disc_l[y], kLand, s_disc_r[y] - s_disc_l[y] + 1);
+      }
+    }
+    drawRelief(band - static_cast<ptrdiff_t>(y0) * kW, y0, y1);
+    fillRows(s_fill_sea, y1, band, y0);
+    fillRows(s_fill_lake, y1, band, y0);
+    if (s_gband != nullptr) memcpy(s_band_mem + static_cast<size_t>(y0) * kW, band, static_cast<size_t>(y1 - y0) * kW);
+  }
+  s_band_y0 = 0;
+  s_band_y1 = kH;
 }
 
 // Projected map points, kept while the camera stays put (re-projecting every point
@@ -2184,7 +2249,7 @@ void applyPaletteTo(LGFX_Sprite& g, bool force) {
   }
   {  // built-up (warm grey) and forest (deep green), 8 shades each, lit like the terrain
     const Rgb ub = hc ? Rgb{124, 116, 100} : Rgb{98, 92, 80};
-    const Rgb fo = hc ? Rgb{50, 128, 58} : Rgb{30, 88, 40};
+    const Rgb fo = hc ? Rgb{34, 150, 56} : Rgb{20, 112, 40};
     for (int i = 0; i < 8; ++i) {
       const int sh = i * 2 + 1;
       const float f = sh < 8 ? kd + (1.0f - kd) * sh / 8.0f : 1.0f + (kl - 1.0f) * (sh - 8) / 7.0f;
@@ -2413,8 +2478,25 @@ void drawLandmarkIcon(int x, int gy, uint8_t cat) {
   }
 }
 
+/** Name of a tapped landmark: a small card just above its symbol. */
+void drawPoiName(const char* name, int x, int y) {
+  setFont(&ui::font::SansBold9);
+  const int w = s_spr.textWidth(name) + S(12), h = S(20);
+  int bx = std::max(S(2), std::min(kW - w - S(2), x - w / 2));
+  int by = y - S(11) - h;
+  if (by < kTopBarH + S(2)) by = y + S(12);  // no room above: below the symbol
+  s_spr.fillRoundRect(bx - 1, by - 1, w + 2, h + 2, S(5), kBg);
+  s_spr.fillRoundRect(bx, by, w, h, S(5), kPanel);
+  s_spr.drawRoundRect(bx, by, w, h, S(5), kCream);
+  s_spr.setTextColor(kText);
+  s_spr.setTextDatum(textdatum_t::middle_center);
+  s_spr.drawString(name, bx + w / 2, by + h / 2);
+  s_spr.setTextDatum(textdatum_t::top_left);
+}
+
 void drawPois(const Cam& c, bool names) {
   loadPois();
+  if (!names) memset(s_poi_vis, 0, sizeof(s_poi_vis));
   if (!names) {
     for (size_t i = 0; i < s_rwy_count; ++i) {
       const Runway& r = s_rwys[i];
@@ -2441,7 +2523,17 @@ void drawPois(const Cam& c, bool names) {
         const Box b{x + S(14), by - S(8), w + S(2), S(16)};
         if (claimLabel(b)) haloText(p.name, x + S(15), by - S(8), kText);
       } else if (p.kind == 1) {
-        if (!names) drawLandmarkIcon(x, y, p.cat);  // symbol only: names crowded the map
+        if (!services::display_prefs::get().places) continue;
+        if (!names) {
+          drawLandmarkIcon(x, y, p.cat);  // symbol only: the name shows when it is tapped
+          s_poi_vis[i] = true;
+          s_poi_sx[i] = static_cast<int16_t>(x);
+          s_poi_sy[i] = static_cast<int16_t>(p.cat >= 1 && p.cat <= 8 ? y - kIconLift : y);
+          continue;
+        }
+        if (static_cast<int>(i) == s_poi_open && millis() < s_poi_open_until && s_poi_vis[i]) {
+          drawPoiName(p.name, s_poi_sx[i], s_poi_sy[i]);
+        }
       }  // kind 2 (district / town names): not drawn, they crowded the map
     }
   }
@@ -2458,7 +2550,7 @@ uint8_t* s_bg = nullptr;
 struct BgKey {
   float pitch, cyaw, syaw, R, f, cx, cy, tscale;
   uint32_t mgen, tgen;
-  uint8_t rings, miles, card, pad;
+  uint8_t rings, miles, card, places;
   double lat, lon;
 };
 BgKey s_bg_key;
@@ -2474,15 +2566,122 @@ BgKey bgKeyFor(const Cam& c) {
   k.rings = ui::radar::showRings();
   k.miles = ui::radar::useMiles();
   k.card = s_selected[0] != '\0' && !infoInLabel();
+  k.places = services::display_prefs::get().places;
   k.lat = services::location::lat();
   k.lon = services::location::lon();
   return k;
 }
 
+// ---------------------------------------------------------------- changed-tile push
+//
+// The screen is split into 32 x 24 tiles. Each frame a hash of every tile is taken;
+// only tiles whose hash differs from what a panel buffer already holds are converted
+// and written to it (three buffers, each with its own hash table). With the camera
+// still that is the aircraft, their labels and a few changing texts, not the 768 KB
+// of a whole frame. The tiles that differ from the cached static layer are the ones
+// put back from it at the start of the next frame.
+constexpr int kTileW = 32, kTileH = 24;
+static_assert(kW % kTileW == 0 && kH % kTileH == 0, "tile grid must divide the screen");
+constexpr int kTilesX = kW / kTileW, kTilesY = kH / kTileH, kTiles = kTilesX * kTilesY;
+uint32_t* s_tile_hash = nullptr;  // current frame
+uint32_t* s_bg_hash = nullptr;    // static layer cache
+uint32_t* s_fb_hash[3] = {nullptr, nullptr, nullptr};
+bool s_fb_valid[3] = {false, false, false};
+uint8_t s_restore[kTiles];  // tile differs from the static layer
+bool s_restore_known = false;
+bool s_tiles_ok = false;
+
+bool allocTiles() {
+  if (s_tiles_ok) return true;
+  auto alloc = []() {
+#if defined(RADAR3D_HOST_TEST)
+    return static_cast<uint32_t*>(malloc(kTiles * sizeof(uint32_t)));
+#else
+    return static_cast<uint32_t*>(heap_caps_malloc(kTiles * sizeof(uint32_t), MALLOC_CAP_SPIRAM));
+#endif
+  };
+  s_tile_hash = alloc();
+  s_bg_hash = alloc();
+  for (auto& h : s_fb_hash) h = alloc();
+  s_tiles_ok = s_tile_hash && s_bg_hash && s_fb_hash[0] && s_fb_hash[1] && s_fb_hash[2];
+  return s_tiles_ok;
+}
+
+void hashTiles(const uint8_t* f, uint32_t* out) {
+  uint32_t acc[kTilesX];
+  for (int ty = 0; ty < kTilesY; ++ty) {
+    for (int tx = 0; tx < kTilesX; ++tx) acc[tx] = 2166136261u;
+    for (int r = 0; r < kTileH; ++r) {
+      const uint32_t* w = reinterpret_cast<const uint32_t*>(f + static_cast<size_t>(ty * kTileH + r) * kW);
+      for (int tx = 0; tx < kTilesX; ++tx, w += kTileW / 4) {
+        uint32_t h = acc[tx];
+        for (int k = 0; k < kTileW / 4; ++k) h = ((h << 5) | (h >> 27)) ^ w[k];
+        acc[tx] = h * 16777619u;
+      }
+    }
+    for (int tx = 0; tx < kTilesX; ++tx) out[ty * kTilesX + tx] = acc[tx];
+  }
+}
+
+/** Copy the flagged tiles (runs along each tile row) from src to dst. */
+template <typename Pred>
+void copyTileRuns(uint8_t* dst, const uint8_t* src, Pred flagged) {
+  for (int ty = 0; ty < kTilesY; ++ty) {
+    for (int tx = 0; tx < kTilesX;) {
+      if (!flagged(ty * kTilesX + tx)) { ++tx; continue; }
+      int te = tx;
+      while (te < kTilesX && flagged(ty * kTilesX + te)) ++te;
+      const size_t x0 = static_cast<size_t>(tx) * kTileW, wbytes = static_cast<size_t>(te - tx) * kTileW;
+      for (int r = 0; r < kTileH; ++r) {
+        const size_t off = static_cast<size_t>(ty * kTileH + r) * kW + x0;
+        memcpy(dst + off, src + off, wbytes);
+      }
+      tx = te;
+    }
+  }
+}
+
+#if !defined(RADAR3D_HOST_TEST)
+/** Convert the flagged tiles through the colour table into a panel buffer. */
+template <typename Pred>
+int pushTileRuns(uint16_t* fb, bool flip, Pred flagged) {
+  static uint16_t line[kW];
+  int pushed = 0;
+  for (int ty = 0; ty < kTilesY; ++ty) {
+    for (int tx = 0; tx < kTilesX;) {
+      if (!flagged(ty * kTilesX + tx)) { ++tx; continue; }
+      int te = tx;
+      while (te < kTilesX && flagged(ty * kTilesX + te)) ++te;
+      pushed += te - tx;
+      const int xs = tx * kTileW, n = (te - tx) * kTileW;
+      for (int r = 0; r < kTileH; ++r) {
+        const int y = ty * kTileH + r;
+        const uint8_t* src = s_band_mem + static_cast<size_t>(y) * kW + xs;
+        if (!flip) {
+          for (int x = 0; x < n; ++x) line[x] = s_lut565[src[x]];
+          memcpy(fb + static_cast<size_t>(y) * kW + xs, line, n * sizeof(uint16_t));
+        } else {
+          for (int x = 0; x < n; ++x) line[n - 1 - x] = s_lut565[src[x]];
+          memcpy(fb + static_cast<size_t>(kH - 1 - y) * kW + (kW - xs - n), line, n * sizeof(uint16_t));
+        }
+      }
+      tx = te;
+    }
+  }
+  return pushed;
+}
+#endif
+
 void drawFrame() {
   if (!s_ready) return;
   {
     const unsigned long now = millis();
+    // Another screen (forecast, settings, ...) was shown: the panel buffers and the
+    // shared frame no longer hold what the tile tables say.
+    if (s_last_frame_ms == 0 || now - s_last_frame_ms > 300) {
+      s_fb_valid[0] = s_fb_valid[1] = s_fb_valid[2] = false;
+      s_restore_known = false;
+    }
     s_dt = s_last_frame_ms == 0 ? 0.05f : std::min(0.25f, (now - s_last_frame_ms) / 1000.0f);
     s_last_frame_ms = now;
 #ifdef RADAR3D_HOST_TEST
@@ -2500,89 +2699,105 @@ void drawFrame() {
   followSelected(count, fetched_ms);
   animateYaw();
   const Cam c = makeCam();
+  allocTiles();
 
   static float dist_km[services::adsb::kMaxAircraft];
   static float bearing[services::adsb::kMaxAircraft];
 
-  static uint32_t st[7];  // us per stage, summed for the serial report
-  static uint32_t n_cached = 0, n_moving = 0;
+  // us per stage, summed for the serial report: 0 ground, 1 lines, 2 bg save,
+  // 3 restore, 4 aircraft, 5 ui, 6 hash, 7 push
+  static uint32_t st[8];
+  static uint32_t n_cached = 0, n_moving = 0, n_tiles = 0;
+  int fbi = 0;
 #if !defined(RADAR3D_HOST_TEST)
-  tft.beginHiddenFrame();  // bands go straight into the hidden frame buffer
+  tft.beginHiddenFrame();
+  fbi = tft.hiddenIndex();
 #endif
-  for (int y0 = 0; y0 < kH; y0 += kBandH) {
-    s_first_band = y0 == 0;
-    selectBand(y0);
-    uint32_t t = micros();
-    const BgKey bk = bgKeyFor(c);
-    const bool same = s_bg_valid && memcmp(&bk, &s_bg_key, sizeof(bk)) == 0;
-    if (same) {
-      memcpy(s_band_mem, s_bg, static_cast<size_t>(kW) * kH);
-      ++n_cached;
-      st[5] += micros() - t; t = micros();
-    } else {
-      s_rebuilt = false;
-      drawGround(c);
-      drawSurface(c);
-      const uint32_t dt = micros() - t;
-      st[0] += dt;
-      if (s_rebuilt) ++n_moving;
-      t = micros();
-      drawMap(c);
-      drawRings(c);
-      drawPois(c, false);
-      st[1] += micros() - t; t = micros();
-      if (s_bg == nullptr) {
-        s_bg = static_cast<uint8_t*>(malloc(static_cast<size_t>(kW) * kH));  // large: lands in PSRAM
-      }
-      // Kept only once the camera has settled: while it turns every frame differs.
-      if (s_bg != nullptr && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
-        memcpy(s_bg, s_band_mem, static_cast<size_t>(kW) * kH);
-        s_bg_key = bk;
-        s_bg_valid = true;
-      } else {
-        s_bg_valid = false;
-      }
-      st[6] += micros() - t; t = micros();
-    }
-    int card_idx = -1;
-    drawAircraft(c, count, fetched_ms, dist_km, bearing, &card_idx);
-    drawPois(c, true);
-    st[2] += micros() - t; t = micros();
-    size_t in_range = 0;
-    for (size_t i = 0; i < count; ++i) {
-      if (dist_km[i] <= c.R) ++in_range;
-    }
-    drawTopBar(in_range, fetched_ms);
-    if (in_range == 0) drawEmptyNote(fetched_ms);
-    drawControls();
-    if (s_selected[0] == '\0') {
-      drawLegendStrip();  // nothing selected: legend strip, no card
-    } else if (!infoInLabel()) {
-      drawInfoPanels(card_idx, dist_km, bearing);
-    }
-    st[3] += micros() - t; t = micros();
-#if !defined(RADAR3D_HOST_TEST)
-    // Straight into the hidden frame buffer through a 256-entry colour table
-    // (LovyanGFX's generic palette push spent ~85 ms per frame on this).
-    {
-      uint16_t* fb = tft.hiddenBuffer();
-      const bool flip = tft.getRotation() == 2;
-      static uint16_t line[kW];
-      for (int y = y0; y < s_band_y1; ++y) {
-        const uint8_t* src = s_band_mem + static_cast<size_t>(y - y0) * kW;
-        if (!flip) {
-          for (int x = 0; x < kW; ++x) line[x] = s_lut565[src[x]];
-          memcpy(fb + static_cast<size_t>(y) * kW, line, sizeof(line));
-        } else {
-          for (int x = 0; x < kW; ++x) line[kW - 1 - x] = s_lut565[src[x]];
-          memcpy(fb + static_cast<size_t>(kH - 1 - y) * kW, line, sizeof(line));
-        }
-      }
-    }
-    st[4] += micros() - t;
-#endif
-  }
   s_first_band = true;
+  selectBand(0);
+  uint32_t t = micros();
+  const BgKey bk = bgKeyFor(c);
+  const bool same = s_bg_valid && memcmp(&bk, &s_bg_key, sizeof(bk)) == 0;
+  if (same) {
+#if defined(RADAR3D_NO_RESTORE)
+    s_restore_known = false;  // host check: full copy, for comparing with the tile path
+#endif
+    if (s_restore_known) {
+      copyTileRuns(s_band_mem, s_bg, [](int i) { return s_restore[i] != 0; });
+    } else {
+      memcpy(s_band_mem, s_bg, static_cast<size_t>(kW) * kH);
+    }
+    ++n_cached;
+    st[3] += micros() - t; t = micros();
+  } else {
+    s_rebuilt = false;
+    drawSurface(c);
+    st[0] += micros() - t;
+    if (s_rebuilt) ++n_moving;
+    t = micros();
+    drawMap(c);
+    drawRings(c);
+    drawPois(c, false);
+    st[1] += micros() - t; t = micros();
+    if (s_bg == nullptr) {
+      s_bg = static_cast<uint8_t*>(malloc(static_cast<size_t>(kW) * kH));  // large: lands in PSRAM
+    }
+    // Kept only once the camera has settled: while it turns every frame differs.
+    if (s_bg != nullptr && s_tiles_ok && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
+      memcpy(s_bg, s_band_mem, static_cast<size_t>(kW) * kH);
+      hashTiles(s_bg, s_bg_hash);
+      s_bg_key = bk;
+      s_bg_valid = true;
+    } else {
+      s_bg_valid = false;
+    }
+    st[2] += micros() - t; t = micros();
+  }
+  int card_idx = -1;
+  drawAircraft(c, count, fetched_ms, dist_km, bearing, &card_idx);
+  drawPois(c, true);
+  st[4] += micros() - t; t = micros();
+  size_t in_range = 0;
+  for (size_t i = 0; i < count; ++i) {
+    if (dist_km[i] <= c.R) ++in_range;
+  }
+  drawTopBar(in_range, fetched_ms);
+  if (in_range == 0) drawEmptyNote(fetched_ms);
+  drawControls();
+  if (s_selected[0] == '\0') {
+    drawLegendStrip();  // nothing selected: legend strip, no card
+  } else if (!infoInLabel()) {
+    drawInfoPanels(card_idx, dist_km, bearing);
+  }
+  st[5] += micros() - t; t = micros();
+
+  // Static layer in place under this frame: find the changed tiles.
+  const bool tiles = s_bg_valid && s_tiles_ok;
+  if (tiles) {
+    hashTiles(s_band_mem, s_tile_hash);
+    for (int i = 0; i < kTiles; ++i) s_restore[i] = s_tile_hash[i] != s_bg_hash[i];
+    s_restore_known = true;
+  } else {
+    s_restore_known = false;
+  }
+  st[6] += micros() - t; t = micros();
+#if !defined(RADAR3D_HOST_TEST)
+  {
+    uint16_t* fb = tft.hiddenBuffer();
+    const bool flip = tft.getRotation() == 2;
+    if (tiles) {
+      const bool known = s_fb_valid[fbi];
+      uint32_t* fh = s_fb_hash[fbi];
+      n_tiles += pushTileRuns(fb, flip, [&](int i) { return !known || fh[i] != s_tile_hash[i]; });
+      memcpy(fh, s_tile_hash, kTiles * sizeof(uint32_t));
+      s_fb_valid[fbi] = true;
+    } else {
+      n_tiles += pushTileRuns(fb, flip, [](int) { return true; });
+      s_fb_valid[fbi] = false;
+    }
+  }
+  st[7] += micros() - t;
+#endif
 #ifdef RADAR3D_HOST_TEST
   extern void hostCaptureFrame(LGFX_Sprite & spr);  // desktop preview harness
   applyPaletteTo(s_frame, true);
@@ -2597,18 +2812,19 @@ void drawFrame() {
     if (millis() - t0 >= 30000) {
       if (t0 != 0 && n) {
         const uint32_t nd = std::max<uint32_t>(1, n - n_cached);  // frames that drew the ground
-        Serial.printf("radar3d: %.1f fps; cached %lu/%lu frames (moving %lu); ms/frame: "
-                      "bg-copy %lu | ground %lu, lines %lu, bg-save %lu (drawn frames) | "
-                      "aircraft %lu, ui %lu, push %lu\n",
+        const uint32_t nc = std::max<uint32_t>(1, n_cached);
+        Serial.printf("radar3d: %.1f fps; still %lu/%lu frames (camera moving %lu); "
+                      "drawn frames ms: ground %lu, lines %lu, bg-save %lu | still frames ms: restore %lu | "
+                      "all ms: aircraft %lu, ui %lu, hash %lu, push %lu (%lu tiles of %d)\n",
                       n * 1000.0f / (millis() - t0), (unsigned long)n_cached, (unsigned long)n,
-                      (unsigned long)n_moving, n_cached ? st[5] / n_cached / 1000 : 0,
-                      st[0] / nd / 1000, st[1] / nd / 1000, st[6] / nd / 1000,
-                      st[2] / n / 1000, st[3] / n / 1000, st[4] / n / 1000);
+                      (unsigned long)n_moving, st[0] / nd / 1000, st[1] / nd / 1000, st[2] / nd / 1000,
+                      st[3] / nc / 1000, st[4] / n / 1000, st[5] / n / 1000, st[6] / n / 1000,
+                      st[7] / n / 1000, (unsigned long)(n_tiles / n), kTiles);
       }
       t0 = millis();
       for (auto& v : st) v = 0;
       n = 0;
-      n_cached = n_moving = 0;
+      n_cached = n_moving = n_tiles = 0;
     }
   }
 }
@@ -2673,6 +2889,21 @@ bool handleTap(int x, int y) {
     memcpy(s_selected, s_hits[best].callsign, sizeof(s_selected));
     s_follow = true;
     return true;
+  }
+  {  // a landmark symbol: show its name for a few seconds (tap again to hide)
+    int hit = -1;
+    int hit_d2 = S(18) * S(18);
+    for (size_t i = 0; i < s_poi_count; ++i) {
+      if (!s_poi_vis[i]) continue;
+      const int dx = s_poi_sx[i] - x, dy = s_poi_sy[i] - y, d2 = dx * dx + dy * dy;
+      if (d2 <= hit_d2) { hit_d2 = d2; hit = static_cast<int>(i); }
+    }
+    if (hit >= 0) {
+      const bool open = hit == s_poi_open && millis() < s_poi_open_until;
+      s_poi_open = open ? -1 : hit;
+      s_poi_open_until = millis() + 6000;
+      return true;
+    }
   }
   const bool on_info = s_selected[0] != '\0' && !infoInLabel() && y >= kInfoY &&
                        y < kInfoY + kInfoH && (x < S(4) + kInfoLW || x >= kInfoRX);

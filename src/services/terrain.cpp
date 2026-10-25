@@ -99,21 +99,31 @@ uint32_t generation() { return s_gen; }
 
 float heightM(float x_km, float y_km) {
   if (!s_have) return 0.0f;
-  // Offset of the grid centre from the radar centre.
-  const float lat0 = static_cast<float>(services::location::lat());
-  const float lon0 = static_cast<float>(services::location::lon());
-  const float gx = static_cast<float>(s_hdr.lon - lon0) * kKmPerDeg * cosf(lat0 * kDegToRad);
-  const float gy = static_cast<float>(s_hdr.lat - lat0) * kKmPerDeg;
+  // Offset of the grid centre from the radar centre, kept until the location or the
+  // grid changes (this is called for every projected point, many thousand per frame).
+  static uint32_t c_gen = 0;
+  static double c_lat = 1e9, c_lon = 1e9;
+  static float gx = 0, gy = 0, inv_step = 1, half = 0;
+  const double lat = services::location::lat(), lon = services::location::lon();
+  if (c_gen != s_gen || lat != c_lat || lon != c_lon) {
+    c_gen = s_gen;
+    c_lat = lat;
+    c_lon = lon;
+    const float lat0 = static_cast<float>(lat);
+    gx = static_cast<float>(s_hdr.lon - lon) * kKmPerDeg * cosf(lat0 * kDegToRad);
+    gy = static_cast<float>(s_hdr.lat - lat) * kKmPerDeg;
+    half = s_hdr.half_km;
+    inv_step = static_cast<float>(s_hdr.n - 1) / (2.0f * s_hdr.half_km);
+  }
   const int n = s_hdr.n;
-  const float step = 2.0f * s_hdr.half_km / static_cast<float>(n - 1);
-  const float fx = (x_km - gx + s_hdr.half_km) / step;
-  const float fy = (y_km - gy + s_hdr.half_km) / step;
+  const float fx = (x_km - gx + half) * inv_step;
+  const float fy = (y_km - gy + half) * inv_step;
   if (fx < 0.0f || fy < 0.0f || fx > n - 1 || fy > n - 1) return 0.0f;
   const int ix = std::min(static_cast<int>(fx), n - 2);
   const int iy = std::min(static_cast<int>(fy), n - 2);
   const float tx = fx - ix, ty = fy - iy;
-  const float h00 = s_h[iy * n + ix], h10 = s_h[iy * n + ix + 1];
-  const float h01 = s_h[(iy + 1) * n + ix], h11 = s_h[(iy + 1) * n + ix + 1];
+  const int16_t* row = s_h + iy * n + ix;
+  const float h00 = row[0], h10 = row[1], h01 = row[n], h11 = row[n + 1];
   const float h = (h00 * (1 - tx) + h10 * tx) * (1 - ty) + (h01 * (1 - tx) + h11 * tx) * ty;
   return h > 0.0f ? h : 0.0f;  // sea and below-sea-level land drawn at sea level
 }

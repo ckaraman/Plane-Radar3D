@@ -20,6 +20,7 @@ struct Prefs {
   uint8_t pitch_deg = 22;    // camera tilt (10 = flat, 62 = from above)
   bool high_contrast = true; // brighter lines and text for glare / viewing angle
   uint8_t info_style = 0;    // selected aircraft: 0 = two corner panels, 1 = card at its label
+  bool places = true;        // landmark symbols on the 5" map (stadium, tower, ...)
 };
 
 void init();
