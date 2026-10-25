@@ -946,7 +946,9 @@
       'nwr["amenity"="place_of_worship"]["wikipedia"]["name"]' + b + ';' +
       'way["bridge"="yes"]["highway"~"^(motorway|trunk)$"]["wikidata"]["name"]' + b + ';' +
       ');out center tags;';
-    try { return await overpassRace(q, 25000, null); } catch (_) { /* optional */ }
+    for (let round = 0; round < 2; round++) {
+      try { return await overpassRace(q, 30000, null); } catch (_) { /* busy: once more */ }
+    }
     return null;   // places are optional
   }
 
@@ -1038,19 +1040,27 @@
   // only their bounding boxes, rasterised into a coarse grid of how much of each cell
   // is town (0..15). Map entry type 6: word 0 = [N, 0, radius x10 (u16)], then N*N
   // nibbles, low nibble first, rows south to north, cells west to east.
-  async function fetchUrban(lat, lon, radiusKm) {
-    const b = bboxFor(lat, lon, radiusKm);
-    const q = '[out:json][timeout:30];way["landuse"~"^(residential|commercial|industrial|retail)$"]' + b + ';out bb;';
-    try { return await overpassRace(q, 35000, null); } catch (_) { return null; }
-  }
   // Forest and woodland (map entry type 7, same grid as type 6): the polygons are
   // rasterised properly (even-odd, 4x4 samples per cell), forests are large and their
   // bounding boxes would paint whole valleys green.
-  async function fetchForest(lat, lon, radiusKm) {
+  // Built-up land use (bounding boxes only) and forests (full outlines) in one request:
+  // Overpass allows each address only a couple of requests at a time, and separate
+  // requests next to the map's were being turned away.
+  async function fetchCover(lat, lon, radiusKm) {
     const b = bboxFor(lat, lon, radiusKm);
-    const q = '[out:json][timeout:40];(way["landuse"="forest"]' + b + ';way["natural"="wood"]' + b +
+    const q = '[out:json][timeout:50];way["landuse"~"^(residential|commercial|industrial|retail)$"]' + b + ';out ids bb;' +
+      '(way["landuse"="forest"]' + b + ';way["natural"="wood"]' + b +
       ';relation["landuse"="forest"]' + b + ';relation["natural"="wood"]' + b + ';);out skel geom qt;';
-    try { return await overpassRace(q, 45000, null); } catch (_) { return null; }
+    for (let round = 0; round < 2; round++) {
+      try {
+        const els = await overpassRace(q, 55000, null);
+        return {
+          urban: els.filter((e) => e.type === 'way' && !e.geometry),
+          forest: els.filter((e) => e.type === 'relation' || (e.type === 'way' && e.geometry)),
+        };
+      } catch (_) { /* busy: once more */ }
+    }
+    return null;
   }
   function buildForestEntry(elements, lat, lon, radiusKm) {
     const N = 48, SS = 4, M = N * SS, R = radiusKm, cosL = Math.cos(lat * Math.PI / 180);
@@ -1487,17 +1497,20 @@
       setMsg(msg, 'info', 'Harita indiriliyor… (birkaç saniye sürebilir)');
       // 5" board: places are fetched at the same time as the map.
       const wantPlaces = dev.hw === 'ws5' || dev.hw === 'ws5b';
+      let placesMissing = false;
       const placesP = wantPlaces ? fetchPlaces(lat, lon, radius) : Promise.resolve(null);
-      const urbanP = wantPlaces ? fetchUrban(lat, lon, radius) : Promise.resolve(null);
-      const forestP = wantPlaces ? fetchForest(lat, lon, radius) : Promise.resolve(null);
       const elements = await fetchOverpass(lat, lon, radius, (t) => setMsg(msg, 'info', t));
+      // After the map, so no more than two requests run at once.
+      const coverP = wantPlaces ? fetchCover(lat, lon, radius) : Promise.resolve(null);
       const water = (dev.mapv || 1) >= 2;
       let blob = buildMapBlob(elements, lat, lon, water, radius);
       if (!blob) return ' Bu konumda çizilecek kıyı ya da ana yol bulunamadı, harita eklenmedi.';
       // 5" board: airports, landmarks and town names on the map too.
       if (wantPlaces) {
-        setMsg(msg, 'info', 'Önemli yerler ekleniyor…');
-        const [places, urban, forest] = await Promise.all([placesP, urbanP, forestP]);
+        setMsg(msg, 'info', 'Önemli yerler, yerleşim ve ormanlar ekleniyor…');
+        const [places, cover] = await Promise.all([placesP, coverP]);
+        const urban = cover && cover.urban, forest = cover && cover.forest;
+        placesMissing = !places;
         const extra = places ? buildPlaceEntries(places, lat, lon, radius) : [];
         const town = urban ? buildUrbanEntry(urban, lat, lon, radius) : null;
         if (town) extra.unshift(town);
@@ -1510,8 +1523,9 @@
       dev.map = blob.length;
       const lakeNote = !water ? '' : (blob.lakes ? ', ' + blob.lakes + ' göl' : ', bu alanda göl yok');
       const placeNote = blob.places ? ', ' + blob.places + ' önemli yer' : '';
+      const missNote = placesMissing ? ' Önemli yerler ve havalimanları bu sefer alınamadı (harita sunucuları yoğun); birkaç dakika sonra tekrar "Cihaza kaydet" deyin.' : '';
       return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB' + lakeNote + placeNote + ').' +
-        (water ? '' : ' Deniz dolgusu için önce 3. adımdan yazılımı güncelleyin.');
+        (water ? '' : ' Deniz dolgusu için önce 3. adımdan yazılımı güncelleyin.') + missNote;
     } catch (e) {
       const m = e && e.message ? e.message : '';
       const why = ERRORS[m] || (m === 'too-big' ? 'çok ayrıntılı' : 'harita sunucuları şu an yanıt vermiyor' + (e && e.reasons ? ' — ' + e.reasons.slice(-2).join('; ') : ''));
