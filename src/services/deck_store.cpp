@@ -20,7 +20,7 @@ constexpr uint32_t kRegionOffset = 0x900000;
 constexpr uint32_t kRegionBytes = 0xC0000;  // 768 KB: whole-key pictures on the 5B (12 x 141 x 153 x 2)
 constexpr size_t kSector = 4096;
 constexpr uint32_t kMagic = 0x4B445250;  // "PRDK"
-constexpr size_t kHeadBytes1 = 6, kHeadBytes2 = 8;
+constexpr size_t kHeadBytes1 = 6, kHeadBytes2 = 8, kHeadBytes3 = 12;
 
 struct Header {
   uint32_t magic;
@@ -44,6 +44,8 @@ const uint16_t* s_icons[kSlots] = {};
 uint8_t* s_blob = nullptr;  // PSRAM copy of the stored set (icons point into it)
 bool s_custom = false;
 bool s_full = false;
+bool s_compact = false;
+int s_cols = 4, s_rows = 3, s_kw = keyW(), s_kh = keyH();
 int s_volume_steps = 16;
 uint32_t s_gen = 1;
 
@@ -71,27 +73,48 @@ void loadDefaults() {
   for (auto& p : s_icons) p = nullptr;
   s_custom = false;
   s_full = false;
+  s_compact = false;
+  s_cols = 4, s_rows = 3, s_kw = keyW(), s_kh = keyH();
   s_volume_steps = 16;
 }
 
 /** Checks a blob and points slots / icons into it. */
 bool apply(const uint8_t* b, size_t n) {
-  if (n < kHeadBytes1 || b[0] != 'D' || b[1] != 'K' || (b[2] != 1 && b[2] != 2) || b[3] != kSlots) return false;
-  const bool v2 = b[2] == 2;
-  const size_t head = v2 ? kHeadBytes2 : kHeadBytes1;
+  if (n < kHeadBytes1 || b[0] != 'D' || b[1] != 'K' || b[2] < 1 || b[2] > 3 || b[3] != kSlots) return false;
+  const int ver = b[2];
+  const size_t head = ver == 3 ? kHeadBytes3 : (ver == 2 ? kHeadBytes2 : kHeadBytes1);
   if (n < head + kSlots * sizeof(Slot)) return false;
-  const int iw = b[4], ih = v2 ? b[5] : b[4];
-  const int steps = v2 ? b[6] : b[5];
+  int iw, ih, steps, cols = 4, rows = 3;
+  if (ver == 3) {
+    cols = b[4];
+    rows = b[5];
+    steps = b[6];
+    iw = b[8] | (b[9] << 8);
+    ih = b[10] | (b[11] << 8);
+  } else {
+    iw = b[4];
+    ih = ver == 2 ? b[5] : b[4];
+    steps = ver == 2 ? b[6] : b[5];
+  }
   const size_t icon_bytes = static_cast<size_t>(iw) * ih * 2;
-  // A set made for the other panel size: keys keep their labels, pictures are dropped.
-  const bool fits = v2 ? (iw == keyW() && ih == keyH()) : (iw == iconPx());
+  bool fits;
+  if (ver == 3) {
+    // Made for this panel: the grid fills the key area (a pixel or two of rounding).
+    fits = cols >= 1 && rows >= 1 && cols <= kSlots && rows <= kSlots && iw > 0 && ih > 0 &&
+           cols * iw + (cols - 1) * keyGap() <= keyAreaW() + 2 && rows * ih + (rows - 1) * keyGap() <= keyAreaH() + 2;
+  } else {
+    // A set made for the other panel size: keys keep their labels, pictures are dropped.
+    fits = ver == 2 ? (iw == keyW() && ih == keyH()) : (iw == iconPx());
+  }
   Slot slots[kSlots];
   memcpy(slots, b + head, sizeof(slots));
   size_t off = head + sizeof(slots);
   const uint16_t* icons[kSlots] = {};
+  int used = 0;
   for (int i = 0; i < kSlots; ++i) {
     slots[i].label[kLabelBytes - 1] = '\0';
     if (static_cast<uint8_t>(slots[i].kind) > static_cast<uint8_t>(Kind::Host)) slots[i].kind = Kind::Empty;
+    if (slots[i].kind != Kind::Empty || slots[i].label[0] || slots[i].has_icon) ++used;
     if (!slots[i].has_icon) continue;
     if (off + icon_bytes > n) return false;
     if (fits) icons[i] = reinterpret_cast<const uint16_t*>(b + off);
@@ -101,7 +124,14 @@ bool apply(const uint8_t* b, size_t n) {
   memcpy(s_slots, slots, sizeof(s_slots));
   memcpy(s_icons, icons, sizeof(s_icons));
   s_volume_steps = (steps >= 4 && steps <= 100) ? steps : 16;
-  s_full = v2;
+  s_full = ver >= 2;
+  s_compact = ver == 3 && fits && used > 0 && cols * rows >= used;
+  if (s_compact) {
+    s_cols = cols, s_rows = rows, s_kw = iw, s_kh = ih;
+  } else {
+    s_cols = 4, s_rows = 3, s_kw = keyW(), s_kh = keyH();
+    if (ver == 3) s_full = false;  // pictures of another size: not drawn at all
+  }
   s_custom = true;
   return true;
 }
@@ -120,6 +150,15 @@ void freeBlob() {
 int iconPx() { return ui::S(48); }
 int volumeSteps() { return s_volume_steps; }
 bool fullKeyIcons() { return s_full; }
+bool compactLayout() { return s_compact; }
+int layoutCols() { return s_cols; }
+int layoutRows() { return s_rows; }
+int layoutKeyW() { return s_kw; }
+int layoutKeyH() { return s_kh; }
+bool slotUsed(int i) {
+  const Slot& k = slot(i);
+  return k.kind != Kind::Empty || k.label[0] != '\0' || k.has_icon;
+}
 
 void init() {
   loadDefaults();

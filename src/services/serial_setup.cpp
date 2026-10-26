@@ -129,6 +129,13 @@ void sendHello() {
   doc["deckicon"] = services::deck::iconPx();
   doc["deckkw"] = services::deck::keyW();  // version 2 sets: pictures fill the key
   doc["deckkh"] = services::deck::keyH();
+  {  // version 3 sets: only the used keys, filling this area
+    JsonArray area = doc["deckarea"].to<JsonArray>();
+    area.add(services::deck::keyAreaW());
+    area.add(services::deck::keyAreaH());
+    area.add(services::deck::keyGap());
+    area.add(services::deck::keyRadius());
+  }
   doc["deckcustom"] = services::deck::custom();
   doc["hostv"] = 2;  // Windows helper protocol (services/host_link.h): 2 = windowed cover, "pm"
   doc["w"] = config::kDisplayWidth;

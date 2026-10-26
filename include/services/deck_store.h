@@ -17,11 +17,14 @@ namespace services::deck {
  *              pictures icon_px * icon_px, drawn small above the label
  *   version 2: 'D' 'K' 2 slot_count icon_w icon_h volume_steps 0
  *              pictures icon_w * icon_h = the whole key (keyW() x keyH()), the label on top
+ *   version 3: 'D' 'K' 3 slot_count cols rows volume_steps 0 key_w(u16) key_h(u16)
+ *              only the used keys are shown, in slot order, cols x rows of key_w x key_h
+ *              filling keyArea() (an unfinished last row centred); pictures key_w x key_h
  *   then slot_count * Slot (28 bytes, below)
  *   then for each slot with has_icon, in slot order: the picture as RGB565 pixels;
  *   kTransparent (magenta) pixels let the key colour show through.
  */
-constexpr uint8_t kVersion = 2;  // newest understood (1 still accepted)
+constexpr uint8_t kVersion = 3;  // newest understood (1 and 2 still accepted)
 constexpr int kSlots = 12;
 constexpr size_t kLabelBytes = 24;  // UTF-8, zero-terminated / padded
 constexpr uint16_t kTransparent = 0xF81F;
@@ -37,8 +40,25 @@ int iconPx();
 constexpr int keyW() { return (470 * config::kDisplayWidth / 800 - 3 * (10 * config::kDisplayWidth / 800)) / 4; }
 constexpr int keyH() { return 120 * config::kDisplayWidth / 800; }
 
-/** True when the pictures of the active set fill the whole key (version 2). */
+/** Gap between keys and the area the keys fill (left of the knob). */
+constexpr int keyGap() { return 10 * config::kDisplayWidth / 800; }
+constexpr int keyAreaX() { return 20 * config::kDisplayWidth / 800; }
+constexpr int keyAreaY() { return 68 * config::kDisplayWidth / 800; }
+constexpr int keyAreaW() { return 4 * keyW() + 3 * keyGap(); }
+constexpr int keyAreaH() { return 3 * keyH() + 2 * keyGap(); }
+constexpr int keyRadius() { return 18 * config::kDisplayWidth / 800; }
+
+/** True when the pictures of the active set fill the whole key (version 2 and 3). */
 bool fullKeyIcons();
+
+/** Version 3: only used keys, in a grid of layoutCols() x layoutRows(). */
+bool compactLayout();
+int layoutCols();
+int layoutRows();
+int layoutKeyW();
+int layoutKeyH();
+/** A slot the deck shows in a compact layout (an action, a label or a picture). */
+bool slotUsed(int i);
 
 enum class Kind : uint8_t {
   Empty = 0,

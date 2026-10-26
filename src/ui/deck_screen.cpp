@@ -39,6 +39,8 @@ constexpr int D(int v) { return v * kW / 800; }
 // Shared top bar: RADAR pill on the right, page dots in the middle.
 constexpr int kRadarX = D(670), kRadarY = D(14), kRadarW = D(110), kRadarH = D(40);
 constexpr int kDotsY = D(34);
+// Page switch at the top: two halves, MÜZİK | TUŞLAR, tapped to change the page.
+constexpr int kTabW = D(220), kTabH = D(42), kTabX = (kW - kTabW) / 2, kTabY = D(13);
 
 // Keys page: 4 x 3 keys on the left, the volume knob on the right.
 constexpr int kCols = 4, kRows = 3;
@@ -52,7 +54,7 @@ static_assert(kCols * kRows == store::kSlots, "one key per stored slot");
 
 // Music page: text, bars and controls at the bottom, over the cover.
 constexpr int kMusicPad = D(28);
-constexpr int kTitleY = D(288), kArtistY = D(330);
+constexpr int kTitleY = D(294);  // top of the title line; the artist follows under it
 constexpr int kBarY = D(374), kBarH = D(6);
 constexpr int kTimeW = D(46);
 constexpr int kCtrlY = D(436);
@@ -109,7 +111,7 @@ bool s_shown_muted = false;
 int s_pressed = -1;
 unsigned long s_pressed_ms = 0;
 bool s_flash = false;
-enum class Target { None, Key, Knob, Back, Prev, Play, Next, VolBar, Swipe };
+enum class Target { None, Key, Knob, Back, Prev, Play, Next, VolBar, Swipe, Tab };
 Target s_target = Target::None;
 bool s_down = false;
 int s_key = -1;
@@ -210,16 +212,51 @@ void toggleMute() {
 }
 
 // ------------------------------------------------------------------ drawing helpers
-void keyRect(int i, int* x, int* y) {
-  *x = kGridX + (i % kCols) * (kKeyW + kGap);
-  *y = kGridY + (i / kCols) * (kKeyH + kGap);
+// Where each slot's key is: the fixed 4 x 3 grid, or (version 3 sets) only the used keys
+// filling the area, an unfinished last row centred.
+struct Box {
+  int16_t x = 0, y = 0, w = 0, h = 0;
+  bool shown = false;
+};
+Box s_box[store::kSlots];
+uint32_t s_box_gen = 0;
+
+void buildBoxes() {
+  if (s_box_gen == store::generation()) return;
+  s_box_gen = store::generation();
+  for (auto& b : s_box) b = Box{};
+  if (!store::compactLayout()) {
+    for (int i = 0; i < store::kSlots; ++i) {
+      s_box[i] = {static_cast<int16_t>(kGridX + (i % kCols) * (kKeyW + kGap)),
+                  static_cast<int16_t>(kGridY + (i / kCols) * (kKeyH + kGap)), kKeyW, kKeyH, true};
+    }
+    return;
+  }
+  const int cols = store::layoutCols(), kw = store::layoutKeyW(), kh = store::layoutKeyH();
+  int used = 0;
+  for (int i = 0; i < store::kSlots; ++i) used += store::slotUsed(i) ? 1 : 0;
+  int p = 0;
+  for (int i = 0; i < store::kSlots; ++i) {
+    if (!store::slotUsed(i)) continue;
+    const int row = p / cols, col = p % cols;
+    const int in_row = std::min(cols, used - row * cols);
+    const int x0 = kGridX + (store::keyAreaW() - (in_row * kw + (in_row - 1) * kGap)) / 2;
+    s_box[i] = {static_cast<int16_t>(x0 + col * (kw + kGap)), static_cast<int16_t>(kGridY + row * (kh + kGap)),
+                static_cast<int16_t>(kw), static_cast<int16_t>(kh), true};
+    ++p;
+  }
+}
+
+const Box& keyBox(int i) {
+  buildBoxes();
+  return s_box[i];
 }
 
 int keyAt(int x, int y) {
+  buildBoxes();
   for (int i = 0; i < store::kSlots; ++i) {
-    int kx, ky;
-    keyRect(i, &kx, &ky);
-    if (x >= kx && x < kx + kKeyW && y >= ky && y < ky + kKeyH) return i;
+    const Box& b = s_box[i];
+    if (b.shown && x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return i;
   }
   return -1;
 }
@@ -271,17 +308,26 @@ void radarPill(Gfx& s, const paint::Canvas& c) {
   s.drawString("RADAR", kRadarX + D(44), kRadarY + kRadarH / 2 + 1);
 }
 
-void pageDots(const paint::Canvas& c, bool music_active) {
-  const int cx = kW / 2;
-  const int wide = D(22), dot = D(7);
-  // Left dot = music, right dot = keys; the active one is a pill.
-  if (music_active) {
-    paint::roundRect(c, cx - D(4) - wide, kDotsY - dot / 2, wide, dot, dot / 2, kWhite, 255);
-    paint::circle(c, cx + D(4) + dot / 2.0f, kDotsY, dot / 2.0f, kWhite, 100);
-  } else {
-    paint::circle(c, cx - D(4) - dot / 2.0f, kDotsY, dot / 2.0f, kWhite, 100);
-    paint::roundRect(c, cx + D(4), kDotsY - dot / 2, wide, dot, dot / 2, kWhite, 255);
-  }
+/** 0 = not on the page switch, 1 = its music half, 2 = its keys half. */
+int tabAt(int x, int y) {
+  if (y < 0 || y >= kTabY + kTabH + D(14) || x < kTabX - D(10) || x >= kTabX + kTabW + D(10)) return 0;
+  return x < kTabX + kTabW / 2 ? 1 : 2;
+}
+
+template <typename Gfx>
+void pageTabs(Gfx& s, const paint::Canvas& c, bool music_active) {
+  const int half = kTabW / 2, pad = D(4);
+  paint::roundRect(c, kTabX, kTabY, kTabW, kTabH, kTabH / 2, kWhite, 22, kWhite, 40);
+  const int ax = music_active ? kTabX + pad : kTabX + half;
+  paint::roundRect(c, ax, kTabY + pad, half - pad, kTabH - 2 * pad, (kTabH - 2 * pad) / 2, kWhite, 255);
+  displayFontSetBitmap(s, &ui::font::SansBold8);
+  s.setTextDatum(textdatum_t::middle_center);
+  const uint16_t ink = col565({21, 24, 58}), light = col565({226, 229, 245});
+  s.setTextColor(music_active ? ink : light);
+  s.drawString("MÜZİK", kTabX + half / 2 + pad / 2, kTabY + kTabH / 2 + 1);
+  s.setTextColor(music_active ? light : ink);
+  s.drawString("TUŞLAR", kTabX + half + half / 2 - pad / 2, kTabY + kTabH / 2 + 1);
+  s.setTextDatum(textdatum_t::top_left);
 }
 
 template <typename Gfx>
@@ -343,10 +389,10 @@ void blitIcon(LGFX_Sprite& s, const uint16_t* pic, int pw, int ph, int x, int y)
 }
 
 void drawKeyContent(LGFX_Sprite& s, int i) {
-  int x, y;
-  keyRect(i, &x, &y);
+  const Box& bx = keyBox(i);
+  const int x = bx.x, y = bx.y, bw = bx.w, bh = bx.h;  // this key's size
   const store::Slot& k = store::slot(i);
-  const int cx = x + kKeyW / 2;
+  const int cx = x + bw / 2;
   const uint16_t* pic = store::icon(i);
   const int px = store::iconPx();
   const bool has_label = k.label[0] != '\0';
@@ -356,37 +402,37 @@ void drawKeyContent(LGFX_Sprite& s, int i) {
   if (pic != nullptr && store::fullKeyIcons()) {
     // The picture is the whole key (the helper rounded its corners and darkened its
     // bottom for the label).
-    blitIcon(s, pic, kKeyW, kKeyH, x, y);
+    blitIcon(s, pic, bw, bh, x, y);
     if (has_label) {
       displayFontSetBitmap(s, &ui::font::Sans8);
-      fitText(s, k.label, kKeyW - D(12), t, sizeof(t));
+      fitText(s, k.label, bw - D(12), t, sizeof(t));
       s.setTextColor(col565({4, 5, 12}));
-      s.drawString(t, cx + 1, y + kKeyH - D(15) + 1);
+      s.drawString(t, cx + 1, y + bh - D(15) + 1);
       s.setTextColor(col565(kWhite));
-      s.drawString(t, cx, y + kKeyH - D(15));
+      s.drawString(t, cx, y + bh - D(15));
     }
   } else if (pic != nullptr) {
-    const int iy = has_label ? y + (kKeyH - px - D(22)) / 2 : y + (kKeyH - px) / 2;
+    const int iy = has_label ? y + (bh - px - D(22)) / 2 : y + (bh - px) / 2;
     blitIcon(s, pic, px, px, cx - px / 2, iy);
     if (has_label) {
       displayFontSetBitmap(s, &ui::font::Sans8);
-      fitText(s, k.label, kKeyW - D(10), t, sizeof(t));
-      s.drawString(t, cx, y + kKeyH - D(16));
+      fitText(s, k.label, bw - D(10), t, sizeof(t));
+      s.drawString(t, cx, y + bh - D(16));
     }
   } else if (k.kind == store::Kind::Media) {
-    mediaIcon(s, static_cast<Media>(k.code), cx, y + kKeyH / 2 - D(10), col565({233, 234, 255}));
+    mediaIcon(s, static_cast<Media>(k.code), cx, y + bh / 2 - D(10), col565({233, 234, 255}));
     displayFontSetBitmap(s, &ui::font::Sans8);
-    fitText(s, k.label, kKeyW - D(10), t, sizeof(t));
-    s.drawString(t, cx, y + kKeyH - D(20));
+    fitText(s, k.label, bw - D(10), t, sizeof(t));
+    s.drawString(t, cx, y + bh - D(20));
   } else if (has_label) {
     const lgfx::GFXfont* fonts[] = {&ui::font::SansBold12, &ui::font::SansBold9, &ui::font::Sans8};
     for (const auto* f : fonts) {
       displayFontSetBitmap(s, f);
-      if (s.textWidth(k.label) <= kKeyW - D(12)) break;
+      if (s.textWidth(k.label) <= bw - D(12)) break;
     }
-    fitText(s, k.label, kKeyW - D(10), t, sizeof(t));
+    fitText(s, k.label, bw - D(10), t, sizeof(t));
     s.setTextColor(col565(kText));
-    s.drawString(t, cx, y + kKeyH / 2);
+    s.drawString(t, cx, y + bh / 2);
   }
   s.setTextDatum(textdatum_t::top_left);
 }
@@ -494,26 +540,28 @@ void buildKeysBase() {
   if (!console::keyboardMode()) {
     displayFontSetBitmap(s, &ui::font::Sans8);
     s.setTextColor(col565({245, 190, 120}));
-    s.drawString("Kurulum modu: tuşlar kapalı", D(130), kDotsY + 1);
+    s.setTextDatum(textdatum_t::middle_right);
+    s.drawString("Kurulum modu: tuşlar kapalı", kW - D(20), kH - D(16));
+    s.setTextDatum(textdatum_t::middle_left);
   }
-  pageDots(c, false);
+  pageTabs(s, c, false);
   radarPill(s, c);
   for (int i = 0; i < store::kSlots; ++i) {
-    int x, y;
-    keyRect(i, &x, &y);
+    const Box& b = keyBox(i);
+    if (!b.shown) continue;
     const store::Slot& k = store::slot(i);
     if (k.kind == store::Kind::Empty && !k.label[0] && !store::icon(i)) {
-      paint::roundRect(c, x, y, kKeyW, kKeyH, D(18), kWhite, 0, kWhite, 40);
+      paint::roundRect(c, b.x, b.y, b.w, b.h, D(18), kWhite, 0, kWhite, 40);
       continue;
     }
-    paint::roundRect(c, x, y, kKeyW, kKeyH, D(18), kWhite, 15, kWhite, 26);
+    paint::roundRect(c, b.x, b.y, b.w, b.h, D(18), kWhite, 15, kWhite, 26);
     drawKeyContent(s, i);
   }
   drawKnobBase(s);
   displayFontSetBitmap(s, &ui::font::Sans8);
   s.setTextDatum(textdatum_t::middle_left);
   s.setTextColor(col565({154, 161, 189}));
-  s.drawString("Sola kaydır: müzik", D(20), kH - D(16));
+  s.drawString("Sağa kaydır: müzik", D(20), kH - D(16));
   s.setTextDatum(textdatum_t::top_left);
   s_keys_gen = store::generation();
   s_keys_dirty = false;
@@ -589,10 +637,10 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   const host::NowPlaying& n = host::now();
   // Top: "now playing" pill, dots, RADAR.
   if (n.valid) {
-    char label[64];
-    snprintf(label, sizeof(label), n.app[0] ? "%s · %s" : "%s", n.playing ? "ŞİMDİ ÇALIYOR" : "DURAKLATILDI",
-             n.app);
+    char raw[64], label[72];
+    snprintf(raw, sizeof(raw), n.app[0] ? "%s · %s" : "%s", n.playing ? "ŞİMDİ ÇALIYOR" : "DURAKLATILDI", n.app);
     displayFontSetBitmap(s, &ui::font::Sans8);
+    fitText(s, raw, kTabX - D(80), label, sizeof(label));  // clear of the page switch
     const int tw = s.textWidth(label);
     paint::roundRect(c, D(20), D(18), tw + D(40), D(32), D(16), kWhite, 30, kWhite, 40);
     paint::circle(c, D(37), D(34), D(4), n.playing ? kPeach : Rgb{180, 184, 210}, 255);
@@ -600,7 +648,7 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
     s.setTextColor(col565(kWhite));
     s.drawString(label, D(50), D(34) + 1);
   }
-  pageDots(c, true);
+  pageTabs(s, c, true);
   radarPill(s, c);
 
   if (!n.valid) {
@@ -614,20 +662,22 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
                                 : "Şarkı bilgisi Windows yardımcı programıyla gelir",
                  kW / 2, kH / 2 + D(16));
     s.setTextDatum(textdatum_t::middle_right);
-    s.drawString("Sağa kaydır: tuşlar", kW - kMusicPad, kCtrlY);
+    s.drawString("Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY);
     s.setTextDatum(textdatum_t::top_left);
     return;
   }
 
   const int tx = kMusicPad, tw = kW - 2 * kMusicPad;
   char buf[176];
-  displayFontSetBitmap(s, &ui::font::SansBold18);
-  s.setTextDatum(textdatum_t::top_left);
+  // Title and artist: small and quiet, the artist line placed under the title's own height.
+  displayFontSetBitmap(s, &ui::font::SansBold12);
+  s.setTextDatum(textdatum_t::bottom_left);
   s.setTextColor(col565(kText));
   fitText(s, n.title[0] ? n.title : "Bilinmeyen parça", tw, buf, sizeof(buf));
-  s.drawString(buf, tx, kTitleY);
-  displayFontSetBitmap(s, &ui::font::Sans12);
-  s.setTextColor(col565({214, 217, 236}));
+  const int title_h = s.fontHeight();
+  s.drawString(buf, tx, kTitleY + title_h);
+  displayFontSetBitmap(s, &ui::font::Sans9);
+  s.setTextColor(col565({184, 189, 214}));
   char who[140];
   if (n.artist[0] && n.album[0]) {
     snprintf(who, sizeof(who), "%s · %s", n.artist, n.album);
@@ -635,7 +685,8 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
     strlcpy(who, n.artist[0] ? n.artist : n.album, sizeof(who));
   }
   fitText(s, who, tw, buf, sizeof(buf));
-  s.drawString(buf, tx, kArtistY);
+  s.drawString(buf, tx, kTitleY + title_h + D(6) + s.fontHeight());
+  s.setTextDatum(textdatum_t::top_left);
 
   // Progress: times either side of a gradient bar.
   const uint32_t pos = host::positionNow();
@@ -687,7 +738,7 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   displayFontSetBitmap(s, &ui::font::Sans8);
   s.setTextColor(col565({174, 180, 204}));
   s.setTextDatum(textdatum_t::middle_right);
-  s.drawString("Sağa kaydır: tuşlar", kW - kMusicPad, kCtrlY);
+  s.drawString("Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY);
   s.setTextDatum(textdatum_t::top_left);
 }
 
@@ -712,9 +763,8 @@ void composeInto(Gfx& g, const paint::Canvas& c) {
   if (s_page == Page::Keys) {
     memcpy(c.px, s_keys_base.getBuffer(), kW * kH * 2);
     if (s_pressed >= 0) {
-      int x, y;
-      keyRect(s_pressed, &x, &y);
-      paint::roundRect(c, x, y, kKeyW, kKeyH, D(18), kLavender, 60, {214, 202, 255}, 150);
+      const Box& b = keyBox(s_pressed);
+      paint::roundRect(c, b.x, b.y, b.w, b.h, D(18), kLavender, 60, {214, 202, 255}, 150);
     }
     const bool muted = mutedNow();
     const int pct = levelPercent();
@@ -878,6 +928,8 @@ Touch touch(int fingers, int x, int y) {
       s_key = -1;
       if (inRadar(x, y)) {
         s_target = Target::Back;
+      } else if (tabAt(x, y) != 0) {
+        s_target = Target::Tab;
       } else if (s_page == Page::Keys) {
         if (inKnob(x, y)) {
           if (millis() >= s_user_until_ms) s_user_level = host::active() ? host::volume() : -1;
@@ -916,9 +968,10 @@ Touch touch(int fingers, int x, int y) {
     const int dx = x - s_down_x, dy = y - s_down_y;
     const int move = abs(dx) + abs(dy);
     if (move > s_max_move) s_max_move = move;
-    // A sideways slide anywhere but on the knob / volume bar turns the page.
+    // A sideways slide anywhere but on the knob / volume bar turns the page; it starts
+    // early, so a quick flick over a key is a page turn and not a key press.
     if (s_target != Target::Knob && s_target != Target::VolBar && s_target != Target::Swipe &&
-        abs(dx) > D(40) && abs(dx) > 2 * abs(dy)) {
+        abs(dx) > D(24) && 2 * abs(dx) > 3 * abs(dy)) {
       if (s_target == Target::Key) {
         s_pressed = -1;
         presentSoon();
@@ -976,18 +1029,33 @@ Touch touch(int fingers, int x, int y) {
   y = s_last_y;
   const Target t = s_target;
   s_target = Target::None;
-  switch (t) {
-    case Target::Back:
-      return inRadar(x, y) || s_max_move < D(20) ? Touch::Back : Touch::None;
-    case Target::Swipe: {
-      const int dx = x - s_down_x;
-      if (dx > D(60)) {
-        setPage(Page::Keys);  // finger to the right: keys
-      } else if (dx < -D(60)) {
-        setPage(Page::Music);  // to the left: music
+  {
+    // Finger moved away sideways (also a flick too quick to be seen while moving):
+    // left = keys, right = music.
+    const int dx = x - s_down_x, dy = y - s_down_y;
+    const bool flick = abs(dx) >= D(24) && 2 * abs(dx) > 3 * abs(dy);
+    if (t == Target::Swipe ||
+        (flick && (t == Target::Key || t == Target::None || t == Target::Prev || t == Target::Play ||
+                   t == Target::Next || t == Target::Tab))) {
+      if (t == Target::Key) s_pressed = -1;
+      if (dx >= D(24)) {
+        setPage(Page::Music);
+      } else if (dx <= -D(24)) {
+        setPage(Page::Keys);
+      } else {
+        presentSoon();
       }
       return Touch::None;
     }
+  }
+  switch (t) {
+    case Target::Back:
+      return inRadar(x, y) || s_max_move < D(20) ? Touch::Back : Touch::None;
+    case Target::Swipe:
+      return Touch::None;  // handled above
+    case Target::Tab:
+      if (s_max_move < D(24)) setPage(tabAt(s_down_x, s_down_y) == 1 ? Page::Music : Page::Keys);
+      return Touch::None;
     case Target::Knob:
       if (s_total_deg < 8.0f && s_max_move < D(14) && now - s_down_ms < 700) {
         toggleMute();
@@ -999,20 +1067,23 @@ Touch touch(int fingers, int x, int y) {
       if (s_user_level >= 0) s_user_until_ms = millis() + 1200;
       return Touch::None;
     case Target::Key:
-      if (s_pressed == s_key) {
+      if (s_pressed == s_key && s_max_move < D(16)) {
         fireKey(s_key);
         s_pressed_ms = millis();
         s_flash = true;  // tick() lets go of the highlight
+      } else if (s_pressed >= 0) {
+        s_pressed = -1;  // moved too much: no press
+        presentSoon();
       }
       return Touch::None;
     case Target::Prev:
-      media(Media::Previous);
+      if (s_max_move < D(20)) media(Media::Previous);
       return Touch::None;
     case Target::Play:
-      media(Media::PlayPause);
+      if (s_max_move < D(20)) media(Media::PlayPause);
       return Touch::None;
     case Target::Next:
-      media(Media::Next);
+      if (s_max_move < D(20)) media(Media::Next);
       return Touch::None;
     case Target::VolBar:
       if (s_target_level >= 0 && host::active()) {
