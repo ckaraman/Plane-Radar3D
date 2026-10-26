@@ -313,6 +313,11 @@
       <div class="deck-grid" id="deck-grid" role="group" aria-label="Kontrol tuşları"></div>
       <div class="deck-knob" aria-hidden="true">SES</div>
     </div>
+    <label for="deck-os">Bu kart hangi bilgisayara bağlı? <span class="sub">(ses düğmesinin bir turu sessizden tam sese gider)</span></label>
+    <select id="deck-os" style="margin-bottom:12px">
+      <option value="16">Mac</option>
+      <option value="50">Windows</option>
+    </select>
     <fieldset id="deck-editor">
       <legend id="deck-legend">Tuş 1</legend>
       <label for="deck-label">Tuşta görünen yazı <span class="sub">(boş bırakılabilir)</span></label>
@@ -2057,7 +2062,7 @@
   async function buildDeckBlob(px) {
     const enc = new TextEncoder();
     const head = new Uint8Array(6 + 28 * DECK_SLOTS);
-    head.set([0x44, 0x4B, 1, DECK_SLOTS, px, 0]);
+    head.set([0x44, 0x4B, 1, DECK_SLOTS, px, parseInt($('#deck-os').value, 10) || 16]);
     const icons = [];
     for (let i = 0; i < DECK_SLOTS; i++) {
       const s = deck.slots[i], o = 6 + 28 * i, a = s.action || 'none';
@@ -2147,6 +2152,8 @@
     for (const id of ['#deck-label', '#deck-key-char']) $(id).addEventListener('input', deckEdited);
     for (const id of ['#deck-action', '#deck-ctrl', '#deck-alt', '#deck-shift', '#deck-gui']) $(id).addEventListener('change', deckEdited);
     $('#deck-file').addEventListener('change', deckPicked);
+    try { const os = localStorage.getItem('pr3d-deck-os'); if (os === '16' || os === '50') $('#deck-os').value = os; } catch (_) { /* default Mac */ }
+    $('#deck-os').addEventListener('change', () => { try { localStorage.setItem('pr3d-deck-os', $('#deck-os').value); } catch (_) { /* optional */ } });
     $('#btn-deck-noimg').addEventListener('click', () => { deck.slots[deck.sel].img = ''; deckSave(); renderDeck(); renderDeckEditor(); });
     $('#btn-deck-send').addEventListener('click', sendDeck);
     $('#btn-deck-defaults').addEventListener('click', deckToDefaults);
