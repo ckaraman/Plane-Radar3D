@@ -1,0 +1,14 @@
+pyserial==3.5
+pillow>=10
+pywebview>=5.1
+pystray>=0.19
+pycaw>=20240210
+comtypes>=1.4
+psutil>=5.9
+pywin32>=306
+icoextract>=0.1.5
+winrt-runtime>=2.0
+winrt-Windows.Foundation>=2.0
+winrt-Windows.Foundation.Collections>=2.0
+winrt-Windows.Media.Control>=2.0
+winrt-Windows.Storage.Streams>=2.0

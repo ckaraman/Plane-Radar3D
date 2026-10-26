@@ -19,7 +19,44 @@ permissions:
   contents: read
 
 jobs:
+  # Windows helper for the 5" control screen (tools/deck-windows): one .exe for the site.
+  deckapp:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: tools/deck-windows
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Icon
+        working-directory: tools/deck-windows
+        run: python -c "import app; img = app.tray_image().resize((256, 256)); img.save('icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+      - name: Build
+        working-directory: tools/deck-windows
+        run: >
+          pyinstaller --noconfirm --onefile --windowed --name PlaneRadarDeck --icon icon.ico
+          --add-data "web;web" --collect-all webview --collect-submodules winrt
+          --hidden-import pystray._win32 --hidden-import win32com.client app.py
+      - name: Self test (the packed program starts and loads its parts)
+        working-directory: tools/deck-windows
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\PlaneRadarDeck.exe -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Output "::error::self test failed ($($p.ExitCode))"; exit 1 }
+          Get-Item dist\PlaneRadarDeck.exe | Format-List Name, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deck-windows
+          path: tools/deck-windows/dist/PlaneRadarDeck.exe
+
   firmware:
+    needs: deckapp
+    # The site still goes out (with the firmware) if only the Windows helper failed.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (4", this branch)
@@ -99,6 +136,18 @@ jobs:
             out/ws5b/firmware-merged.bin
             out/ws5b/firmware.bin
 
+      - name: Helper protocol tests (fake card)
+        run: |
+          pip install pyserial pillow
+          python tools/deck-windows/tests/test_core.py
+
+      - name: Windows helper from the deckapp job
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: deck-windows
+          path: out/deck
+
       - name: Assemble web site
         run: |
           set -x
@@ -121,6 +170,7 @@ jobs:
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
+          if [ -f out/deck/PlaneRadarDeck.exe ]; then cp out/deck/PlaneRadarDeck.exe site/; else echo "::warning::Windows helper not built"; fi
           python3 - "$VERSION" "$VERSION_WS5" <<'PY'
           import json, sys
           version, version_ws5 = sys.argv[1], sys.argv[2]
