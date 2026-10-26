@@ -177,6 +177,54 @@ def tray_image():
     return img
 
 
+def _deep_selftest():
+    """CI: touch the Windows APIs once and write what happened to selftest.txt."""
+    import asyncio
+    import traceback
+
+    out = []
+
+    def step(name, fn):
+        try:
+            out.append("%s: %s" % (name, fn()))
+        except Exception:  # noqa: BLE001
+            out.append("%s FAILED: %s" % (name, traceback.format_exc(limit=3).replace("\n", " | ")))
+
+    from deck import actions, media, programs, volume
+
+    step("browsers", lambda: [b["name"] for b in actions.browsers()])
+    step("programs", lambda: len(programs.list_programs()))
+    step("icon", lambda: len(programs.icon_data_url(os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "notepad.exe"))))
+
+    def media_once():
+        async def go():
+            mgr = await media.MediaManager.request_async()
+            s = mgr.get_current_session()
+            return "session=%s" % (s is not None)
+        return asyncio.new_event_loop().run_until_complete(go())
+
+    step("media", media_once)
+
+    def vol():
+        import comtypes
+        comtypes.CoInitialize()
+        ep = volume.VolumeWatcher.__new__(volume.VolumeWatcher)._endpoint()
+        return "%.2f muted=%s" % (ep.GetMasterVolumeLevelScalar(), ep.GetMute())
+
+    step("volume", vol)
+    step("cover", lambda: len(media.cover_jpeg(_test_png(), 800, 480)))
+    with open("selftest.txt", "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
+
+
+def _test_png():
+    import io
+
+    buf = io.BytesIO()
+    tray_image().convert("RGB").resize((300, 300)).save(buf, "PNG")
+    return buf.getvalue()
+
+
 def run():
     if "--selftest" in sys.argv:  # CI: the packaged program starts and its modules load
         from deck import actions, blob, config, device, media, programs, volume  # noqa: F401
@@ -184,6 +232,8 @@ def run():
         import pystray  # noqa: F401
 
         print("ok", VERSION)
+        if "--deep" in sys.argv:
+            _deep_selftest()
         return
 
     # One copy only: a second start shows the first one's window.

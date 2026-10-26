@@ -308,6 +308,7 @@
 
   <section class="card m5" aria-labelledby="h-deck">
     <h2 id="h-deck"><span class="step">5</span>Kontrol tuşları <span class="sub">(stream deck ekranı)</span></h2>
+    <div class="msg info" style="margin-bottom:14px"><strong>Windows için Plane Radar Deck:</strong> tuşları bilgisayardaki bu programla da ayarlayabilirsiniz. Program ayrıca istediğiniz siteyi istediğiniz tarayıcıda açar, program başlatır, gerçek ses seviyesini ve çalan şarkıyı (kapağıyla) karta gönderir. <a class="btn primary" href="PlaneRadarDeck.exe" download style="margin-left:6px">Windows programını indir</a><br><span class="small">İlk açılışta Windows “bilinmeyen yayımcı” uyarısı verebilir: “Ek bilgi → Yine de çalıştır”. Program açıkken bu sayfa karta bağlanamaz; programın menüsünden “Bağlantıyı bırak” deyin.</span></div>
     <p class="hint">Radardaki ızgara düğmesiyle açılan kontrol ekranının 12 tuşuna resim, yazı ve işlev verin. Tuşlar USB kablosundan bilgisayara klavye tuşu olarak gider; sağdaki yuvarlak düğme sesi açar / kısar, dokununca sessize alır. Bir tuşa tıklayıp aşağıdan düzenleyin, sonra “Cihaza gönder”e basın.</p>
     <div class="deck-wrap">
       <div class="deck-grid" id="deck-grid" role="group" aria-label="Kontrol tuşları"></div>
@@ -1930,7 +1931,7 @@
   // Stream deck keys on the 5" board. Blob format: firmware include/services/deck_store.h.
   // Media codes = services::hid::Media (0 vol+, 1 vol-, 2 mute, 3 play/pause, 4 next, 5 prev),
   // key codes = Arduino keyboard codes (F13 = 0xF0 ... F24 = 0xFB, letters as lowercase ASCII).
-  const DECK_SLOTS = 12, DECK_KEY_BG = [18, 30, 46];
+  const DECK_SLOTS = 12, DECK_KEY_BG = [36, 40, 73]; // a key on the card's new background
   const DECK_ACTIONS = [['none', 'Boş (bir şey yapmaz)'], ['m3', 'Oynat / Duraklat'], ['m5', 'Önceki parça'],
     ['m4', 'Sonraki parça'], ['m0', 'Ses +'], ['m1', 'Ses -'], ['m2', 'Sessiz']];
   for (let i = 0; i < 12; i++) DECK_ACTIONS.push(['k' + (0xF0 + i), 'F' + (13 + i) + ' tuşu']);
