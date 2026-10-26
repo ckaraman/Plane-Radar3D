@@ -22,9 +22,21 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install PlatformIO
-        run: pip install "platformio==6.1.18" "click<8.2" uv
+        run: |
+          python -m venv "$HOME/pio-s3"
+          "$HOME/pio-s3/bin/pip" install "platformio==6.1.18" "click<8.2" uv
       - name: Build
-        run: PLATFORMIO_CORE_DIR=~/.pio-${{ matrix.env }} pio run -e ${{ matrix.env }}
+        run: |
+          export PATH="$HOME/pio-s3/bin:$PATH"
+          set -o pipefail
+          PLATFORMIO_CORE_DIR="$HOME/.pio-core-${{ matrix.env }}" pio run -e ${{ matrix.env }} 2>&1 | tee build.log || {
+            # Errors as annotations (readable from the API without the log download).
+            grep -nE "error|Error|undefined reference" build.log | head -40 | while IFS= read -r l; do
+              echo "::error::${l:0:900}"
+            done
+            tail -15 build.log | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
+            exit 1
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.env }}
