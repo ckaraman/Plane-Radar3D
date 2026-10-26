@@ -19,6 +19,7 @@
 #include "services/clock_service.h"
 #include "services/display_prefs.h"
 #include "services/deck_store.h"
+#include "services/host_link.h"
 #include "services/hid_keys.h"
 #include "services/map_store.h"
 #include "services/radar_location.h"
@@ -576,10 +577,13 @@ void loop() {
       pollTouch();
       // 5": the radar redraws as fast as it can (camera moves smoothly); the other
       // screens keep the slow cadence.
-      const unsigned long interval =
+      unsigned long interval =
           g_screen == Screen::Radar ? config::kRadarFrameIntervalMs
           : g_screen == Screen::Deck ? 33UL  // knob and music page move smoothly
                                      : config::kRadarRedrawIntervalMs;
+      // An album cover on its way from the Windows helper: one small chunk per answer, so
+      // fewer frames for those few seconds let it arrive many times faster.
+      if (services::host::coverReceiving() && interval < 250UL) interval = 250UL;
       if (millis() - g_last_redraw_ms >= interval) {
         g_last_redraw_ms = millis();
         updateScreen();

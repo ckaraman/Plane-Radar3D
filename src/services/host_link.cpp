@@ -101,6 +101,7 @@ const uint8_t* cover(size_t* len, int* w, int* h) {
   return s_cover;
 }
 uint32_t coverId() { return s_cover_id; }
+bool coverReceiving() { return s_stage != nullptr && millis() - s_last_ms < 1500; }
 uint32_t coverGeneration() { return s_cover_gen; }
 
 void handleVol(const char* json) {

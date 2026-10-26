@@ -60,6 +60,9 @@ uint32_t nowGeneration();
  *  generation. */
 const uint8_t* cover(size_t* len, int* w = nullptr, int* h = nullptr);
 uint32_t coverId();
+/** True while a cover is coming in (the screen then redraws less often, so each chunk
+ *  is answered quickly). */
+bool coverReceiving();
 uint32_t coverGeneration();
 
 // Line handlers (serial_setup).

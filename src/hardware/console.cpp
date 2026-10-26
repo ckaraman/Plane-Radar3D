@@ -4,6 +4,8 @@
 #include <Preferences.h>
 #include <USB.h>
 #include <USBCDC.h>
+
+#include <algorithm>
 #include <esp_private/periph_ctrl.h>
 #include <soc/rtc_cntl_reg.h>
 #include <soc/usb_serial_jtag_reg.h>
@@ -138,7 +140,32 @@ int ConsoleIO::peek() { return console::s_io ? console::s_io->peek() : -1; }
 void ConsoleIO::flush() {
   if (console::s_io) console::s_io->flush();
 }
-size_t ConsoleIO::write(uint8_t c) { return console::s_io ? console::s_io->write(c) : 0; }
+size_t ConsoleIO::write(uint8_t c) { return write(&c, 1); }
 size_t ConsoleIO::write(const uint8_t* buffer, size_t size) {
-  return console::s_io ? console::s_io->write(buffer, size) : 0;
+  if (console::s_io == nullptr) return 0;
+  if (console::s_cdc == nullptr) return console::s_io->write(buffer, size);
+  // Keyboard mode: USBCDC::write() spins for ever while the computer reads nothing (a
+  // stalled TinyUSB port, a program that holds the port without reading): the whole card
+  // would hang. Only what fits is written; after a short wait the rest is dropped.
+  static unsigned long s_stalled_ms = 0;
+  size_t done = 0;
+  const unsigned long t0 = millis();
+  while (done < size) {
+    const int room = console::s_cdc->availableForWrite();
+    if (room <= 0) {
+      const bool recently = s_stalled_ms != 0 && millis() - s_stalled_ms < 1000;
+      if (recently || millis() - t0 >= 30) {
+        s_stalled_ms = millis();
+        break;
+      }
+      delay(1);
+      continue;
+    }
+    const size_t n = std::min(static_cast<size_t>(room), size - done);
+    const size_t w = console::s_cdc->write(buffer + done, n);
+    if (w == 0) break;
+    done += w;
+  }
+  if (done == size) s_stalled_ms = 0;
+  return size;  // dropped bytes count as written: callers must not retry
 }
