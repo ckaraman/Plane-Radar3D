@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 
 
@@ -60,42 +60,42 @@ class Api:
     """Called from web/index.html through pywebview (window.pywebview.api.*)."""
 
     def __init__(self, core):
-        self.core = core
-        self.window = None
+        self._core = core
+        self._window = None
 
     def state(self):
         from deck import actions
 
-        slots, settings = self.core.config.snapshot()
-        v = self.core.volume
+        slots, settings = self._core.config.snapshot()
+        v = self._core.volume
         return {
             "version": VERSION, "slots": slots, "settings": settings,
-            "device": self.core.device.status(), "volume": {"v": v.level, "m": v.muted},
-            "now": self.core.now, "browsers": [{"id": b["id"], "name": b["name"]} for b in actions.browsers()],
-            "upload": dict(self.core.upload),
+            "device": self._core.device.status(), "volume": {"v": v.level, "m": v.muted},
+            "now": self._core.now, "browsers": [{"id": b["id"], "name": b["name"]} for b in actions.browsers()],
+            "upload": dict(self._core.upload),
         }
 
     def live(self):
-        v = self.core.volume
-        return {"device": self.core.device.status(), "volume": {"v": v.level, "m": v.muted},
-                "now": self.core.now, "upload": dict(self.core.upload)}
+        v = self._core.volume
+        return {"device": self._core.device.status(), "volume": {"v": v.level, "m": v.muted},
+                "now": self._core.now, "upload": dict(self._core.upload)}
 
     def save_slots(self, slots):
-        self.core.config.set_slots(slots)
+        self._core.config.set_slots(slots)
         return True
 
     def save_settings(self, settings):
-        self.core.config.set_settings(settings)
+        self._core.config.set_settings(settings)
         try:
-            set_autostart(bool(self.core.config.settings.get("autostart", True)))
+            set_autostart(bool(self._core.config.settings.get("autostart", True)))
         except OSError as e:
             log("autostart: %s" % e)
-        self.core._send_now()
+        self._core._send_now()
         return True
 
     def send_to_card(self, slots):
-        self.core.config.set_slots(slots)
-        return self.core.send_keys_to_card()
+        self._core.config.set_slots(slots)
+        return self._core.send_keys_to_card()
 
     def test(self, action):
         from deck import actions
@@ -114,7 +114,7 @@ class Api:
         return programs.icon_data_url(path)
 
     def _dialog(self, kind, types=()):
-        w = self.window
+        w = self._window
         if w is None:
             return None
         res = w.create_file_dialog(kind, file_types=tuple(types))
@@ -147,11 +147,19 @@ class Api:
         return self._dialog(webview.FOLDER_DIALOG) or ""
 
     def release(self, released):
-        self.core.device.release(bool(released))
-        return self.core.device.status()
+        self._core.device.release(bool(released))
+        return self._core.device.status()
 
     def logs(self):
         return "\n".join(LOG_LINES[-200:])
+
+    def exit(self):
+        """'Programı kapat' in the window."""
+        threading.Thread(target=self._quit, daemon=True).start()
+        return True
+
+    def _quit(self):  # replaced in run()
+        os._exit(0)
 
 
 # ------------------------------------------------------------------ tray
@@ -259,32 +267,53 @@ def run():
     except OSError as e:
         log("autostart: %s" % e)
     api = Api(core)
-    start_hidden = "--tray" in sys.argv
-    window = webview.create_window(APP_NAME, resource("web", "index.html"), js_api=api, width=1240, height=820,
-                                   min_size=(900, 640), hidden=start_hidden, background_color="#111634")
-    api.window = window
-    quitting = {"now": False}
 
-    def on_closing():
-        if quitting["now"]:
-            return True
-        window.hide()  # closing the window keeps the helper running in the tray
-        return False
+    # pywebview runs one GUI loop, which ends when its last window closes. A hidden
+    # keeper window keeps it alive, so the editor window can be closed and opened again
+    # from the tray as often as wanted.
+    webview.create_window("PlaneRadarDeck", html="<html><body></body></html>", hidden=True, width=200, height=100)
+    lock = threading.Lock()
 
-    window.events.closing += on_closing
+    def open_editor(*_):
+        with lock:
+            w = api._window
+            if w is not None:
+                try:
+                    w.show()
+                    w.restore()
+                    w.on_top = True   # to the front, then normal again
+                    w.on_top = False
+                    return
+                except Exception:  # noqa: BLE001 - it was closed meanwhile
+                    api._window = None
+            w = webview.create_window(APP_NAME, resource("web", "index.html"), js_api=api, width=1240, height=820,
+                                      min_size=(900, 640), background_color="#111634")
 
-    def show(*_):
-        window.show()
-        window.restore()
+            def closed():
+                if api._window is w:
+                    api._window = None
+                if core.config.settings.get("close_quits", False):
+                    quit_app()
 
-    def toggle_release(icon, item):
+            w.events.closed += closed
+            api._window = w
+
+    def quit_app(*_):
+        log("quit")
+        try:
+            core.device.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            icon.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        os._exit(0)  # the whole program: tray, card link, browser engine
+
+    api._quit = quit_app
+
+    def toggle_release(_icon, _item):
         core.device.release(not core.device.released)
-
-    def quit_app(icon, _item):
-        quitting["now"] = True
-        core.device.stop()
-        icon.stop()
-        window.destroy()
 
     def status_text(_item):
         st = core.device.status()
@@ -296,11 +325,11 @@ def run():
 
     menu = pystray.Menu(
         pystray.MenuItem(status_text, None, enabled=False),
-        pystray.MenuItem("Tuşları düzenle…", show, default=True),
+        pystray.MenuItem("Tuşları düzenle…", open_editor, default=True),
         pystray.MenuItem("Bağlantıyı bırak (kurulum sayfası için)", toggle_release,
                          checked=lambda _i: core.device.released),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Çıkış", quit_app),
+        pystray.MenuItem("Programı kapat", quit_app),
     )
     icon = pystray.Icon("PlaneRadarDeck", tray_image(), APP_NAME, menu)
     icon.run_detached()
@@ -310,12 +339,18 @@ def run():
             try:
                 conn, _ = srv.accept()
                 conn.close()
-                show()
+                open_editor()
             except OSError:
                 return
 
     threading.Thread(target=listen, daemon=True).start()
-    webview.start(gui="edgechromium", debug="--debug" in sys.argv)
+
+    def first():
+        if "--tray" not in sys.argv:
+            open_editor()
+
+    webview.start(first, gui="edgechromium", debug="--debug" in sys.argv)
+    quit_app()  # the GUI loop ended: nothing left to show, close everything
 
 
 if __name__ == "__main__":

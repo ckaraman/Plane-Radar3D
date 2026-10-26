@@ -42,6 +42,7 @@ DEFAULT_SETTINGS = {
     "back_seconds": 60,         # after a stop, back to the keys (-1 = never)
     "send_volume": True,        # real volume on the card
     "steps": 50,                # volume keys per full knob turn without the helper (Windows: 2 %)
+    "close_quits": False,       # closing the window ends the program (else it stays in the tray)
 }
 
 

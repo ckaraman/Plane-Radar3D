@@ -179,6 +179,8 @@
           <h2 style="margin-top: 16px">Genel</h2>
           <div class="opt"><label for="s-auto">Windows açılınca kendiliğinden başlat (görev çubuğunda)</label><input type="checkbox" id="s-auto"></div>
           <div class="opt"><label for="s-vol">Gerçek ses seviyesini kartta göster</label><input type="checkbox" id="s-vol"></div>
+          <div class="opt"><label for="s-close">Pencereyi kapatınca programdan tamamen çık<br><span class="small">Kapalıyken program görev çubuğunda çalışmaya devam eder; tuşlar ve müzik ekranı çalışır.</span></label><input type="checkbox" id="s-close"></div>
+          <div class="btns" style="margin: 8px 0 16px"><button type="button" class="btn" id="b-exit">Programı kapat</button></div>
         </div>
         <div class="card">
           <h2>Kart</h2>
@@ -434,9 +436,11 @@
     S.settings.send_volume = $('#s-vol').checked;
     S.settings.music_screen = $('#s-music').checked;
     S.settings.back_seconds = parseInt($('#s-back').value, 10);
+    S.settings.close_quits = $('#s-close').checked;
     api().save_settings(S.settings);
   }
-  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back']) $(id).addEventListener('change', saveSettings);
+  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close']) $(id).addEventListener('change', saveSettings);
+  $('#b-exit').addEventListener('click', () => { if (confirm('Program tamamen kapansın mı? Kartın tuşlarından site ve program açma, gerçek ses ve müzik ekranı program yeniden açılana kadar çalışmaz.')) api().exit(); });
   $('#b-release').addEventListener('click', async () => { const st = await api().release(!S.device.released); applyDevice(st); });
 
   function applyDevice(d) {
@@ -474,6 +478,7 @@
     $('#s-vol').checked = !!S.settings.send_volume;
     $('#s-music').checked = !!S.settings.music_screen;
     $('#s-back').value = String(S.settings.back_seconds);
+    $('#s-close').checked = !!S.settings.close_quits;
     $('#c-app').textContent = 'Plane Radar Deck ' + st.version;
     renderGrid(); renderEditor(); applyLive(st);
     setInterval(async () => { try { applyLive(await api().live()); } catch (_) { /* window closing */ } }, 1000);
