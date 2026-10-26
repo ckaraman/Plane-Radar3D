@@ -267,11 +267,11 @@ class Device:
             return r[1]
 
     def send_cover(self, jpeg, track_id, w=0, h=0, abort=lambda: False):
-        """Album cover in keyboard mode: small chunks (the TinyUSB port loses long bursts),
-        a few on the way at once with firmware 0.32+."""
+        """Album cover in keyboard mode: small chunks, each answered before the next (the
+        TinyUSB port stalls on bursts; 0.32.1+ redraws less meanwhile, so it is quick)."""
         if not self.connected or self.busy:
             return False
-        win = 4 if (self.hello or {}).get("hostv", 1) >= 2 else 1
+        win = 1  # keyboard mode: one chunk at a time (the TinyUSB port stalls on bursts)
         try:
             t0 = time.time()
             self._transfer("COVER", jpeg, 180, win, {"id": track_id, "w": w, "h": h},

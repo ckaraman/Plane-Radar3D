@@ -66,7 +66,7 @@ def cover_size(raw):
         return (0, 0)
 
 
-def cover_jpeg(raw, w, h, max_bytes=140 * 1024):
+def cover_jpeg(raw, w, h, max_bytes=72 * 1024):
     """Album art for a w x h screen: as large as fits the screen height (the card shows it
     in the middle with fading edges), sharp, as a baseline JPEG. -> (jpeg, width, height)"""
     img = _trim_bars(Image.open(io.BytesIO(raw)).convert("RGB"))
@@ -78,7 +78,7 @@ def cover_jpeg(raw, w, h, max_bytes=140 * 1024):
             from PIL import ImageFilter
 
             img = img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=60, threshold=2))
-    for q in (92, 88, 82, 75, 65):
+    for q in (90, 86, 80, 72, 62):
         out = io.BytesIO()
         img.save(out, "JPEG", quality=q, optimize=True, subsampling=0 if q >= 88 else 2)  # baseline
         if out.tell() <= max_bytes:

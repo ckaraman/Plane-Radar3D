@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 
 
@@ -157,6 +157,39 @@ class Api:
 
     def logs(self):
         return "\n".join(LOG_LINES[-200:])
+
+    def _log_text(self):
+        st = self._core.device.status()
+        head = "Plane Radar Deck %s, kart: %s %s, port %s" % (VERSION, st.get("fw"), st.get("usb"), st.get("port"))
+        return head + "\n" + "\n".join(LOG_LINES[-300:])
+
+    def copy_logs(self):
+        try:
+            import win32clipboard
+
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(self._log_text(), win32clipboard.CF_UNICODETEXT)
+            finally:
+                win32clipboard.CloseClipboard()
+            return True
+        except Exception as e:  # noqa: BLE001
+            log("copy: %s" % e)
+            return False
+
+    def save_logs(self):
+        try:
+            desk = os.path.join(os.path.expanduser("~"), "Desktop")
+            if not os.path.isdir(desk):
+                desk = os.path.expanduser("~")
+            path = os.path.join(desk, "PlaneRadarDeck-kayit.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self._log_text())
+            return path
+        except OSError as e:
+            log("save log: %s" % e)
+            return ""
 
     def exit(self):
         """'Programı kapat' in the window."""
