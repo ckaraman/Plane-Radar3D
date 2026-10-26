@@ -346,8 +346,38 @@ def run():
     threading.Thread(target=listen, daemon=True).start()
 
     def first():
-        if "--tray" not in sys.argv:
+        if "--smoke" in sys.argv:
+            smoke()
+        elif "--tray" not in sys.argv:
             open_editor()
+
+    def smoke():
+        """CI: open the editor, close it, open it again, check the page each time, quit."""
+        res = []
+        for round_ in (1, 2):
+            open_editor()
+            ok = False
+            for _ in range(60):
+                time.sleep(0.5)
+                w = api._window
+                try:
+                    if w is not None and w.evaluate_js("document.querySelectorAll('#grid .key').length") == 12:
+                        ok = True
+                        break
+                except Exception:  # noqa: BLE001 - page still loading
+                    pass
+            res.append("round %d editor %s" % (round_, "ok" if ok else "FAILED"))
+            w = api._window
+            if w is not None:
+                w.destroy()
+            for _ in range(20):
+                time.sleep(0.25)
+                if api._window is None:
+                    break
+            res.append("round %d closed %s" % (round_, "ok" if api._window is None else "FAILED"))
+        with open("smoke.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(res))
+        quit_app()
 
     webview.start(first, gui="edgechromium", debug="--debug" in sys.argv)
     quit_app()  # the GUI loop ended: nothing left to show, close everything
