@@ -84,6 +84,17 @@
   .model { text-align: left; padding: 14px; min-height: 92px; font: inherit; color: var(--text); cursor: pointer;
     background: var(--field); border: 2px solid var(--line); border-radius: 12px; }
   .model:hover { border-color: var(--accent); }
+  .deck-wrap { display: flex; gap: 12px; align-items: center; margin: 8px 0 14px; }
+  .deck-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; flex: 1; }
+  .deck-key { aspect-ratio: 1.05; border-radius: 10px; background: #12202e; color: #fff; border: 2px solid #30566e;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit;
+    font-size: .78rem; line-height: 1.15; cursor: pointer; padding: 4px; overflow: hidden; text-align: center; }
+  .deck-key img { width: 52%; height: 52%; object-fit: contain; }
+  .deck-key[aria-pressed="true"] { border-color: var(--accent); outline: 3px solid var(--accent); outline-offset: 1px; }
+  .deck-knob { width: 26%; aspect-ratio: 1; border-radius: 50%; flex: none; display: flex; align-items: center;
+    justify-content: center; font-weight: 700; color: #9db0bc; background: #0e1824; border: 10px solid #1c3042; }
+  #deck-editor { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 0 0 12px; }
+  #deck-editor legend { font-weight: 600; padding: 0 6px; }
   .model strong { display: block; font-size: 1.1rem; margin-bottom: 2px; }
   .model span { color: var(--muted); font-size: .9rem; }
   /* Nothing below the model question until a model is picked; then only that model's parts. */
@@ -293,6 +304,45 @@
     <p class="small"><strong>Windows:</strong> Zip dosyasını ayıklayın ve <strong>USB-Kopru-Baslat.bat</strong> dosyasına çift tıklayın. Windows uyarı verirse “Ek bilgi → Yine de çalıştır” deyin.</p>
     <p class="small"><strong>Mac:</strong> Terminal'i açın, <code>python3 </code> yazın (sonunda boşluk), indirilen <strong>usb-kopru-mac</strong> klasöründeki <strong>radar_kopru.py</strong> dosyasını Terminal penceresine sürükleyin ve Enter'a basın. macOS “komut satırı geliştirici araçları”nı kurmayı önerirse “Yükle” deyin (tek seferlik). Çift tıklamayla açmak için bir kez Terminal'de <code>xattr -dr com.apple.quarantine ~/Downloads/usb-kopru-mac</code> çalıştırın; sonra <strong>Kopru-Baslat.command</strong> açılır (macOS “Done / Move to Trash” uyarısını bu yüzden verir, “Move to Trash” demeyin).</p>
     <p class="small">Köprü çalışırken bu sayfanın cihaza bağlı olmaması gerekir: önce yukarıdan “Bağlantıyı kes”e basın. Köprü penceresi açık kaldığı sürece radar çalışır.</p>
+  </section>
+
+  <section class="card m5" aria-labelledby="h-deck">
+    <h2 id="h-deck"><span class="step">5</span>Kontrol tuşları <span class="sub">(stream deck ekranı)</span></h2>
+    <p class="hint">Radardaki ızgara düğmesiyle açılan kontrol ekranının 12 tuşuna resim, yazı ve işlev verin. Tuşlar USB kablosundan bilgisayara klavye tuşu olarak gider; sağdaki yuvarlak düğme sesi açar / kısar, dokununca sessize alır. Bir tuşa tıklayıp aşağıdan düzenleyin, sonra “Cihaza gönder”e basın.</p>
+    <div class="deck-wrap">
+      <div class="deck-grid" id="deck-grid" role="group" aria-label="Kontrol tuşları"></div>
+      <div class="deck-knob" aria-hidden="true">SES</div>
+    </div>
+    <fieldset id="deck-editor">
+      <legend id="deck-legend">Tuş 1</legend>
+      <label for="deck-label">Tuşta görünen yazı <span class="sub">(boş bırakılabilir)</span></label>
+      <input id="deck-label" type="text" maxlength="22" autocomplete="off">
+      <label for="deck-action" style="margin-top:10px">İşlev</label>
+      <select id="deck-action"></select>
+      <div id="deck-combo" hidden style="margin-top:10px">
+        <div class="checks">
+          <label><input type="checkbox" id="deck-ctrl"> Ctrl</label>
+          <label><input type="checkbox" id="deck-alt"> Alt <span class="sub">(Mac: Option)</span></label>
+          <label><input type="checkbox" id="deck-shift"> Shift</label>
+          <label><input type="checkbox" id="deck-gui"> Win <span class="sub">(Mac: Cmd)</span></label>
+        </div>
+        <label for="deck-key-char" style="margin-top:8px">Tuş <span class="sub">(bir harf ya da rakam, a-z / 0-9)</span></label>
+        <input id="deck-key-char" type="text" maxlength="1" autocomplete="off" style="max-width:6em">
+      </div>
+      <label for="deck-file" style="margin-top:10px">Resim <span class="sub">(PNG, JPG, SVG; şeffaf alanlar tuş renginde görünür)</span></label>
+      <div class="row">
+        <input id="deck-file" type="file" accept="image/*">
+        <button type="button" class="btn" id="btn-deck-noimg">Resmi kaldır</button>
+      </div>
+    </fieldset>
+    <div class="row">
+      <button type="button" class="btn primary" id="btn-deck-send" disabled>Cihaza gönder</button>
+      <button type="button" class="btn" id="btn-deck-defaults">Varsayılan tuşlara dön</button>
+    </div>
+    <progress id="deck-progress" max="100" value="0" hidden style="width:100%;margin-top:10px"></progress>
+    <div class="msg" id="msg-deck" role="status" hidden></div>
+    <p class="small"><strong>Bir web sitesini ya da programı açtırmak için</strong> tuşa F13–F24'ten birini verin ve bilgisayarda o tuşu bir işe bağlayın. Windows'ta AutoHotkey ile tek satır yeter, ör. <code>F13::Run "https://youtube.com"</code>. Mac'te Kestirmeler uygulamasında “URL Aç” kestirmesine klavye kısayolu atayın ya da Hammerspoon kullanın (Mac F13–F20'yi tanır).</p>
+    <p class="small">Gönderirken kart birkaç saniyeliğine kurulum moduna geçer (tuşlar o sırada çalışmaz), bitince klavye moduna döner. Düzenlediğiniz tuşlar bu tarayıcıda da saklanır.</p>
   </section>
 
   </div><!-- #steps -->
@@ -548,6 +598,11 @@
       // The start line is retried a few times: on a device busy with Wi-Fi (TLS takes
       // most of the free memory for a moment) an older firmware can fail to read it.
       const fwCrc = crc32(fw);
+      // 5in-0.29.x ran USB as a keyboard without the setup mode: its serial port stalls on
+      // the update. Those two versions are updated once with the old method (BOOT + RESET).
+      if (/^5in-0\.29\./.test(String((state.device && state.device.fw) || ''))) throw new Error('fw029');
+      await ensureSetupUsb(msg);
+      setMsg(msg, 'info', 'Yazılım cihaza gönderiliyor…');
       let begin = null;
       for (let attempt = 1; attempt <= 5; attempt++) {
         try {
@@ -627,17 +682,69 @@
       try { if (state.port) await sendLine('PR:OTAABORT'); } catch (_) { /* gone */ }
       const m = String(e && e.message ? e.message : e);
       const old = /unknown_command|ota_not_started/.test(m);
-      setMsg(msg, 'err', old
+      setMsg(msg, 'err', m === 'fw029'
+        ? 'Cihazdaki 5in-0.29 sürümü bu düğmeyle güncellenemiyor (USB klavye modunun bir hatası). Bir kereliğine aşağıdaki “Gelişmiş → Eski yöntemle güncelle”yi kullanın: kartın BOOT tuşunu basılı tutup RESET’e basın, BOOT’u bırakın, sonra düğmeye basıp kartı seçin. Ayarlar silinmez; sonraki güncellemeler yine bu düğmeyle olur.'
+        : old
         ? 'Cihazdaki yazılım USB güncellemeyi henüz bilmiyor. Bir kereliğine aşağıdaki “Gelişmiş → Tam kurulum” ile yükleyin; sonraki güncellemeler bu düğmeyle olur.'
-        : 'Güncelleme tamamlanamadı (' + m + '). Cihaz eski yazılımla çalışmaya devam eder; tekrar deneyin.');
+        : ERRORS[m] || ('Güncelleme tamamlanamadı (' + m + '). Cihaz eski yazılımla çalışmaya devam eder; tekrar deneyin.'));
     } finally {
       btn.disabled = !state.connected;
     }
   }
 
   async function disconnect() {
+    // A 5" board left in setup mode goes back to keyboard mode (stream deck) right away.
+    if (state.port && state.device && state.device.usb === 'setup') {
+      state.expectingDrop = true;
+      try { await request('PR:USBNORMAL', ['USBMODE'], 2000); } catch (_) { /* old firmware or gone */ }
+    }
     await closePort();
     renderConnection();
+  }
+
+  // ------------------------------------------------------------ USB modes
+  // 5" board from 5in-0.30: its one USB port is a USB keyboard + serial port ("kb") for the
+  // stream deck, or the plain USB-Serial/JTAG port ("setup"). Long uploads need setup mode:
+  // the keyboard-mode serial port loses data on them. Firmware: include/hardware/console.h.
+  async function ensureSetupUsb(msg) {
+    const dev = state.device || {};
+    if (dev.usb !== 'kb') return; // already in setup mode, or firmware without the two modes
+    if (msg) setMsg(msg, 'info', 'Kart kurulum moduna geçiyor (birkaç saniye)…');
+    note('USB kurulum moduna geçiliyor');
+    state.expectingDrop = true;
+    try { await request('PR:USBSETUP', ['USBMODE'], 3000); } catch (_) { /* it restarts anyway */ }
+    await closePort();
+    let port = null;
+    for (let i = 0; i < 30 && !port; i++) {
+      await sleep(500);
+      try {
+        const ports = await navigator.serial.getPorts();
+        port = ports.find((p) => { const f = p.getInfo(); return f.usbVendorId === 0x303a && f.usbProductId === 0x1001; }) || null;
+      } catch (_) { /* retry */ }
+    }
+    if (!port) {
+      state.expectingDrop = false;
+      renderConnection();
+      throw new Error('usb_reselect');
+    }
+    await sleep(700);
+    try { await openPort(port); } catch (_) { state.expectingDrop = false; renderConnection(); throw new Error('usb_mode'); }
+    const d = await handshake();
+    state.expectingDrop = false;
+    if (!d) { await closePort(); renderConnection(); throw new Error('usb_mode'); }
+    state.device = d;
+    state.connected = true;
+    renderConnection();
+  }
+
+  // After a deck upload: back to keyboard mode now (else the board waits a few minutes).
+  async function backToKeyboard() {
+    if (!(state.port && state.device && state.device.usb === 'setup')) return false;
+    state.expectingDrop = true;
+    try { await request('PR:USBNORMAL', ['USBMODE'], 2000); } catch (_) { /* restarting */ }
+    await closePort();
+    renderConnection();
+    return true;
   }
 
   function onPortLost() {
@@ -660,6 +767,7 @@
     $('#settings-fields').disabled = !on;
     $('#btn-reset').disabled = !on;
     $('#btn-usb-update').disabled = !on;
+    $('#btn-deck-send').disabled = !on;
     $('#settings-hint').hidden = on;
     const chips = $('#device-chips');
     chips.hidden = !on;
@@ -673,6 +781,7 @@
         'Kimlik ' + d.mac,
       ];
       if (d.map > 0) items.push('Harita: ' + Math.round(d.map / 1024) + ' KB');
+      if (d.usb) items.push(d.usb === 'kb' ? 'USB: klavye modu' : 'USB: kurulum modu');
       for (const t of items) {
         const s = document.createElement('span');
         s.className = 'chip';
@@ -845,6 +954,12 @@
     map_too_big: 'Harita cihaz hafızasına sığmadı.',
     bad_map: 'Harita cihazda doğrulanamadı (veri bozuk geldi).',
     bad_map_chunk: 'Harita verisi cihaza bozuk ulaştı.',
+    usb_reselect: 'Kart kurulum moduna geçti ama tarayıcı onu henüz tanımıyor. 1. adımdan “Cihaza bağlan”a basıp listedeki kartı seçin, sonra işlemi tekrar başlatın (yalnızca ilk seferde gerekir).',
+    usb_mode: 'Kart kurulum moduna geçtikten sonra yanıt vermedi. Tekrar bağlanıp deneyin.',
+    usb_setup: 'Kart klavye modunda kaldı. Sayfayı yenileyip tekrar bağlanın.',
+    deck_too_big: 'Tuş verisi cihaza sığmadı.',
+    bad_deck: 'Tuş verisi cihazda doğrulanamadı (bozuk geldi), tekrar gönderin.',
+    bad_deck_chunk: 'Tuş verisi cihaza bozuk ulaştı, tekrar gönderin.',
   };
 
 
@@ -1475,6 +1590,7 @@
   }
 
   async function uploadMap(blob, onProgress) {
+    await ensureSetupUsb(null);
     const ack = async (cmd, timeout) => {
       const r = await request(cmd, ['MAPACK', 'ERR'], timeout);
       if (r.tag === 'ERR') throw new Error(r.data.msg || 'map-error');
@@ -1653,6 +1769,7 @@
         if (r.tag === 'ERR') throw new Error(r.data.msg || 'elev');
         return r;
       };
+      await ensureSetupUsb(null);
       await ack('PR:ELEVBEGIN ' + JSON.stringify({ n: N, half: Math.round(half * 100) / 100, lat, lon }));
       for (let r = 0; r < N; r++) await ack('PR:ELEVROW ' + r + ' ' + h.slice(r * N, (r + 1) * N).join(','));
       const done = await request('PR:ELEVEND', ['OK', 'ERR'], 5000);
@@ -1804,6 +1921,237 @@
     }
   }
 
+  // ---------------------------------------------------------- deck keys
+  // Stream deck keys on the 5" board. Blob format: firmware include/services/deck_store.h.
+  // Media codes = services::hid::Media (0 vol+, 1 vol-, 2 mute, 3 play/pause, 4 next, 5 prev),
+  // key codes = Arduino keyboard codes (F13 = 0xF0 ... F24 = 0xFB, letters as lowercase ASCII).
+  const DECK_SLOTS = 12, DECK_KEY_BG = [18, 30, 46];
+  const DECK_ACTIONS = [['none', 'Boş (bir şey yapmaz)'], ['m3', 'Oynat / Duraklat'], ['m5', 'Önceki parça'],
+    ['m4', 'Sonraki parça'], ['m0', 'Ses +'], ['m1', 'Ses -'], ['m2', 'Sessiz']];
+  for (let i = 0; i < 12; i++) DECK_ACTIONS.push(['k' + (0xF0 + i), 'F' + (13 + i) + ' tuşu']);
+  DECK_ACTIONS.push(['combo', 'Özel kısayol (Ctrl / Alt / Shift / Win + tuş)']);
+  const MEDIA_GLYPH = { m0: '🔊+', m1: '🔉−', m2: '🔇', m3: '⏯', m4: '⏭', m5: '⏮' };
+  const deckDefaults = () => {
+    const d = [{ label: 'Önceki', action: 'm5' }, { label: 'Oynat / Dur', action: 'm3' }, { label: 'Sonraki', action: 'm4' }];
+    for (let i = 0; i < 8; i++) d.push({ label: 'F' + (13 + i), action: 'k' + (0xF0 + i) });
+    d.push({ label: 'Kısayol P', action: 'combo', mods: 7, key: 'p' });
+    return d.map((x) => Object.assign({ mods: 0, key: '', img: '' }, x));
+  };
+  const deck = { slots: deckDefaults(), sel: 0 };
+
+  function deckLoad() {
+    try {
+      const v = JSON.parse(localStorage.getItem('pr3d-deck') || 'null');
+      if (Array.isArray(v) && v.length === DECK_SLOTS) deck.slots = v.map((x) => Object.assign({ label: '', action: 'none', mods: 0, key: '', img: '' }, x));
+    } catch (_) { /* defaults */ }
+  }
+  function deckSave() {
+    try { localStorage.setItem('pr3d-deck', JSON.stringify(deck.slots)); } catch (_) {
+      setMsg($('#msg-deck'), 'warn', 'Tarayıcı tuşları saklayamadı (yer yok); gönderebilirsiniz ama sayfayı kapatınca düzenlemeler kaybolur.');
+    }
+  }
+
+  function renderDeck() {
+    const grid = $('#deck-grid');
+    grid.textContent = '';
+    deck.slots.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'deck-key';
+      b.setAttribute('aria-pressed', String(i === deck.sel));
+      b.setAttribute('aria-label', 'Tuş ' + (i + 1) + (s.label ? ': ' + s.label : ''));
+      if (s.img) {
+        const im = document.createElement('img');
+        im.src = s.img; im.alt = '';
+        b.appendChild(im);
+      } else if (MEDIA_GLYPH[s.action]) {
+        const g = document.createElement('span');
+        g.textContent = MEDIA_GLYPH[s.action]; g.style.fontSize = '1.3rem';
+        b.appendChild(g);
+      }
+      if (s.label) { const t = document.createElement('span'); t.textContent = s.label; b.appendChild(t); }
+      b.addEventListener('click', () => { deck.sel = i; renderDeck(); renderDeckEditor(); });
+      grid.appendChild(b);
+    });
+  }
+
+  function renderDeckEditor() {
+    const s = deck.slots[deck.sel];
+    $('#deck-legend').textContent = 'Tuş ' + (deck.sel + 1);
+    $('#deck-label').value = s.label || '';
+    $('#deck-action').value = s.action || 'none';
+    $('#deck-combo').hidden = s.action !== 'combo';
+    $('#deck-ctrl').checked = !!(s.mods & 1);
+    $('#deck-shift').checked = !!(s.mods & 2);
+    $('#deck-alt').checked = !!(s.mods & 4);
+    $('#deck-gui').checked = !!(s.mods & 8);
+    $('#deck-key-char').value = s.key || '';
+    $('#btn-deck-noimg').disabled = !s.img;
+    $('#deck-file').value = '';
+  }
+
+  function deckEdited() {
+    const s = deck.slots[deck.sel];
+    s.label = $('#deck-label').value;
+    s.action = $('#deck-action').value;
+    s.mods = ($('#deck-ctrl').checked ? 1 : 0) | ($('#deck-shift').checked ? 2 : 0) | ($('#deck-alt').checked ? 4 : 0) | ($('#deck-gui').checked ? 8 : 0);
+    s.key = ($('#deck-key-char').value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    $('#deck-key-char').value = s.key;
+    $('#deck-combo').hidden = s.action !== 'combo';
+    deckSave();
+    renderDeck();
+  }
+
+  // The picture is kept as a 128 px PNG (enough for both panels, small in storage).
+  async function deckPicked(ev) {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    try {
+      const url = URL.createObjectURL(f);
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const g = c.getContext('2d');
+      const k = Math.min(128 / (img.naturalWidth || 128), 128 / (img.naturalHeight || 128));
+      const w = (img.naturalWidth || 128) * k, h = (img.naturalHeight || 128) * k;
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, (128 - w) / 2, (128 - h) / 2, w, h);
+      URL.revokeObjectURL(url);
+      deck.slots[deck.sel].img = c.toDataURL('image/png');
+      setMsg($('#msg-deck'), '', '');
+    } catch (_) {
+      setMsg($('#msg-deck'), 'err', 'Bu resim açılamadı. PNG, JPG ya da SVG deneyin.');
+    }
+    deckSave();
+    renderDeck();
+    renderDeckEditor();
+  }
+
+  /** px x px RGB565 (little endian); transparent pixels = magenta 0xF81F, the key colour on the device. */
+  async function deckIconPixels(dataUrl, px) {
+    const img = new Image();
+    img.src = dataUrl;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = c.height = px;
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, px, px);
+    const d = g.getImageData(0, 0, px, px).data, out = new Uint8Array(px * px * 2);
+    for (let p = 0; p < px * px; p++) {
+      const a = d[p * 4 + 3];
+      let v = 0xF81F;
+      if (a >= 64) {
+        const mix = (ch, i) => Math.round((ch * a + DECK_KEY_BG[i] * (255 - a)) / 255);
+        const r = mix(d[p * 4], 0), gg = mix(d[p * 4 + 1], 1), b = mix(d[p * 4 + 2], 2);
+        v = ((r >> 3) << 11) | ((gg >> 2) << 5) | (b >> 3);
+        if (v === 0xF81F) v = 0xF81E;
+      }
+      out[p * 2] = v & 255; out[p * 2 + 1] = v >> 8;
+    }
+    return out;
+  }
+
+  async function buildDeckBlob(px) {
+    const enc = new TextEncoder();
+    const head = new Uint8Array(6 + 28 * DECK_SLOTS);
+    head.set([0x44, 0x4B, 1, DECK_SLOTS, px, 0]);
+    const icons = [];
+    for (let i = 0; i < DECK_SLOTS; i++) {
+      const s = deck.slots[i], o = 6 + 28 * i, a = s.action || 'none';
+      let kind = 0, code = 0, mods = 0;
+      if (a[0] === 'm') { kind = 1; code = parseInt(a.slice(1), 10); }
+      else if (a[0] === 'k') { kind = 2; code = parseInt(a.slice(1), 10); }
+      else if (a === 'combo' && s.key) { kind = 2; code = s.key.charCodeAt(0); mods = s.mods & 15; }
+      head[o] = kind; head[o + 1] = code; head[o + 2] = mods;
+      if (s.img) { icons.push(await deckIconPixels(s.img, px)); head[o + 3] = 1; }
+      let lb = enc.encode(s.label || '');
+      if (lb.length > 23) { let n = 23; while (n > 0 && (lb[n] & 0xC0) === 0x80) n--; lb = lb.slice(0, n); }
+      head.set(lb, o + 4);
+    }
+    const total = head.length + icons.reduce((t, x) => t + x.length, 0);
+    const out = new Uint8Array(total);
+    out.set(head, 0);
+    let off = head.length;
+    for (const x of icons) { out.set(x, off); off += x.length; }
+    return out;
+  }
+
+  async function sendDeck() {
+    const msg = $('#msg-deck'), bar = $('#deck-progress'), btn = $('#btn-deck-send');
+    if (!state.port || !state.connected) { setMsg(msg, 'warn', 'Önce 1. adımdan cihaza bağlanın.'); return; }
+    const dev = state.device || {};
+    if (!dev.deckv) { setMsg(msg, 'warn', 'Cihazdaki yazılım kontrol tuşlarını bilmiyor. Önce 3. adımdan yazılımı güncelleyin.'); return; }
+    if (deck.slots.some((s) => s.action === 'combo' && !s.key)) {
+      setMsg(msg, 'warn', 'Özel kısayol seçilen bir tuşa harf ya da rakam girilmemiş; o tuş bir şey yapmaz.');
+    }
+    btn.disabled = true;
+    bar.hidden = false; bar.value = 0;
+    try {
+      setMsg(msg, 'info', 'Resimler hazırlanıyor…');
+      const blob = await buildDeckBlob(dev.deckicon || 72);
+      await ensureSetupUsb(msg);
+      setMsg(msg, 'info', 'Tuşlar cihaza gönderiliyor…');
+      const ack = async (cmd, timeout) => {
+        const r = await request(cmd, ['DECKACK', 'ERR'], timeout);
+        if (r.tag === 'ERR') throw new Error(r.data.msg || 'deck');
+        return r;
+      };
+      await ack('PR:DECKBEGIN ' + JSON.stringify({ len: blob.length, crc: crc32(blob) }), 5000);
+      const CH = 360;
+      for (let off = 0, seq = 1; off < blob.length; off += CH, seq++) {
+        const part = blob.subarray(off, Math.min(off + CH, blob.length));
+        let bin = ''; for (let i = 0; i < part.length; i++) bin += String.fromCharCode(part[i]);
+        const r = await ack('PR:DECK ' + seq + ' ' + btoa(bin), 5000);
+        if (r.data.seq !== seq) throw new Error('deck-seq');
+        bar.value = Math.round(((off + part.length) / blob.length) * 100);
+      }
+      const done = await request('PR:DECKEND', ['OK', 'ERR'], 10000);
+      if (done.tag === 'ERR') throw new Error(done.data.msg || 'deck');
+      const back = await backToKeyboard();
+      setMsg(msg, 'ok', 'Tuşlar kaydedildi.' + (back ? ' Kart klavye moduna dönüyor; birkaç saniye sonra kontrol ekranında görünür. Yeniden değişiklik yapmak için 1. adımdan tekrar bağlanın.' : ''));
+    } catch (e) {
+      const m = String(e && e.message ? e.message : e);
+      setMsg(msg, 'err', ERRORS[m] || ('Tuşlar gönderilemedi (' + m + '). Tekrar deneyin.'));
+    }
+    bar.hidden = true;
+    btn.disabled = !state.connected;
+  }
+
+  async function deckToDefaults() {
+    if (!confirm('Tuşlar varsayılana dönsün mü? Bu tarayıcıdaki düzenlemeler ve resimler silinir.')) return;
+    deck.slots = deckDefaults();
+    deck.sel = 0;
+    deckSave();
+    renderDeck();
+    renderDeckEditor();
+    const msg = $('#msg-deck');
+    if (state.port && state.connected && state.device && state.device.deckv) {
+      try {
+        await request('PR:DECKCLEAR', ['OK', 'ERR'], 5000);
+        setMsg(msg, 'ok', 'Cihazdaki tuşlar da varsayılana döndü.');
+      } catch (_) { setMsg(msg, 'warn', 'Sayfadaki tuşlar sıfırlandı, cihaza ulaşılamadı.'); }
+    } else {
+      setMsg(msg, 'info', 'Sayfadaki tuşlar sıfırlandı. Cihazdakini de sıfırlamak için bağlanıp tekrar basın ya da “Cihaza gönder”i kullanın.');
+    }
+  }
+
+  function initDeck() {
+    const sel = $('#deck-action');
+    for (const [v, t] of DECK_ACTIONS) { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); }
+    deckLoad();
+    renderDeck();
+    renderDeckEditor();
+    for (const id of ['#deck-label', '#deck-key-char']) $(id).addEventListener('input', deckEdited);
+    for (const id of ['#deck-action', '#deck-ctrl', '#deck-alt', '#deck-shift', '#deck-gui']) $(id).addEventListener('change', deckEdited);
+    $('#deck-file').addEventListener('change', deckPicked);
+    $('#btn-deck-noimg').addEventListener('click', () => { deck.slots[deck.sel].img = ''; deckSave(); renderDeck(); renderDeckEditor(); });
+    $('#btn-deck-send').addEventListener('click', sendDeck);
+    $('#btn-deck-defaults').addEventListener('click', deckToDefaults);
+  }
+
   // ------------------------------------------------------------------ init
   function init() {
     if (!('serial' in navigator)) {
@@ -1838,6 +2186,7 @@
       e.currentTarget.setAttribute('aria-pressed', String(show));
     });
     $('#btn-usb-update').addEventListener('click', usbUpdate);
+    initDeck();
     // The update tool needs the USB port to itself.
     for (const id of INSTALLERS) {
       $('#' + id).addEventListener('click', () => { if (state.port) { state.expectingDrop = false; disconnect(); } }, true);

@@ -137,10 +137,15 @@ jobs:
               {"path": "firmware.bin", "offset": 65536}])
           write("site/manifest-full.json", "Plane Radar 3D 4in full install", version, "ESP32",
                 [{"path": "firmware-merged.bin", "offset": 0}])
-          # 5": the S3 boots from 0x0.
+          # 5": the S3 boots from 0x0. The old-method update writes the first app slot, so it
+          # also blanks otadata (0xE000): otherwise a board that ran from the second slot after a
+          # USB update would keep booting that one. NVS (settings) and the map stay.
+          with open("site/otadata-blank.bin", "wb") as f:
+              f.write(b"\xff" * 0x2000)
           write("site/manifest-update-ws5.json", "Plane Radar 3D 5in update", version_ws5, "ESP32-S3", [
               {"path": "bootloader-ws5.bin", "offset": 0},
               {"path": "partitions-ws5.bin", "offset": 32768},
+              {"path": "otadata-blank.bin", "offset": 57344},
               {"path": "firmware-ws5.bin", "offset": 65536}])
           write("site/manifest-full-ws5.json", "Plane Radar 3D 5in full install", version_ws5, "ESP32-S3",
                 [{"path": "firmware-merged-ws5.bin", "offset": 0}])
