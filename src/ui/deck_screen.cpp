@@ -3,6 +3,7 @@
 #if defined(BOARD_WS5)
 
 #include <Arduino.h>
+#include <Preferences.h>
 #include <esp_heap_caps.h>
 
 #include <cmath>
@@ -26,8 +27,11 @@ using services::hid::Media;
 namespace store = services::deck;
 
 constexpr unsigned long kPressFlashMs = 140;
-/** Knob: one volume step per this many degrees of turn (Windows: 2 % per step). */
-constexpr float kStepDeg = 12.0f;
+/** Knob: a full turn goes from silent to full volume, so one volume key per 360 / steps
+ *  degrees (macOS: 16 steps, Windows: 50; set on the setup page). */
+float stepDeg() { return 360.0f / static_cast<float>(services::deck::volumeSteps()); }
+/** The estimated level is saved this long after the last change (flash wear). */
+constexpr unsigned long kSaveLevelMs = 3000;
 /** A touch on the knob that turns less than this, short and still, is a tap (mute). */
 constexpr float kTapMaxDeg = 8.0f;
 constexpr unsigned long kTapMaxMs = 700;
@@ -60,8 +64,32 @@ uint16_t cRed() { return tft.color565(235, 90, 80); }
 
 LGFX_Sprite s_knob(&tft);
 bool s_knob_ok = false;
-float s_dial_deg = -90.0f;  // indicator position (visual only; the PC keeps the level)
+// Volume as the deck thinks it is: the USB keyboard cannot read the PC's level, so the
+// deck counts its own steps. Turning past either end keeps sending keys, which brings the
+// count back in line after the volume was changed elsewhere (the PC stops at 0 / max).
+int s_level = -1;  // 0..volumeSteps(); -1 = not loaded yet
 bool s_muted = false;
+unsigned long s_level_changed_ms = 0;
+bool s_level_dirty = false;
+
+void loadLevel() {
+  Preferences p;
+  int v = services::deck::volumeSteps() / 2;
+  if (p.begin("deck", true)) {
+    v = p.getInt("vol", v);
+    p.end();
+  }
+  s_level = constrain(v, 0, services::deck::volumeSteps());
+}
+
+void saveLevel() {
+  Preferences p;
+  if (p.begin("deck", false)) {
+    p.putInt("vol", s_level);
+    p.end();
+  }
+  s_level_dirty = false;
+}
 
 int s_pressed = -1;  // key drawn pressed
 unsigned long s_pressed_ms = 0;
@@ -195,35 +223,47 @@ void drawKnob() {
   LGFX_Sprite& g = s_knob;
   const int c = kKnobD / 2, R = kKnobR;
   g.fillScreen(cBg());
-  // Outer ring with ticks, the face, an indicator dot that follows the turn.
+  // Ring: the level as an arc from the top, clockwise; a full ring = full volume.
+  const int steps = services::deck::volumeSteps();
+  const int level = s_level < 0 ? 0 : (s_level > steps ? steps : s_level);
+  const int rw = S(14);  // ring width
   g.fillCircle(c, c, R, tft.color565(28, 48, 66));
-  g.fillCircle(c, c, R - S(10), tft.color565(14, 24, 36));
-  for (int t = 0; t < 24; ++t) {
-    const float a = t * 15.0f * static_cast<float>(M_PI) / 180.0f;
-    const float ca = cosf(a), sa = sinf(a);
-    g.drawLine(c + lroundf(ca * (R - S(8))), c + lroundf(sa * (R - S(8))), c + lroundf(ca * (R - S(2))),
-               c + lroundf(sa * (R - S(2))), t % 6 == 0 ? cCyan() : cEdge());
+  g.fillCircle(c, c, R - rw, tft.color565(14, 24, 36));
+  const uint16_t arc = s_muted ? cDim() : cCyan();
+  const float end_deg = -90.0f + 360.0f * level / steps;
+  if (level >= steps) {
+    g.fillCircle(c, c, R - S(1), arc);
+    g.fillCircle(c, c, R - rw + S(1), tft.color565(14, 24, 36));
+  } else if (level > 0) {
+    g.fillArc(c, c, R - S(1), R - rw + S(1), -90.0f, end_deg, arc);
   }
-  const float a = s_dial_deg * static_cast<float>(M_PI) / 180.0f;
-  const int dr = R - S(24);
-  g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), S(7), s_muted ? cDim() : cCyan());
-  // Centre: speaker, crossed out while muted.
+  // Knob end: a dot on the ring at the current level (also at zero, at the top).
+  const float a = end_deg * static_cast<float>(M_PI) / 180.0f;
+  const int dr = R - rw / 2;
+  g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), rw / 2 + S(2), 0xFFFF);
+  g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), rw / 2 - S(1), arc);
+  // Centre: speaker (crossed out while muted) and the level in percent.
   const uint16_t sc = s_muted ? cRed() : 0xFFFF;
-  speakerIcon(g, c - S(6), c - S(6), S(16), sc);
-  const int mx = c + S(14), my = c - S(6);
+  speakerIcon(g, c - S(6), c - S(22), S(12), sc);
+  const int mx = c + S(10), my = c - S(22);
   if (s_muted) {
     for (int t = -1; t <= 1; ++t) {
       g.drawLine(mx - S(6) + t, my - S(6), mx + S(6) + t, my + S(6), sc);
       g.drawLine(mx - S(6) + t, my + S(6), mx + S(6) + t, my - S(6), sc);
     }
   } else {
-    g.drawArc(mx - S(8), my, S(8), S(6), -45, 45, sc);
-    g.drawArc(mx - S(8), my, S(14), S(12), -45, 45, sc);
+    g.drawArc(mx - S(6), my, S(6), S(4), -45, 45, sc);
+    g.drawArc(mx - S(6), my, S(11), S(9), -45, 45, sc);
   }
-  displayFontSetBitmap(g, &ui::font::SansBold9);
+  char pct[8];
+  snprintf(pct, sizeof(pct), "%%%d", (level * 100 + steps / 2) / steps);
+  displayFontSetBitmap(g, &ui::font::SansBold24);
   g.setTextDatum(textdatum_t::middle_center);
+  g.setTextColor(s_muted ? cDim() : 0xFFFF);
+  g.drawString(pct, c, c + S(8));
+  displayFontSetBitmap(g, &ui::font::SansBold8);
   g.setTextColor(s_muted ? cRed() : cDim());
-  g.drawString(s_muted ? "SESSİZ" : "SES", c, c + S(26));
+  g.drawString(s_muted ? "SESSİZ" : "SES", c, c + S(36));
   g.pushSprite(kKnobX, kKnobY);
 }
 
@@ -294,7 +334,9 @@ void fireKey(int i) {
 }
 
 void volumeStep(int dir) {
-  s_dial_deg += dir * kStepDeg;
+  s_level = constrain(s_level + dir, 0, services::deck::volumeSteps());
+  s_level_changed_ms = millis();
+  s_level_dirty = true;
   s_muted = false;  // Windows and macOS unmute on a volume key
   if (canSend()) services::hid::sendMedia(dir > 0 ? Media::VolumeUp : Media::VolumeDown);
 }
@@ -307,6 +349,7 @@ float angleAt(int x, int y) {
 }  // namespace
 
 void enter() {
+  if (s_level < 0) loadLevel();
   s_pressed = -1;
   s_flash = false;
   s_down = false;
@@ -336,6 +379,7 @@ bool tick() {
     s_pressed = -1;
     s_flash = false;
   }
+  if (s_level_dirty && now - s_level_changed_ms >= kSaveLevelMs) saveLevel();
   const int usb = console::keyboardMode() ? (services::hid::ready() ? 1 : 0) : 2;
   if (usb != s_usb_shown) drawUsbStatus();
   return true;
@@ -385,13 +429,14 @@ Touch touch(int fingers, int x, int y) {
       s_accum_deg += d;
       s_total_deg += fabsf(d);
       bool changed = false;
-      while (s_accum_deg >= kStepDeg) {
-        s_accum_deg -= kStepDeg;
+      const float step = stepDeg();
+      while (s_accum_deg >= step) {
+        s_accum_deg -= step;
         volumeStep(+1);  // clockwise (screen y points down): louder
         changed = true;
       }
-      while (s_accum_deg <= -kStepDeg) {
-        s_accum_deg += kStepDeg;
+      while (s_accum_deg <= -step) {
+        s_accum_deg += step;
         volumeStep(-1);
         changed = true;
       }

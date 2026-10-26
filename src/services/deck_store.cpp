@@ -43,6 +43,7 @@ Slot s_slots[kSlots];
 const uint16_t* s_icons[kSlots] = {};
 uint8_t* s_blob = nullptr;  // PSRAM copy of the stored set (icons point into it)
 bool s_custom = false;
+int s_volume_steps = 16;
 uint32_t s_gen = 1;
 
 uint8_t* s_stage = nullptr;
@@ -68,6 +69,7 @@ void loadDefaults() {
   memcpy(s_slots, defaults, sizeof(s_slots));
   for (auto& p : s_icons) p = nullptr;
   s_custom = false;
+  s_volume_steps = 16;
 }
 
 /** Checks a blob and points slots / icons into it. */
@@ -94,6 +96,7 @@ bool apply(const uint8_t* b, size_t n) {
   if (off != n) return false;
   memcpy(s_slots, slots, sizeof(s_slots));
   memcpy(s_icons, icons, sizeof(s_icons));
+  s_volume_steps = (b[5] >= 4 && b[5] <= 100) ? b[5] : 16;
   s_custom = true;
   return true;
 }
@@ -110,6 +113,7 @@ void freeBlob() {
 }  // namespace
 
 int iconPx() { return ui::S(48); }
+int volumeSteps() { return s_volume_steps; }
 
 void init() {
   loadDefaults();

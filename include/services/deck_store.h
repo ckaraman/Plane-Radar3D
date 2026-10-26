@@ -11,7 +11,7 @@ namespace services::deck {
  * in PSRAM while running. Without a stored set the built-in default keys are used.
  *
  * Blob (little endian), as sent by the page:
- *   'D' 'K' version(1) slot_count(kSlots) icon_px reserved(0)
+ *   'D' 'K' version(1) slot_count(kSlots) icon_px volume_steps (0 = 16)
  *   slot_count * Slot (28 bytes, below)
  *   then for each slot with has_icon, in slot order: icon_px * icon_px RGB565 pixels;
  *   kTransparent (magenta) pixels let the key colour show through.
@@ -20,6 +20,10 @@ constexpr uint8_t kVersion = 1;
 constexpr int kSlots = 12;
 constexpr size_t kLabelBytes = 24;  // UTF-8, zero-terminated / padded
 constexpr uint16_t kTransparent = 0xF81F;
+
+/** Volume keys from silent to full on the computer: one full knob turn. macOS 16,
+ *  Windows 50 (2 % per key); chosen on the setup page, 16 by default. */
+int volumeSteps();
 
 /** Icon edge in pixels: about a third of a key at 1.5x (5") or 1.875x (5B). */
 int iconPx();
