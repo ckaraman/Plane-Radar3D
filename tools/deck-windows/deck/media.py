@@ -66,11 +66,14 @@ def cover_size(raw):
         return (0, 0)
 
 
-def cover_jpeg(raw, w, h, max_bytes=72 * 1024):
-    """Album art for a w x h screen: as large as fits the screen height (the card shows it
-    in the middle with fading edges), sharp, as a baseline JPEG. -> (jpeg, width, height)"""
+def cover_jpeg(raw, w, h, max_bytes=72 * 1024, min_side=240):
+    """Album art for a w x h screen at its own size (never blown up: a small cover stays
+    small and sharp; the card shows it in the middle, fading into the dark page), only
+    made smaller to fit, as a baseline JPEG. -> (jpeg, width, height)"""
     img = _trim_bars(Image.open(io.BytesIO(raw)).convert("RGB"))
-    k = min(w / img.width, h / img.height)
+    k = min(w / img.width, h / img.height, 1.0)
+    if max(img.width, img.height) * k < min_side:  # a tiny thumbnail: a little larger
+        k = min(w / img.width, h / img.height, min_side / max(img.width, img.height))
     size = (max(1, min(w, round(img.width * k))), max(1, min(h, round(img.height * k))))
     if size != img.size:
         img = img.resize(size, Image.LANCZOS)
@@ -84,48 +87,6 @@ def cover_jpeg(raw, w, h, max_bytes=72 * 1024):
         if out.tell() <= max_bytes:
             break
     return out.getvalue(), img.width, img.height
-
-
-# ------------------------------------------------------------------ better covers
-def _norm(t):
-    import re
-    import unicodedata
-
-    t = unicodedata.normalize("NFKD", (t or "").lower())
-    t = "".join(ch for ch in t if not unicodedata.combining(ch))
-    t = re.sub(r"[\(\[].*?[\)\]]", " ", t)  # (Official Video), [Remastered] ...
-    t = re.sub(r"\b(feat|ft)\.?\b.*", " ", t)
-    t = re.sub(r"\s*-\s*topic$", " ", t)
-    return re.sub(r"[^a-z0-9]+", " ", t).strip()
-
-
-def lookup_cover(title, artist, timeout=4.0):
-    """A large cover for title / artist from the iTunes catalogue (free, no account).
-    Only when the shop's title and artist match what is playing; None otherwise."""
-    import json
-    import urllib.parse
-    import urllib.request
-
-    t, a = _norm(title), _norm(artist)
-    if not t or not a:
-        return None
-    # YouTube titles often read "Artist - Song".
-    if " - " in (title or "") and _norm(title.split(" - ", 1)[0]) == a:
-        t = _norm(title.split(" - ", 1)[1])
-    q = urllib.parse.urlencode({"term": "%s %s" % (artist, t), "media": "music", "entity": "song", "limit": 10})
-    req = urllib.request.Request("https://itunes.apple.com/search?" + q, headers={"User-Agent": "PlaneRadarDeck"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        data = json.loads(r.read().decode("utf-8", "replace"))
-    for res in data.get("results", []):
-        rt, ra = _norm(res.get("trackName")), _norm(res.get("artistName"))
-        if not rt or not ra or not res.get("artworkUrl100"):
-            continue
-        if (rt == t or rt.startswith(t) or t.startswith(rt)) and (a in ra or ra in a):
-            url = res["artworkUrl100"].replace("100x100bb", "600x600bb")
-            with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "PlaneRadarDeck"}),
-                                        timeout=timeout) as r:
-                return r.read()
-    return None
 
 
 async def _read_thumbnail(ref):

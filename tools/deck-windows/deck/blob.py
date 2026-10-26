@@ -2,6 +2,8 @@
 
 Version 1: 'D' 'K' 1 12 icon_px volume_steps; small square pictures above the label.
 Version 2: 'D' 'K' 2 12 key_w key_h volume_steps 0; each picture is the whole key.
+Version 3: 'D' 'K' 3 12 cols rows volume_steps 0 key_w(u16) key_h(u16): only the used
+keys, in slot order, in a cols x rows grid filling the key area (firmware 0.33+).
 Then 12 x 28-byte slots (kind, code, mods, has_icon, label[24] UTF-8), then the pictures
 (RGB565 little endian, magenta = see-through).
 """
@@ -169,11 +171,67 @@ def key_picture(img, kw, kh, radius, has_label):
     return canvas
 
 
-def build(slots, icon_px, volume_steps, key=None):
-    """key = (key_w, key_h, corner_radius) of the card's keys: version 2 (pictures fill the
-    key); None: version 1 with icon_px square pictures (older firmware)."""
+def slot_used(s):
+    """A key the card shows: it does something, has a label or a picture."""
+    a = s.get("action") or {}
+    return a.get("type", "none") != "none" or bool(s.get("label")) or bool(s.get("img"))
+
+
+def default_area(screen_w=800):
+    """(area_w, area_h, gap, radius) of the keys left of the knob, as the firmware has it."""
+    kw = (470 * screen_w // 800 - 3 * (10 * screen_w // 800)) // 4
+    kh = 120 * screen_w // 800
+    gap = 10 * screen_w // 800
+    return 4 * kw + 3 * gap, 3 * kh + 2 * gap, gap, 18 * screen_w // 800
+
+
+def layout(n, area):
+    """(cols, rows, key_w, key_h) for n used keys filling the area: big, near-square keys,
+    few empty places."""
+    aw, ah, gap = area[0], area[1], area[2]
+    n = max(1, n)
+    best, best_score = None, -1.0
+    for cols in range(1, min(n, 6) + 1):
+        rows = -(-n // cols)
+        if rows > 4:
+            continue
+        kw, kh = (aw - (cols - 1) * gap) // cols, (ah - (rows - 1) * gap) // rows
+        if kw <= 0 or kh <= 0:
+            continue
+        shape = min(kw / kh, kh / kw)
+        score = kw * kh * shape ** 1.5 * (n / (cols * rows)) ** 0.5
+        if score > best_score:
+            best, best_score = (cols, rows, kw, kh), score
+    return best
+
+
+def boxes(slots, area):
+    """[(slot index, x, y, w, h)] inside the area for the used keys (last row centred)."""
+    used = [i for i, s in enumerate(slots) if slot_used(s)]
+    if not used:
+        return []
+    cols, rows, kw, kh = layout(len(used), area)
+    out = []
+    for p, i in enumerate(used):
+        row, col = divmod(p, cols)
+        in_row = min(cols, len(used) - row * cols)
+        x0 = (area[0] - (in_row * kw + (in_row - 1) * area[2])) // 2
+        out.append((i, x0 + col * (kw + area[2]), row * (kh + area[2]), kw, kh))
+    return out
+
+
+def build(slots, icon_px, volume_steps, key=None, area=None):
+    """area = (area_w, area_h, gap, radius) from the card (firmware 0.33+): version 3, only
+    used keys filling the area. key = (key_w, key_h, radius): version 2, the fixed 4 x 3
+    grid with whole-key pictures. Neither: version 1 with icon_px square pictures."""
     steps = max(4, min(100, int(volume_steps)))
-    if key:
+    used = sum(1 for s in slots if slot_used(s))
+    if area and used:
+        cols, rows, kw, kh = layout(used, area)
+        radius = area[3]
+        head = bytearray(b"DK" + bytes([3, len(slots), cols, rows, steps, 0]) + struct.pack("<HH", kw, kh))
+        key = (kw, kh, radius)
+    elif key:
         kw, kh, radius = key
         head = bytearray(b"DK" + bytes([2, len(slots), kw & 0xFF, kh & 0xFF, steps, 0]))
     else:

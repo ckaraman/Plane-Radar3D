@@ -6,7 +6,7 @@ import time
 from . import actions, blob
 from .config import Config
 from .device import Device
-from .media import MediaWatcher, cover_jpeg, cover_size, lookup_cover
+from .media import MediaWatcher, cover_jpeg
 from .volume import VolumeWatcher
 
 
@@ -58,22 +58,11 @@ class Core:
         self._send_now()
 
     def _make_cover(self, raw, state):
-        """Screen-sized JPEG from the media session's picture; a small one (browsers often
-        give 120-300 px) is swapped for the shop's large cover when it is the same song."""
+        """Screen-fitting JPEG of the picture the media session gives."""
         st = self.device.status()
         w, h = int(st.get("w") or 800), int(st.get("h") or 480)
         try:
-            src = raw
-            size = max(cover_size(raw))
-            if size < 400 and self.config.settings.get("hq_cover", True):
-                try:
-                    better = lookup_cover(state.get("t"), state.get("a"))
-                    if better:
-                        self.log("cover: %d px -> shop cover %d px" % (size, max(cover_size(better))))
-                        src = better
-                except Exception as e:  # noqa: BLE001 - offline, not found
-                    self.log("cover lookup: %s" % e)
-            jpeg, cw, ch = cover_jpeg(src, w, h)
+            jpeg, cw, ch = cover_jpeg(raw, w, h)
         except Exception as e:  # noqa: BLE001 - a picture Pillow cannot read
             self.log("cover: %s" % e)
             return
@@ -127,6 +116,24 @@ class Core:
                     time.sleep(2)
 
     # ------------------------------------------------------------------ editor
+    def preview_layout(self, slots):
+        """Where the keys sit on the card's screen, for the window's preview."""
+        st = self.device.status()
+        w = int(st.get("w") or 800)
+        h = int(st.get("h") or 480)
+        area = st.get("deckarea")
+        area = tuple(int(v) for v in area) if isinstance(area, list) and len(area) == 4 else blob.default_area(w)
+        compact = bool(st.get("deckarea")) or not st.get("connected")  # new firmware (or not known yet)
+        if compact:
+            bx = blob.boxes(slots, area)
+        else:  # older firmware: the fixed 4 x 3 grid
+            kw, kh, gap = (area[0] - 3 * area[2]) // 4, (area[1] - 2 * area[2]) // 3, area[2]
+            bx = [(i, (i % 4) * (kw + gap), (i // 4) * (kh + gap), kw, kh) for i in range(len(slots))]
+        ox, oy = 20 * w // 800, 68 * w // 800
+        return {"screen": [w, h], "radius": area[3], "compact": compact,
+                "knob": [512 * w // 800, 88 * w // 800, 268 * w // 800],
+                "keys": [{"i": i, "x": ox + x, "y": oy + y, "w": kw, "h": kh} for i, x, y, kw, kh in bx]}
+
     def send_keys_to_card(self):
         """Builds the key set and uploads it (runs in a thread; see self.upload)."""
         if self.upload["running"]:
@@ -145,13 +152,15 @@ class Core:
         key = None
         if st.get("deckkw") and st.get("deckkh"):  # firmware 0.32+: pictures fill the key
             key = (int(st["deckkw"]), int(st["deckkh"]), round(18 * int(st.get("w") or 800) / 800))
+        area = st.get("deckarea")
+        area = tuple(int(v) for v in area) if isinstance(area, list) and len(area) == 4 else None
         try:
-            data = blob.build(slots, int(st.get("deckicon") or 72), settings.get("steps", 50), key)
+            data = blob.build(slots, int(st.get("deckicon") or 72), settings.get("steps", 50), key, area)
         except Exception as e:  # noqa: BLE001
             self.log("keys: %s" % e)
             self.upload.update(running=False, pct=0, text="", error="Tuşlar hazırlanamadı: %s" % e)
             return False
-        self.log("keys: %d KB for the card (%s)" % (len(data) // 1024, "whole-key pictures" if key else "small pictures"))
+        self.log("keys: %d KB for the card (%s)" % (len(data) // 1024, "used keys fill the screen" if area else ("whole-key pictures" if key else "small pictures")))
         self.upload.update(running=True, pct=0, text="Hazırlanıyor…", error="")
 
         def work():

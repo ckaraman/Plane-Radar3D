@@ -180,6 +180,28 @@ def test_blob_v2():
     assert blob.is_icon(Image.open(io.BytesIO(base64.b64decode(icon.split(",")[1]))).convert("RGBA"))
 
 
+def test_layout():
+    area = blob.default_area(800)
+    assert area == (470, 380, 10, 18)
+    assert blob.layout(12, area) == (4, 3, 110, 120)  # all keys: the usual grid
+    assert blob.layout(8, area)[:2] == (3, 3)
+    assert blob.layout(4, area)[:2] == (2, 2)
+    assert blob.layout(1, area) == (1, 1, 470, 380)
+    slots = [{"label": "A", "img": "", "action": {"type": "none"}}] + [{"label": "", "img": "", "action": {"type": "none"}}] * 8 + \
+            [{"label": "", "img": "", "action": {"type": "media", "code": 3}}] * 3
+    bx = blob.boxes(slots, area)
+    assert [b[0] for b in bx] == [0, 9, 10, 11]
+    assert bx[0][1:] == (0, 0, 230, 185) and bx[3][1:] == (240, 195, 230, 185)
+    b = blob.build(slots, 72, 50, None, area)
+    assert b[:12] == b"DK\x03\x0c\x02\x02\x32\x00" + struct.pack("<HH", 230, 185)
+    assert len(b) == 12 + 28 * 12
+    # 5B panel: the firmware's numbers
+    assert blob.default_area(1024) == (600, 483, 12, 23)
+    for n in range(1, 13):
+        cols, rows, kw, kh = blob.layout(n, blob.default_area(1024))
+        assert cols * kw + (cols - 1) * 12 <= 602 and rows * kh + (rows - 1) * 12 <= 485 and cols * rows >= n
+
+
 def test_cover_and_position():
     from PIL import Image
 
@@ -190,8 +212,11 @@ def test_cover_and_position():
     im.paste(Image.new("RGB", (480, 270), (90, 120, 200)), (0, 45))  # a letterboxed video frame
     im.save(buf, "JPEG")
     jpeg, w, h = media.cover_jpeg(buf.getvalue(), 800, 480)
-    assert (w, h) == (800, 450), (w, h)  # bars gone, as large as the screen allows
-    assert Image.open(io.BytesIO(jpeg)).size == (800, 450)
+    assert (w, h) == (480, 270), (w, h)  # bars gone, its own size (not blown up)
+    assert Image.open(io.BytesIO(jpeg)).size == (480, 270)
+    buf = io.BytesIO()
+    Image.new("RGB", (1200, 1200), (10, 200, 10)).save(buf, "JPEG")
+    assert media.cover_jpeg(buf.getvalue(), 800, 480)[1:] == (480, 480)  # large: fits the height
 
     # Position: a browser that keeps reporting the resume point must not pull the bar back.
     class T:
@@ -266,6 +291,7 @@ def test_cover_and_position():
 if __name__ == "__main__":
     test_blob()
     test_blob_v2()
+    test_layout()
     test_cover_and_position()
     test_all()
     print("tests ok")

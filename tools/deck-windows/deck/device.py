@@ -60,6 +60,7 @@ class Device:
             "fw": h.get("fw"), "usb": h.get("usb"), "hostv": h.get("hostv"),
             "w": h.get("w", 800), "h": h.get("h", 480), "deckicon": h.get("deckicon", 72),
             "deckv": h.get("deckv", 1), "deckkw": h.get("deckkw"), "deckkh": h.get("deckkh"),
+            "deckarea": h.get("deckarea"),
             "busy": self.busy,
         }
 

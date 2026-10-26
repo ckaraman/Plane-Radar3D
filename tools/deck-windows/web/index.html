@@ -65,6 +65,21 @@
   .key[aria-pressed="true"] { background: var(--sel-bg); border: 1.5px solid var(--sel-line); font-weight: 600; }
   .key.empty { border-style: dashed; color: var(--muted); background: transparent; }
   .key.drop { outline: 2px dashed #c4b3ff; }
+  /* Preview of the card's keys page (positions from the program, as the card draws them). */
+  .pv { position: relative; width: 100%; aspect-ratio: 800 / 480; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
+        background: radial-gradient(60% 70% at 90% 8%, rgba(126,110,236,0.38), rgba(126,110,236,0) 70%), radial-gradient(50% 60% at 4% 100%, rgba(236,150,128,0.22), rgba(236,150,128,0) 70%), linear-gradient(160deg, #111634, #161a3d 40%, #1a1739 70%, #0f1730); }
+  .pv .pk { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); color: #f3f4fb; font-size: 10px; text-align: center; line-height: 1.1; }
+  .pv .pk.sel { outline: 2px solid #c4b3ff; }
+  .pv .pk img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .pv .pk.icon img { inset: 8% 8% 22% 8%; width: 84%; height: 70%; object-fit: contain; }
+  .pv .pk.icon.nolabel img { inset: 8%; height: 84%; }
+  .pv .pk span { position: relative; padding: 2px 4px; }
+  .pv .pk.pic span { position: absolute; bottom: 6%; left: 0; right: 0; }
+  .pv .pk svg { width: 30%; height: 30%; }
+  .pv .pknob { position: absolute; border-radius: 50%; border: 6px solid rgba(255,255,255,0.10); background: radial-gradient(circle at 40% 30%, #262b57, #151938); }
+  .pv .ptab { position: absolute; left: 36.25%; top: 2.7%; width: 27.5%; height: 8.75%; border-radius: 999px; background: rgba(255,255,255,0.09); display: flex; font-size: 9px; font-weight: 700; color: #e2e5f5; }
+  .pv .ptab b { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .pv .ptab b + b { margin: 3px; border-radius: 999px; background: #fff; color: #15183a; }
   .knob { width: 32%; aspect-ratio: 1; border-radius: 50%; flex: none; position: relative; }
   .knob i { position: absolute; inset: 7%; border-radius: 50%; background: radial-gradient(circle at 40% 32%, #262b57, #1b1f45 55%, #151938); display: grid; place-items: center; }
   .acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -127,6 +142,9 @@
           <div class="knob" id="knob" aria-hidden="true"><i><svg width="40" height="33" viewBox="0 0 86 70" fill="none"><path d="M8 25h14l19-16v52L22 45H8z" fill="#f3f4fb"/><path d="M54 23c6 6 6 18 0 24M64 13c11 11 11 33 0 44" stroke="#f3f4fb" stroke-width="5" stroke-linecap="round"/></svg></i></div>
         </div>
         <p class="small" style="margin: 14px 0 0">Değişiklikler bu bilgisayarda hemen saklanır; kartta görünmeleri için “Kaydet ve karta gönder”e bas.</p>
+        <h2 style="margin-top: 22px">Kartta böyle görünecek</h2>
+        <p class="hint" id="pv-hint">Boş bıraktığın tuşlar kartta yer kaplamaz; kalan tuşlar ekranı doldurur.</p>
+        <div class="pv" id="pv" aria-label="Kart ekranının önizlemesi"></div>
       </div>
 
       <div class="card" style="flex: 1 1 380px">
@@ -172,7 +190,6 @@
       </div>
       <div class="card" style="flex: 1 1 520px; max-width: 760px; padding-top: 6px; padding-bottom: 6px">
         <div class="opt"><label for="s-music">Müzik çalınca kartta Müzik ekranını aç</label><input type="checkbox" id="s-music"></div>
-        <div class="opt"><label for="s-hq">Kapak küçükse yüksek çözünürlüklüsünü internetten bul<br><span class="small">Tarayıcılar (YouTube Music) küçük kapak verir; aynı şarkının büyük kapağı iTunes kataloğundan alınır.</span></label><input type="checkbox" id="s-hq"></div>
         <div class="opt"><label for="s-back">Müzik durunca tuşlar ekranına dön</label>
           <select class="in" id="s-back" style="width: auto; min-height: 40px">
             <option value="0">Hemen</option><option value="60">1 dakika sonra</option><option value="300">5 dakika sonra</option><option value="-1">Dönme</option>
@@ -326,6 +343,39 @@
       else if (empty) b.append(el('span', { text: 'Boş' }));
       g.append(b);
     });
+    renderPreview();
+  }
+
+  // ------------------------------------------------------------ preview of the card
+  let pvTimer = null;
+  function renderPreview() {
+    clearTimeout(pvTimer);
+    pvTimer = setTimeout(async () => {
+      let L;
+      try { L = await api().preview(S.slots); } catch (_) { return; }
+      const pv = $('#pv'); pv.textContent = '';
+      const W = L.screen[0], H = L.screen[1], pc = (v, t) => (100 * v / t) + '%';
+      pv.style.aspectRatio = W + ' / ' + H;
+      pv.append(el('div', { class: 'ptab' }, [el('b', { text: 'MÜZİK' }), el('b', { text: 'TUŞLAR' })]));
+      const k = L.knob;
+      pv.append(el('div', { class: 'pknob', style: 'left:' + pc(k[0], W) + ';top:' + pc(k[1], H) + ';width:' + pc(k[2], W) + ';height:' + pc(k[2], H) }));
+      for (const b of L.keys) {
+        const s = S.slots[b.i], a = s.action || { type: 'none' };
+        const d = el('div', { class: 'pk' + (b.i === S.sel ? ' sel' : ''),
+          style: 'left:' + pc(b.x, W) + ';top:' + pc(b.y, H) + ';width:' + pc(b.w, W) + ';height:' + pc(b.h, H) + ';border-radius:' + (100 * L.radius / b.w) + '% / ' + (100 * L.radius / b.h) + '%' });
+        if (s.img) {
+          d.classList.add('pic'); if (!s.label) d.classList.add('nolabel');
+          isIcon(s.img).then((icon) => d.classList.toggle('icon', icon));
+          d.append(el('img', { src: s.img, alt: '' }));
+        } else if (iconFor(a)) { const t = el('span'); t.innerHTML = iconFor(a); d.append(t.firstChild); }
+        if (s.label) d.append(el('span', { text: s.label }));
+        d.addEventListener('click', () => { S.sel = b.i; renderGrid(); renderEditor(); });
+        pv.append(d);
+      }
+      $('#pv-hint').textContent = L.compact
+        ? 'Boş bıraktığın tuşlar kartta yer kaplamaz; kalan tuşlar ekranı doldurur.'
+        : 'Karttaki yazılım eski: tuşlar sabit 4 × 3 düzende. Kurulum sayfasından güncelleyince kalan tuşlar ekranı doldurur.';
+    }, 120);
   }
 
   // ------------------------------------------------------------ editor
@@ -481,10 +531,9 @@
     S.settings.music_screen = $('#s-music').checked;
     S.settings.back_seconds = parseInt($('#s-back').value, 10);
     S.settings.close_quits = $('#s-close').checked;
-    S.settings.hq_cover = $('#s-hq').checked;
     api().save_settings(S.settings);
   }
-  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close', '#s-hq']) $(id).addEventListener('change', saveSettings);
+  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close']) $(id).addEventListener('change', saveSettings);
   $('#b-exit').addEventListener('click', () => { if (confirm('Program tamamen kapansın mı? Kartın tuşlarından site ve program açma, gerçek ses ve müzik ekranı program yeniden açılana kadar çalışmaz.')) api().exit(); });
   $('#b-release').addEventListener('click', async () => { const st = await api().release(!S.device.released); applyDevice(st); });
 
@@ -525,7 +574,6 @@
     $('#s-music').checked = !!S.settings.music_screen;
     $('#s-back').value = String(S.settings.back_seconds);
     $('#s-close').checked = !!S.settings.close_quits;
-    $('#s-hq').checked = S.settings.hq_cover !== false;
     $('#c-app').textContent = 'Plane Radar Deck ' + st.version;
     renderGrid(); renderEditor(); applyLive(st);
     setInterval(async () => { try { applyLive(await api().live()); } catch (_) { /* window closing */ } }, 1000);

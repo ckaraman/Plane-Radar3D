@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.1.1"
+VERSION = "1.2.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 
 
@@ -101,6 +101,9 @@ class Api:
             log("send: %s" % e)
             self._core.upload.update(running=False, pct=0, text="", error=str(e) or "Gönderilemedi")
             return False
+
+    def preview(self, slots):
+        return self._core.preview_layout(slots)
 
     def test(self, action):
         from deck import actions
@@ -259,7 +262,6 @@ def _deep_selftest():
 
     step("volume", vol)
     step("cover", lambda: media.cover_jpeg(_test_png(), 800, 480)[1:])
-    step("itunes", lambda: len(media.lookup_cover("Bohemian Rhapsody", "Queen") or b""))
     step("browser", lambda: actions.default_browser_exe())
     with open("selftest.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(out))
