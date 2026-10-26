@@ -3,18 +3,21 @@
 namespace ui::deck {
 
 /**
- * Stream deck screen (5" board): a grid of keys that send media keys and F13-F21
- * shortcuts to the computer over the USB cable (USB keyboard). Opened from the DECK
- * button on the radar; only the RADAR button goes back (no time-out).
+ * Stream deck screen (5" board): 12 keys set up on the setup page (picture, label,
+ * media key or keyboard shortcut) and a round volume knob. Turning the knob with a finger
+ * sends volume up / down, a tap on it mutes / unmutes. The keys and the knob go to the
+ * computer as a USB keyboard (console keyboard mode). Opened from the deck button on the
+ * radar; only the RADAR button goes back.
  */
 void enter();
 
-/** Called at the redraw cadence: releases the pressed-key highlight, updates the USB
- *  status. Always true: the deck closes only from its RADAR button. */
+/** Called at the redraw cadence: key highlight, USB status, a new key set from the page.
+ *  Always true: the deck closes only from its RADAR button. */
 bool tick();
 
-/** Tap result. */
-enum class Tap { None, Key, Back };
-Tap tap(int x, int y);
+/** Raw touch while the deck is up, every poll: fingers = 0 when none. The deck handles
+ *  presses, drags on the knob and releases itself. Back = RADAR released. */
+enum class Touch { None, Back };
+Touch touch(int fingers, int x, int y);
 
 }  // namespace ui::deck

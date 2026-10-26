@@ -1,4 +1,5 @@
 #include "services/water_store.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -137,7 +138,7 @@ void migrateOld(Preferences& p) {
     p.putBytes(kKeyTotals, &s_tot, sizeof(s_tot));
     p.remove("hours");
     p.remove("tot");
-    Serial.println("water: history moved to the 90-day layout");
+    Console.println("water: history moved to the 90-day layout");
   }
 }
 

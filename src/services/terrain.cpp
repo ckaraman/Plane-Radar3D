@@ -1,4 +1,5 @@
 #include "services/terrain.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -51,7 +52,7 @@ uint64_t s_rows_mask = 0;
 void reply(const char* tag, const char* body) {
   char line[64];
   const int n = snprintf(line, sizeof(line), "PR:%s %s\n", tag, body);
-  if (n > 0) Serial.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
+  if (n > 0) Console.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
 }
 
 void replyRow(int row) {
@@ -215,7 +216,7 @@ void handleEnd() {
   updateMax();
   save();
   reply("OK", "{}");
-  Serial.printf("terrain: %dx%d grid, %.1f km\n", n, n, s_hdr.half_km);
+  Console.printf("terrain: %dx%d grid, %.1f km\n", n, n, s_hdr.half_km);
 }
 
 void clear() {

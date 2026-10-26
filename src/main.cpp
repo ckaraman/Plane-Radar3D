@@ -7,6 +7,7 @@
  */
 
 #include <Arduino.h>
+#include "hardware/console.h"
 #include <esp_heap_caps.h>
 #include <WiFi.h>
 
@@ -17,6 +18,7 @@
 #include "services/adsb_client.h"
 #include "services/clock_service.h"
 #include "services/display_prefs.h"
+#include "services/deck_store.h"
 #include "services/hid_keys.h"
 #include "services/map_store.h"
 #include "services/radar_location.h"
@@ -98,7 +100,7 @@ void benchMemory() {
   auto* b = static_cast<uint8_t*>(heap_caps_malloc(kN, MALLOC_CAP_SPIRAM));
   auto* sram = static_cast<uint8_t*>(heap_caps_malloc(16384, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   if (!a || !b || !sram) {
-    Serial.println("bench: no memory");
+    Console.println("bench: no memory");
   } else {
     for (int pass = 0; pass < 2; ++pass) {
       if (pass == 1) {
@@ -123,7 +125,7 @@ void benchMemory() {
       volatile float f = 1.0f;
       for (int i = 0; i < 200000; ++i) f = f * 1.0000001f + 0.5f;
       const uint32_t cpu = micros() - t;
-      Serial.printf("bench (%s): psram write %.1f MB/s, read %.1f MB/s, copy %.1f MB/s; sram write %.1f MB/s; cpu loop %lu us\n",
+      Console.printf("bench (%s): psram write %.1f MB/s, read %.1f MB/s, copy %.1f MB/s; sram write %.1f MB/s; cpu loop %lu us\n",
                     pass == 0 ? "panel on" : "panel slow", kN / (float)wr, kN / (float)rd, kN / (float)cp,
                     16 * 16384 / (float)sw, cpu);
     }
@@ -216,7 +218,7 @@ void onBootTap() {
   ui::radar::rangeNext();
   char label[12];
   ui::radar::formatCurrentRing3Label(label, sizeof(label));
-  Serial.printf("Range: %s\n", label);
+  Console.printf("Range: %s\n", label);
   g_last_redraw_ms = 0;
 }
 
@@ -279,12 +281,7 @@ void onTouchTap(int x, int y) {
     }
     return;
   }
-#if defined(BOARD_WS5)
-  if (g_screen == Screen::Deck) {
-    if (ui::deck::tap(x, y) == ui::deck::Tap::Back) wakeRadar();
-    return;
-  }
-#endif
+
   if (g_screen != Screen::Radar) {
     wakeRadar();
     return;
@@ -323,6 +320,14 @@ void pollTouch() {
   lgfx::touch_point_t tps[2];
   const int n = tft.getTouch(tps, 2);
   const unsigned long now = millis();
+  // Stream deck: it handles presses, knob turns and releases itself.
+  if (g_screen == Screen::Deck && !ui::water::overlayActive()) {
+    g_touch_down = false;
+    if (ui::deck::touch(n, n > 0 ? tps[0].x : 0, n > 0 ? tps[0].y : 0) == ui::deck::Touch::Back) {
+      wakeRadar();
+    }
+    return;
+  }
   const bool on_radar = g_screen == Screen::Radar && !ui::water::overlayActive();
   if (n > 0) {
     if (!g_touch_down) {
@@ -452,7 +457,7 @@ void adsbFetchTask(void*) {
   for (;;) {
     if (millis() - last_mem_log >= 60000) {
       last_mem_log = millis();
-      Serial.printf("mem: free %u, largest %u, lowest %u, net stack left %u\n",
+      Console.printf("mem: free %u, largest %u, lowest %u, net stack left %u\n",
                     static_cast<unsigned>(ESP.getFreeHeap()),
                     static_cast<unsigned>(ESP.getMaxAllocHeap()),
                     static_cast<unsigned>(ESP.getMinFreeHeap()),
@@ -485,19 +490,20 @@ void adsbFetchTask(void*) {
 }  // namespace
 
 void setup() {
-  Serial.setRxBufferSize(4096);  // setup page and USB feed send lines in bursts
-  Serial.begin(115200);
-  services::hid::begin();  // 5": USB keyboard next to the serial port (stream deck)
+  // USB: keyboard mode (serial port + USB keyboard for the stream deck screen) or setup
+  // mode (USB-Serial/JTAG port for updates and uploads), see hardware/console.h.
+  console::begin();
   delay(300);
-  Serial.println();
-  Serial.printf("Plane Radar 3D v%s\n", config::kFirmwareVersion);
+  Console.println();
+  Console.printf("Plane Radar 3D v%s (USB %s mode)\n", config::kFirmwareVersion,
+                 console::keyboardMode() ? "keyboard" : "setup");
 
   services::display_prefs::init();
   bootButtonInit();
   displayInit();
   // The 76.8 KB frame sprite needs one contiguous block: take it before Wi-Fi.
   if (!ui::radar3d::init()) {
-    Serial.println("Not enough RAM for the radar frame buffer");
+    Console.println("Not enough RAM for the radar frame buffer");
   }
   services::sht30::init();
 #if defined(BOARD_WS5)
@@ -524,6 +530,7 @@ void setup() {
   ui::radar::rangeInit();
   services::adsb::init();
   services::route::init();
+  services::deck::init();
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -541,11 +548,12 @@ void loop() {
   }
   handleBootButton();
   wifiLoop();
+  console::tick();
   services::sht30::tick();
 
   if (!online()) {
     if (g_radar_visible) {
-      Serial.println("WiFi lost — will reconnect");
+      Console.println("WiFi lost — will reconnect");
       g_radar_visible = false;
     }
     if (g_wifi_down_since == 0) {

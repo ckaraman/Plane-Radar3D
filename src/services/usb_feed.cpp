@@ -1,4 +1,5 @@
 #include "services/usb_feed.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <sys/time.h>
@@ -94,7 +95,7 @@ void end(const char* args) {
   if (s_staged != nullptr) services::adsb::publishExternal(s_staged, s_count);
   s_last_batch_ms = millis();
   s_have_batch = true;
-  Serial.printf("PR:AOK {\"n\":%u}\n", static_cast<unsigned>(s_count));
+  Console.printf("PR:AOK {\"n\":%u}\n", static_cast<unsigned>(s_count));
 }
 
 bool active() { return s_have_batch && millis() - s_last_batch_ms < kActiveMs; }

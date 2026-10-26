@@ -1,4 +1,5 @@
 #include "ui/radar_range.h"
+#include "hardware/console.h"
 
 
 #include <Preferences.h>
@@ -115,19 +116,19 @@ bool showRings() { return s_show_rings; }
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
   saveUseMiles();
-  Serial.printf("Distance units: %s\n", s_use_miles ? "miles" : "km");
+  Console.printf("Distance units: %s\n", s_use_miles ? "miles" : "km");
 }
 
 void saveRunwaysFromPortal(const char* checkbox_value) {
   s_show_runways = portalCheckboxChecked(checkbox_value);
   saveShowRunways();
-  Serial.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
+  Console.printf("Runway overlay: %s\n", s_show_runways ? "on" : "off");
 }
 
 void saveRingsFromPortal(const char* checkbox_value) {
   s_show_rings = portalCheckboxChecked(checkbox_value);
   saveShowRings();
-  Serial.printf("Radar rings: %s\n", s_show_rings ? "on" : "off");
+  Console.printf("Radar rings: %s\n", s_show_rings ? "on" : "off");
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {

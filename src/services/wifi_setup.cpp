@@ -1,4 +1,5 @@
 #include "services/wifi_setup.h"
+#include "hardware/console.h"
 
 #include <WiFi.h>
 
@@ -122,7 +123,7 @@ void resetWifiCredentials() {
   services::map::clear();
   services::terrain::clear();
   ui::radar::unitsReset();
-  Serial.println("WiFi credentials, location, and units cleared");
+  Console.println("WiFi credentials, location, and units cleared");
 }
 
 void prepareSta() {
@@ -175,7 +176,7 @@ bool tryConnectWithUi(const String& ssid, const String& pass, bool show_ui) {
 
   for (uint8_t attempt = 1; attempt <= config::kWifiConnectAttempts; ++attempt) {
     if (attempt > 1) {
-      Serial.printf("WiFi connect retry %u/%u\n", attempt,
+      Console.printf("WiFi connect retry %u/%u\n", attempt,
                     config::kWifiConnectAttempts);
       WiFi.disconnect(true);
       WiFi.mode(WIFI_OFF);
@@ -233,7 +234,7 @@ bool connectSavedNetwork(bool show_ui) {
 bool waitForUsbSetup() {
   WiFi.mode(WIFI_OFF);
   statusScreenPortal();
-  Serial.println("No saved WiFi — waiting for the USB setup page");
+  Console.println("No saved WiFi — waiting for the USB setup page");
   while (!wifiLinkUp() && !services::usb_feed::active()) {
     bootButtonPollLongPress();
     services::serial_setup::poll();
@@ -244,7 +245,7 @@ bool waitForUsbSetup() {
 }
 
 void logConnected() {
-  Serial.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
+  Console.printf("Connected: %s  IP %s\n", WiFi.SSID().c_str(),
                 WiFi.localIP().toString().c_str());
 }
 
@@ -293,7 +294,7 @@ void bootButtonPollLongPress() {
     if (!s_long_press_handled &&
         millis() - down_ms >= config::kBootResetHoldMs) {
       s_long_press_handled = true;
-      Serial.println("BOOT held — resetting WiFi");
+      Console.println("BOOT held — resetting WiFi");
       wifiResetCredentialsAndReboot();
     }
   } else {
@@ -313,7 +314,7 @@ void wifiResetCredentialsAndReboot() {
 
 bool wifiReconnect() {
   initBootButton();
-  Serial.println("WiFi reconnecting...");
+  Console.println("WiFi reconnecting...");
   return connectSavedNetwork(true);
 }
 
@@ -341,7 +342,7 @@ bool wifiSetupConnect() {
   if (!storedWifiCredentials()) {
     waitForUsbSetup();
     if (!wifiLinkUp()) {
-      Serial.println("Running on USB data (no Wi-Fi)");
+      Console.println("Running on USB data (no Wi-Fi)");
       return false;
     }
     WiFi.setAutoReconnect(true);
@@ -349,14 +350,14 @@ bool wifiSetupConnect() {
     return true;
   }
 
-  Serial.println("Connecting to saved WiFi...");
+  Console.println("Connecting to saved WiFi...");
   if (connectSavedNetwork(true)) {
     WiFi.setAutoReconnect(true);
     logConnected();
     return true;
   }
 
-  Serial.println("WiFi connection failed (will keep retrying)");
+  Console.println("WiFi connection failed (will keep retrying)");
   if (!services::usb_feed::active()) {
     statusScreenConnectFailed();
   }

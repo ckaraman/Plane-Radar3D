@@ -1,4 +1,5 @@
 #include "services/sht30.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #if defined(BOARD_WS5)
@@ -98,7 +99,7 @@ void tick() {
         s_state = State::Waiting;
       } else if (s_fail_streak < 255) {
         if (++s_fail_streak == 3) {
-          Serial.println("sht30: no answer on I2C (check SDA/SCL wiring)");
+          Console.println("sht30: no answer on I2C (check SDA/SCL wiring)");
         }
       }
     }

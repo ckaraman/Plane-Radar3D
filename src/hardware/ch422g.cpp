@@ -1,6 +1,7 @@
 #if defined(BOARD_WS5)
 
 #include "hardware/ch422g.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 
@@ -33,7 +34,7 @@ bool begin() {
     return false;
   }
   s_ready = send(kAddrSet, 0x01) && send(kAddrIo, s_out);
-  if (!s_ready) Serial.println("ch422g: no answer on the I2C bus");
+  if (!s_ready) Console.println("ch422g: no answer on the I2C bus");
   return s_ready;
 }
 

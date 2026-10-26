@@ -7,9 +7,9 @@ namespace services::hid {
 /**
  * The 5" board as a USB keyboard / media keys (stream deck screen).
  *
- * Needs the native USB port in TinyUSB mode (ARDUINO_USB_MODE=0): the board then shows
- * up as one composite device, a serial port (setup page, USB bridge, updates, as before)
- * plus a keyboard. Call begin() early in setup(), before the PC enumerates the device.
+ * Only in the console's keyboard mode (hardware/console.h): the native USB port then runs
+ * TinyUSB and the board is one composite device, a serial port plus a keyboard.
+ * console::begin() calls begin() before it starts USB; in setup mode ready() stays false.
  */
 void begin();
 

@@ -1,4 +1,5 @@
 #include "services/radar_location.h"
+#include "hardware/console.h"
 
 #include <Preferences.h>
 #include <cstdlib>
@@ -74,7 +75,7 @@ bool saveFromStrings(const char* lat_str, const char* lon_str) {
     return false;
   }
   persist(lat, lon);
-  Serial.printf("Radar location saved: %.6f, %.6f\n", lat, lon);
+  Console.printf("Radar location saved: %.6f, %.6f\n", lat, lon);
   return true;
 }
 

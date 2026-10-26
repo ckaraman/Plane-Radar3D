@@ -1,4 +1,5 @@
 #include "services/map_store.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <esp_partition.h>
@@ -126,7 +127,7 @@ bool activateStored() {
     const uint8_t* blob = static_cast<const uint8_t*>(ptr) + sizeof(h);
     if (crc32(blob, h.length) != h.crc || !validBlob(blob, h.length)) {
       map_munmap(handle);
-      Serial.println("map: stored map is damaged, ignoring it");
+      Console.println("map: stored map is damaged, ignoring it");
       return false;
     }
     s_mmap = handle;
@@ -135,13 +136,13 @@ bool activateStored() {
   } else {
     uint8_t* buf = static_cast<uint8_t*>(malloc(h.length));
     if (buf == nullptr) {
-      Serial.println("map: no RAM for stored map");
+      Console.println("map: no RAM for stored map");
       return false;
     }
     if (esp_partition_read(part, sizeof(h), buf, h.length) != ESP_OK ||
         crc32(buf, h.length) != h.crc || !validBlob(buf, h.length)) {
       free(buf);
-      Serial.println("map: stored map is damaged, ignoring it");
+      Console.println("map: stored map is damaged, ignoring it");
       return false;
     }
     s_active_ram = buf;
@@ -149,7 +150,7 @@ bool activateStored() {
   }
   s_active_len = h.length;
   ++s_generation;
-  Serial.printf("map: %u bytes (%s)\n", static_cast<unsigned>(h.length),
+  Console.printf("map: %u bytes (%s)\n", static_cast<unsigned>(h.length),
                 s_mapped ? "read from flash" : "copied to RAM");
   return true;
 }

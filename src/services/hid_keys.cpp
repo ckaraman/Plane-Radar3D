@@ -10,7 +10,7 @@
 namespace {
 
 // Global objects: their constructors register the HID interface before the USB stack
-// starts (with CDC on boot the core starts USB before setup()).
+// starts (console::begin() starts it in keyboard mode; in setup mode it never starts).
 USBHIDKeyboard s_keyboard;
 USBHIDConsumerControl s_media;
 
@@ -32,11 +32,10 @@ void onUsbEvent(void*, esp_event_base_t base, int32_t id, void*) {
 namespace services::hid {
 
 void begin() {
+  // Called by console::begin() in keyboard mode, before it starts USB.
   USB.onEvent(onUsbEvent);
   s_keyboard.begin();
   s_media.begin();
-  USB.begin();  // already running with CDC on boot; harmless then
-  s_mounted = static_cast<bool>(USB);
 }
 
 bool ready() { return s_mounted; }

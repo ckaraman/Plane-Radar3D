@@ -1,4 +1,5 @@
 #include "services/route_service.h"
+#include "hardware/console.h"
 
 #include "services/adsb_client.h"
 
@@ -210,7 +211,7 @@ void fetchPending() {
   }
   if (code != HTTP_CODE_OK) {
     http.end();
-    Serial.printf("route: HTTP %d for %s (free heap %u, largest block %u)\n", code, callsign,
+    Console.printf("route: HTTP %d for %s (free heap %u, largest block %u)\n", code, callsign,
                   static_cast<unsigned>(ESP.getFreeHeap()),
                   static_cast<unsigned>(ESP.getMaxAllocHeap()));
     // Try again on the next cycles; after a few failures leave it (asked again in 30 min)
@@ -250,7 +251,7 @@ void fetchPending() {
   foldAscii(route["origin"]["municipality"] | "", r.from_city, sizeof(r.from_city));
   foldAscii(route["destination"]["municipality"] | "", r.to_city, sizeof(r.to_city));
   put(callsign, (r.from_code[0] || r.to_code[0]) ? &r : nullptr);
-  Serial.printf("route: %s %s -> %s\n", callsign, r.from_code, r.to_code);
+  Console.printf("route: %s %s -> %s\n", callsign, r.from_code, r.to_code);
 }
 
 }  // namespace services::route

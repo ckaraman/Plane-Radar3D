@@ -1,4 +1,6 @@
 #include "services/serial_setup.h"
+#include "hardware/console.h"
+#include "services/deck_store.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -54,7 +56,7 @@ void sendReply(const char* tag, const JsonDocument& doc) {
   const size_t body = serializeJson(doc, reply + n, cap - static_cast<size_t>(n) - 2);
   size_t total = static_cast<size_t>(n) + body;
   reply[total++] = '\n';
-  Serial.write(reinterpret_cast<const uint8_t*>(reply), total);
+  Console.write(reinterpret_cast<const uint8_t*>(reply), total);
   free(reply);
 }
 
@@ -119,6 +121,12 @@ void sendHello() {
   doc["elevv"] = services::terrain::kProtocolVersion;
   doc["otav"] = 2;
   doc["elev"] = services::terrain::available();
+  // USB mode (hardware/console.h): "kb" = keyboard mode, uploads need "PR:USBSETUP" first.
+  doc["usb"] = console::keyboardMode() ? "kb" : "setup";
+  doc["deckv"] = services::deck::kVersion;
+  doc["deckslots"] = services::deck::kSlots;
+  doc["deckicon"] = services::deck::iconPx();
+  doc["deckcustom"] = services::deck::custom();
   sendReply("HELLO", doc);
 }
 
@@ -337,7 +345,7 @@ void handleSet(const char* json) {
   char ip[16];
   strlcpy(ip, WiFi.localIP().toString().c_str(), sizeof(ip));
   sendOk(true, ip);
-  Serial.flush();
+  Console.flush();
   delay(700);
   esp_restart();  // clean start on the saved network
 }
@@ -428,9 +436,62 @@ void handleMapClear() {
   sendOk(false);
 }
 
+void handleDeckBegin(const char* json) {
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok ||
+      !doc["len"].is<uint32_t>() || !doc["crc"].is<uint32_t>()) {
+    sendError("bad_json");
+    return;
+  }
+  if (!services::deck::beginStaging(doc["len"].as<uint32_t>(), doc["crc"].as<uint32_t>())) {
+    sendError("deck_too_big");
+    return;
+  }
+  JsonDocument ack;
+  ack["seq"] = 0;
+  sendReply("DECKACK", ack);
+}
+
+void handleDeckChunk(char* args) {
+  char* data = strchr(args, ' ');
+  if (data == nullptr) {
+    sendError("bad_deck_chunk");
+    return;
+  }
+  *data++ = '\0';
+  const long seq = atol(args);
+  uint8_t bytes[480];
+  const int n = b64Decode(data, bytes, sizeof(bytes));
+  if (n <= 0 || !services::deck::stageChunk(bytes, static_cast<size_t>(n))) {
+    services::deck::abortStaging();
+    sendError("bad_deck_chunk");
+    return;
+  }
+  JsonDocument ack;
+  ack["seq"] = seq;
+  sendReply("DECKACK", ack);
+}
+
+void handleDeckEnd() {
+  if (!services::deck::commit()) {
+    sendError("bad_deck");
+    return;
+  }
+  JsonDocument doc;
+  doc["deckcustom"] = services::deck::custom();
+  sendReply("OK", doc);
+}
+
+/** Long uploads only in setup mode: the TinyUSB port of keyboard mode stalls on them. */
+bool uploadAllowed() {
+  if (!console::keyboardMode()) return true;
+  sendError("usb_setup");
+  return false;
+}
+
 void handleReset() {
   sendOk(true);
-  Serial.flush();
+  Console.flush();
   delay(200);
   wifiResetCredentialsAndReboot();
 }
@@ -447,14 +508,28 @@ void handleLine(char* line) {
     args = command + strlen(command);  // empty string
   }
 
+  console::noteActivity();
   if (strcmp(command, "HELLO") == 0) {
     sendHello();
+  } else if (strcmp(command, "USBSETUP") == 0) {
+    console::switchTo(console::Mode::Setup);
+  } else if (strcmp(command, "USBNORMAL") == 0) {
+    console::switchTo(console::Mode::Keyboard);
+  } else if (strcmp(command, "DECKBEGIN") == 0) {
+    if (uploadAllowed()) handleDeckBegin(args);
+  } else if (strcmp(command, "DECK") == 0) {
+    handleDeckChunk(args);
+  } else if (strcmp(command, "DECKEND") == 0) {
+    handleDeckEnd();
+  } else if (strcmp(command, "DECKCLEAR") == 0) {
+    services::deck::clear();
+    sendOk(false);
   } else if (strcmp(command, "SCAN") == 0) {
     sendScan();
   } else if (strcmp(command, "SET") == 0) {
     handleSet(args);
   } else if (strcmp(command, "MAPBEGIN") == 0) {
-    handleMapBegin(args);
+    if (uploadAllowed()) handleMapBegin(args);
   } else if (strcmp(command, "MAP") == 0) {
     handleMapChunk(args);
   } else if (strcmp(command, "MAPEND") == 0) {
@@ -466,7 +541,7 @@ void handleLine(char* line) {
   } else if (strcmp(command, "ELEVROW") == 0) {
     services::terrain::handleRow(args);
   } else if (strcmp(command, "ELEVBEGIN") == 0) {
-    services::terrain::handleBegin(args);
+    if (uploadAllowed()) services::terrain::handleBegin(args);
   } else if (strcmp(command, "ELEVEND") == 0) {
     services::terrain::handleEnd();
   } else if (strcmp(command, "ELEVCLEAR") == 0) {
@@ -474,7 +549,7 @@ void handleLine(char* line) {
   } else if (strcmp(command, "OTA") == 0) {
     services::serial_ota::chunk(args);
   } else if (strcmp(command, "OTABEGIN") == 0) {
-    services::serial_ota::begin(args);
+    if (uploadAllowed()) services::serial_ota::begin(args);
   } else if (strcmp(command, "OTAEND") == 0) {
     services::serial_ota::end();
   } else if (strcmp(command, "OTAABORT") == 0) {
@@ -497,8 +572,8 @@ void handleLine(char* line) {
 
 void poll() {
   int budget = services::serial_ota::active() ? 8192 : 2048;  // bytes per call
-  while (budget-- > 0 && Serial.available() > 0) {
-    const int c = Serial.read();
+  while (budget-- > 0 && Console.available() > 0) {
+    const int c = Console.read();
     if (c < 0) {
       break;
     }

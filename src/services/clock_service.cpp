@@ -1,4 +1,5 @@
 #include "services/clock_service.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <Preferences.h>
@@ -68,7 +69,7 @@ void startSync() {
   // SNTP keeps retrying in the background, so this is fine to call as soon as
   // WiFi is up; the time simply appears once the first reply arrives.
   configTzTime(s_tz, config::kNtpServer1, config::kNtpServer2);
-  Serial.printf("Clock: NTP started, TZ=%s\n", s_tz);
+  Console.printf("Clock: NTP started, TZ=%s\n", s_tz);
 }
 
 bool now(tm* out) {
@@ -90,7 +91,7 @@ void saveFromPortal(const char* tz, const char* enabled_checkbox) {
   if (tz != nullptr && tz[0] != '\0' && strlen(tz) < kTzMaxLen) {
     strlcpy(s_tz, tz, sizeof(s_tz));
   } else {
-    Serial.println("Clock: invalid timezone in portal — keeping previous");
+    Console.println("Clock: invalid timezone in portal — keeping previous");
   }
   s_enabled = checkboxChecked(enabled_checkbox);
 
@@ -101,7 +102,7 @@ void saveFromPortal(const char* tz, const char* enabled_checkbox) {
     prefs.end();
   }
   applyTimezone();  // takes effect immediately, no reboot needed
-  Serial.printf("Clock: %s, TZ=%s\n", s_enabled ? "on" : "off", s_tz);
+  Console.printf("Clock: %s, TZ=%s\n", s_enabled ? "on" : "off", s_tz);
 }
 
 void clear() {

@@ -1,4 +1,5 @@
 #include "services/serial_ota.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <Update.h>
@@ -31,7 +32,7 @@ int s_drawn_pct = -1;
 void reply(const char* tag, const char* body) {
   char line[96];
   const int n = snprintf(line, sizeof(line), "PR:%s %s\n", tag, body);
-  if (n > 0) Serial.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
+  if (n > 0) Console.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(n));
 }
 
 void replyAck(uint32_t seq) {
@@ -133,7 +134,7 @@ bool jsonUint(const char* json, const char* key, uint32_t* out) {
 void begin(const char* json) {
   uint32_t len = 0, crc = 0;
   if (!jsonUint(json, "len", &len) || !jsonUint(json, "crc", &crc)) {
-    Serial.printf("ota: bad begin line '%.60s'\n", json);
+    Console.printf("ota: bad begin line '%.60s'\n", json);
     replyError("bad_json");
     return;
   }
@@ -217,7 +218,7 @@ void end() {
     return;
   }
   if (!Update.end(true)) {
-    Serial.printf("ota: %s\n", Update.errorString());
+    Console.printf("ota: %s\n", Update.errorString());
     s_active = false;
     replyError("ota_image");
     return;
@@ -225,7 +226,7 @@ void end() {
   s_active = false;
   drawScreen(100);
   reply("OTADONE", "{}");
-  Serial.flush();
+  Console.flush();
   delay(600);
   ESP.restart();
 }
@@ -242,7 +243,7 @@ bool active() { return s_active; }
 void tick() {
   if (!s_active) return;
   if (millis() - s_last_ms > kStallTimeoutMs) {
-    Serial.println("ota: transfer stalled, cancelled");
+    Console.println("ota: transfer stalled, cancelled");
     abort("ota_timeout");
     ESP.restart();  // back to the normal screens with a clean state
   }

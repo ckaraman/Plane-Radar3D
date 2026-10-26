@@ -1,4 +1,5 @@
 #include "services/adsb_client.h"
+#include "hardware/console.h"
 
 #include <HTTPClient.h>
 #include <WiFiClient.h>
@@ -353,7 +354,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
   if (!(try_plain ? http.begin(plain, url) : http.begin(client, url))) {
-    Serial.println("adsb: http.begin failed");
+    Console.println("adsb: http.begin failed");
     setError("bağlantı kurulamadı", 0);
     return false;
   }
@@ -369,7 +370,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     char tls[64] = "";
     int tls_code = 0;
     if (!try_plain) tls_code = client.lastError(tls, sizeof(tls));
-    Serial.printf("adsb: %s %s HTTP %d (heap before %u, largest block %u) %s\n", src.name,
+    Console.printf("adsb: %s %s HTTP %d (heap before %u, largest block %u) %s\n", src.name,
                   try_plain ? "http" : "https", code, heap_before, block_before, tls);
     http.end();
     if (try_plain && s_plain_state[s_source] == 0) {
@@ -397,7 +398,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   WiFiClient* stream = http.getStreamPtr();
   if (stream == nullptr) {
-    Serial.println("adsb: no response stream");
+    Console.println("adsb: no response stream");
     http.end();
     return false;
   }
@@ -451,7 +452,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   bool reported = false;  // a specific reason was already set for this fetch
   if (!found) {
     reported = true;
-    Serial.println(body.bytesRead() == 0 ? "adsb: empty response" : "adsb: no aircraft list");
+    Console.println(body.bytesRead() == 0 ? "adsb: empty response" : "adsb: no aircraft list");
     setError(body.bytesRead() == 0 ? "boş yanıt" : "beklenmeyen yanıt", 0);
   }
   JsonDocument doc;
@@ -486,7 +487,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
     } in{&body};
     const DeserializationError err = deserializeJson(doc, in, DeserializationOption::Filter(filter));
     if (err) {
-      Serial.printf("adsb: JSON parse error: %s\n", err.c_str());
+      Console.printf("adsb: JSON parse error: %s\n", err.c_str());
       setError(err == DeserializationError::NoMemory ? "bellek yetmedi" : "veri okunamadı", 0);
       reported = true;
       ok = false;
@@ -553,7 +554,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
   body.drain();
   http.end();
   if (!ok) {
-    if (body.framingError()) Serial.println("adsb: malformed chunked body");
+    if (body.framingError()) Console.println("adsb: malformed chunked body");
     if (!reported) setError("veri yarıda kesildi", 0);
     return false;
   }
@@ -562,10 +563,10 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
 
   publish(parsed, n);
   if (total > n) {
-    Serial.printf("adsb: %u aircraft (nearest of %u)\n", static_cast<unsigned>(n),
+    Console.printf("adsb: %u aircraft (nearest of %u)\n", static_cast<unsigned>(n),
                   static_cast<unsigned>(total));
   } else {
-    Serial.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
+    Console.printf("adsb: %u aircraft\n", static_cast<unsigned>(n));
   }
   next_on_fail.ok = true;
   return true;

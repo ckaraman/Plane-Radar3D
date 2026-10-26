@@ -1,4 +1,5 @@
 #include "services/tls_client.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <esp_system.h>
@@ -127,7 +128,7 @@ int Client::connect(const char* host, uint16_t port, int32_t timeout_ms) {
   if (runUntil(BR_SSL_SENDAPP | BR_SSL_RECVAPP, true, handshake_ms_) <= 0) {
     if (last_error_ == 0) last_error_ = br_ssl_engine_last_error(&s_sc.eng);
     if (last_error_ == 0) last_error_ = -2;  // timeout
-    Serial.printf("tls: handshake with %s failed (%d)\n", host, last_error_);
+    Console.printf("tls: handshake with %s failed (%d)\n", host, last_error_);
     stop();
     return 0;
   }

@@ -1,4 +1,5 @@
 #include "services/weather_service.h"
+#include "hardware/console.h"
 
 #include <Arduino.h>
 #include <HTTPClient.h>
@@ -62,7 +63,7 @@ void setError(const char* fmt, int value) {
   lock();
   snprintf(s_error, sizeof(s_error), fmt, value);
   unlock();
-  Serial.printf("weather: %s (free heap %u, largest block %u)\n", s_error,
+  Console.printf("weather: %s (free heap %u, largest block %u)\n", s_error,
                 static_cast<unsigned>(ESP.getFreeHeap()),
                 static_cast<unsigned>(ESP.getMaxAllocHeap()));
 }
@@ -112,7 +113,7 @@ bool fetchOnce(const char* url, bool secure, Forecast* out) {
     return false;
   }
   if (!parseForecast(doc, out)) {
-    if (doc["reason"].is<const char*>()) Serial.printf("weather: %s\n", doc["reason"].as<const char*>());
+    if (doc["reason"].is<const char*>()) Console.printf("weather: %s\n", doc["reason"].as<const char*>());
     setError("beklenmeyen yanıt", 0);
     return false;
   }
@@ -154,7 +155,7 @@ bool fetchNow(double lat, double lon) {
   s_lon = lon;
   s_error[0] = '\0';
   unlock();
-  Serial.printf("weather: now %d C (%s), %u days\n", f.now.temp_c,
+  Console.printf("weather: now %d C (%s), %u days\n", f.now.temp_c,
                 conditionLabel(f.now.cond), static_cast<unsigned>(f.day_count));
   return true;
 }
@@ -178,7 +179,7 @@ void saveFromPortal(const char* enabled_checkbox) {
     prefs.putBool(kKeyOn, s_enabled);
     prefs.end();
   }
-  Serial.printf("Weather: %s\n", s_enabled ? "on" : "off");
+  Console.printf("Weather: %s\n", s_enabled ? "on" : "off");
 }
 
 void clear() {
@@ -219,7 +220,7 @@ bool lastError(char* out, size_t out_len) {
 void handleBridge(const char* args) {
   Forecast f;
   if (!parseBridgeLine(args, &f)) {
-    Serial.println("PR:ERR {\"msg\":\"bad_weather\"}");
+    Console.println("PR:ERR {\"msg\":\"bad_weather\"}");
     return;
   }
   lock();
@@ -228,7 +229,7 @@ void handleBridge(const char* args) {
   s_fetched_ms = millis();
   if (s_fetched_ms == 0) s_fetched_ms = 1;
   unlock();
-  Serial.printf("PR:WOK {\"days\":%u}\n", static_cast<unsigned>(f.day_count));
+  Console.printf("PR:WOK {\"days\":%u}\n", static_cast<unsigned>(f.day_count));
 }
 
 void fetchIfDue(double lat, double lon) {

@@ -3,10 +3,16 @@
 #if defined(BOARD_WS5)
 
 #include <Arduino.h>
+#include <esp_heap_caps.h>
+
+#include <cmath>
+#include <cstring>
 
 #include "config.h"
+#include "hardware/console.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
+#include "services/deck_store.h"
 #include "services/hid_keys.h"
 #include "ui/fonts_tr.h"
 #include "ui/screen_switch.h"
@@ -17,227 +23,411 @@ namespace ui::deck {
 namespace {
 
 using services::hid::Media;
+namespace store = services::deck;
 
-/** How long a pressed key stays highlighted. */
 constexpr unsigned long kPressFlashMs = 140;
+/** Knob: one volume step per this many degrees of turn (Windows: 2 % per step). */
+constexpr float kStepDeg = 12.0f;
+/** A touch on the knob that turns less than this, short and still, is a tap (mute). */
+constexpr float kTapMaxDeg = 8.0f;
+constexpr unsigned long kTapMaxMs = 700;
 
-// Arduino keyboard codes for F13..F24 (USBHIDKeyboard.h: KEY_F13 = 0xF0 ... KEY_F24 = 0xFB).
-constexpr uint8_t kF13 = 0xF0;
-
-enum class Icon : uint8_t { None, Prev, PlayPause, Next, VolDown, VolUp, Mute };
-
-struct Key {
-  const char* label;  // shown under the icon, or alone
-  Icon icon;
-  bool media;
-  Media media_key;
-  uint8_t modifiers;
-  uint8_t key;
-};
-
-// 5 x 3 grid. F13-F24 are not on normal keyboards, so they never clash with an app's
-// own shortcuts: assign them in AutoHotkey, the app's shortcut settings, OBS, etc.
-constexpr int kCols = 5;
-constexpr int kRows = 3;
-const Key kKeys[kCols * kRows] = {
-    {"Önceki", Icon::Prev, true, Media::Previous, 0, 0},
-    {"Oynat / Dur", Icon::PlayPause, true, Media::PlayPause, 0, 0},
-    {"Sonraki", Icon::Next, true, Media::Next, 0, 0},
-    {"Ses -", Icon::VolDown, true, Media::VolumeDown, 0, 0},
-    {"Ses +", Icon::VolUp, true, Media::VolumeUp, 0, 0},
-
-    {"Sessiz", Icon::Mute, true, Media::Mute, 0, 0},
-    {"F13", Icon::None, false, Media::Mute, 0, kF13 + 0},
-    {"F14", Icon::None, false, Media::Mute, 0, kF13 + 1},
-    {"F15", Icon::None, false, Media::Mute, 0, kF13 + 2},
-    {"F16", Icon::None, false, Media::Mute, 0, kF13 + 3},
-
-    {"F17", Icon::None, false, Media::Mute, 0, kF13 + 4},
-    {"F18", Icon::None, false, Media::Mute, 0, kF13 + 5},
-    {"F19", Icon::None, false, Media::Mute, 0, kF13 + 6},
-    {"F20", Icon::None, false, Media::Mute, 0, kF13 + 7},
-    {"F21", Icon::None, false, Media::Mute, 0, kF13 + 8},
-};
-
-// Layout: title bar, key grid, RADAR button bottom right (same place as on the other screens).
+// --- Layout: title bar, 4 x 3 keys on the left, the knob on the right, RADAR bottom right.
 constexpr int kW = config::kDisplayWidth;
 constexpr int kTopH = S(34);
 constexpr int kGap = S(8);
-constexpr int kGridX = S(8);
-constexpr int kGridY = kTopH + S(4);
-constexpr int kGridW = kW - 2 * kGridX;
-constexpr int kGridH = ui::kSwitchY - S(6) - kGridY;
-constexpr int kKeyW = (kGridW - (kCols - 1) * kGap) / kCols;
-constexpr int kKeyH = (kGridH - (kRows - 1) * kGap) / kRows;
-
-int s_pressed = -1;
-unsigned long s_pressed_ms = 0;
-int s_usb_shown = -1;
+constexpr int kMargin = S(8);
+constexpr int kAreaY = kTopH + S(4);
+constexpr int kAreaH = ui::kSwitchY - S(6) - kAreaY;
+constexpr int kKnobD = S(200) < kAreaH ? S(200) : kAreaH;
+constexpr int kKnobX = kW - kMargin - kKnobD;
+constexpr int kKnobY = kAreaY + (kAreaH - kKnobD) / 2;
+constexpr int kKnobR = kKnobD / 2 - S(2);
+constexpr int kCols = 4;
+constexpr int kRows = 3;
+constexpr int kKeysW = kKnobX - S(12) - kMargin;
+constexpr int kKeyW = (kKeysW - (kCols - 1) * kGap) / kCols;
+constexpr int kKeyH = (kAreaH - (kRows - 1) * kGap) / kRows;
+static_assert(kCols * kRows == store::kSlots, "one key per stored slot");
 
 uint16_t cBg() { return tft.color565(6, 10, 18); }
 uint16_t cKey() { return tft.color565(18, 30, 46); }
-uint16_t cKeyMedia() { return tft.color565(14, 38, 52); }
 uint16_t cKeyDown() { return tft.color565(60, 150, 210); }
 uint16_t cEdge() { return tft.color565(48, 86, 110); }
-uint16_t cText() { return 0xFFFF; }
 uint16_t cDim() { return tft.color565(125, 139, 150); }
 uint16_t cCyan() { return tft.color565(110, 210, 255); }
+uint16_t cRed() { return tft.color565(235, 90, 80); }
+
+LGFX_Sprite s_knob(&tft);
+bool s_knob_ok = false;
+float s_dial_deg = -90.0f;  // indicator position (visual only; the PC keeps the level)
+bool s_muted = false;
+
+int s_pressed = -1;  // key drawn pressed
+unsigned long s_pressed_ms = 0;
+bool s_flash = false;  // released, highlight still showing
+int s_usb_shown = -1;
+uint32_t s_gen_shown = 0;
+uint16_t* s_icon_buf = nullptr;  // one icon composed onto the key colour
+
+// Touch state.
+enum class Target { None, Key, Knob, Back };
+Target s_target = Target::None;
+bool s_down = false;
+int s_key = -1;
+int s_down_x = 0, s_down_y = 0;
+int s_last_x = 0, s_last_y = 0;  // last finger position (none on release)
+unsigned long s_down_ms = 0;
+float s_last_deg = 0.0f, s_accum_deg = 0.0f, s_total_deg = 0.0f;
+int s_max_move = 0;
 
 void keyRect(int i, int* x, int* y) {
-  *x = kGridX + (i % kCols) * (kKeyW + kGap);
-  *y = kGridY + (i / kCols) * (kKeyH + kGap);
+  *x = kMargin + (i % kCols) * (kKeyW + kGap);
+  *y = kAreaY + (i / kCols) * (kKeyH + kGap);
 }
 
-void speaker(int cx, int cy, int s, uint16_t c) {
-  tft.fillRect(cx - s, cy - s / 2, s * 2 / 3, s, c);
-  tft.fillTriangle(cx - s / 3, cy - s / 2, cx + s / 3, cy - s, cx + s / 3, cy + s, c);
-  tft.fillRect(cx - s / 3, cy - s / 2, s * 2 / 3, s, c);
+int keyAt(int x, int y) {
+  for (int i = 0; i < store::kSlots; ++i) {
+    int kx, ky;
+    keyRect(i, &kx, &ky);
+    if (x >= kx && x < kx + kKeyW && y >= ky && y < ky + kKeyH) return i;
+  }
+  return -1;
 }
 
-void drawIcon(Icon icon, int cx, int cy, uint16_t c, uint16_t bg) {
+constexpr int kKnobCx = kKnobX + kKnobD / 2;
+constexpr int kKnobCy = kKnobY + kKnobD / 2;
+
+bool inKnob(int x, int y) {
+  const int dx = x - kKnobCx, dy = y - kKnobCy;
+  return dx * dx + dy * dy <= (kKnobR + S(10)) * (kKnobR + S(10));
+}
+
+// --- Drawing -----------------------------------------------------------------------
+
+template <typename Gfx>
+void speakerIcon(Gfx& g, int cx, int cy, int s, uint16_t c) {
+  g.fillRect(cx - s, cy - s / 2, s * 2 / 3, s, c);
+  g.fillTriangle(cx - s / 3, cy - s / 2, cx + s / 3, cy - s, cx + s / 3, cy + s, c);
+  g.fillRect(cx - s / 3, cy - s / 2, s * 2 / 3 + 1, s, c);
+}
+
+/** Built-in pictures for media keys without one of their own. */
+void mediaIcon(Media m, int cx, int cy, uint16_t c) {
   const int s = S(14);
-  switch (icon) {
-    case Icon::Prev:
+  switch (m) {
+    case Media::Previous:
       tft.fillRect(cx - s, cy - s, S(3), 2 * s, c);
       tft.fillTriangle(cx - s + S(3), cy, cx, cy - s, cx, cy + s, c);
       tft.fillTriangle(cx, cy, cx + s, cy - s, cx + s, cy + s, c);
       break;
-    case Icon::Next:
+    case Media::Next:
       tft.fillTriangle(cx - s, cy - s, cx - s, cy + s, cx, cy, c);
       tft.fillTriangle(cx, cy - s, cx, cy + s, cx + s - S(3), cy, c);
       tft.fillRect(cx + s - S(3), cy - s, S(3), 2 * s, c);
       break;
-    case Icon::PlayPause:
+    case Media::PlayPause:
       tft.fillTriangle(cx - s, cy - s, cx - s, cy + s, cx + S(2), cy, c);
       tft.fillRect(cx + S(5), cy - s, S(4), 2 * s, c);
       tft.fillRect(cx + S(12), cy - s, S(4), 2 * s, c);
       break;
-    case Icon::VolDown:
-    case Icon::VolUp:
-    case Icon::Mute: {
-      speaker(cx - S(6), cy, s, c);
+    case Media::VolumeUp:
+    case Media::VolumeDown:
+    case Media::Mute: {
+      speakerIcon(tft, cx - S(6), cy, s, c);
       const int mx = cx + S(12);
-      if (icon == Icon::Mute) {
+      if (m == Media::Mute) {
         for (int t = -1; t <= 1; ++t) {
           tft.drawLine(mx - S(5) + t, cy - S(5), mx + S(5) + t, cy + S(5), c);
           tft.drawLine(mx - S(5) + t, cy + S(5), mx + S(5) + t, cy - S(5), c);
         }
       } else {
         tft.fillRect(mx - S(6), cy - S(1), S(12), S(3), c);
-        if (icon == Icon::VolUp) tft.fillRect(mx - S(1), cy - S(6), S(3), S(12), c);
+        if (m == Media::VolumeUp) tft.fillRect(mx - S(1), cy - S(6), S(3), S(12), c);
       }
-      (void)bg;
       break;
     }
-    case Icon::None: break;
   }
 }
 
 void drawKey(int i, bool down) {
   int x, y;
   keyRect(i, &x, &y);
-  const Key& k = kKeys[i];
-  const uint16_t fill = down ? cKeyDown() : (k.media ? cKeyMedia() : cKey());
+  const store::Slot& k = store::slot(i);
+  const uint16_t fill = down ? cKeyDown() : cKey();
   tft.fillRoundRect(x, y, kKeyW, kKeyH, S(10), fill);
-  tft.drawRoundRect(x, y, kKeyW, kKeyH, S(10), down ? cText() : cEdge());
-  const int cx = x + kKeyW / 2, cy = y + kKeyH / 2;
+  tft.drawRoundRect(x, y, kKeyW, kKeyH, S(10), down ? 0xFFFF : cEdge());
+  if (k.kind == store::Kind::Empty && !k.label[0] && !store::icon(i)) return;
+  const int cx = x + kKeyW / 2;
+  const uint16_t* pic = store::icon(i);
+  const int px = store::iconPx();
+  const bool has_label = k.label[0] != '\0';
+  tft.setTextColor(0xFFFF, fill);
   tft.setTextDatum(textdatum_t::middle_center);
-  tft.setTextColor(cText(), fill);
-  if (k.icon != Icon::None) {
-    drawIcon(k.icon, cx, cy - S(10), down ? cText() : cCyan(), fill);
-    displayFontSetBitmap(tft, &ui::font::Sans9);
-    tft.drawString(k.label, cx, cy + S(22));
+  if (pic != nullptr && s_icon_buf != nullptr) {
+    // Picture: magenta pixels take the key colour, then one push.
+    for (int p = 0; p < px * px; ++p) s_icon_buf[p] = pic[p] == store::kTransparent ? fill : pic[p];
+    const int iy = has_label ? y + S(5) : y + (kKeyH - px) / 2;
+    tft.pushImage(cx - px / 2, iy, px, px, reinterpret_cast<const lgfx::rgb565_t*>(s_icon_buf));
+    if (has_label) {
+      displayFontSetBitmap(tft, &ui::font::Sans8);
+      tft.drawString(k.label, cx, y + kKeyH - S(10));
+    }
+  } else if (k.kind == store::Kind::Media) {
+    mediaIcon(static_cast<Media>(k.code), cx, y + kKeyH / 2 - S(9), down ? 0xFFFF : cCyan());
+    displayFontSetBitmap(tft, &ui::font::Sans8);
+    tft.drawString(k.label, cx, y + kKeyH - S(12));
   } else {
-    displayFontSetBitmap(tft, &ui::font::SansBold18);
-    tft.drawString(k.label, cx, cy);
+    // Text only: the largest font that fits the key.
+    const lgfx::GFXfont* fonts[] = {&ui::font::SansBold18, &ui::font::SansBold12, &ui::font::SansBold9,
+                                    &ui::font::Sans8};
+    for (const auto* f : fonts) {
+      displayFontSetBitmap(tft, f);
+      if (tft.textWidth(k.label) <= kKeyW - S(10)) break;
+    }
+    tft.drawString(k.label, cx, y + kKeyH / 2);
   }
+  tft.setTextDatum(textdatum_t::top_left);
+}
+
+void drawKnob() {
+  if (!s_knob_ok) return;
+  LGFX_Sprite& g = s_knob;
+  const int c = kKnobD / 2, R = kKnobR;
+  g.fillScreen(cBg());
+  // Outer ring with ticks, the face, an indicator dot that follows the turn.
+  g.fillCircle(c, c, R, tft.color565(28, 48, 66));
+  g.fillCircle(c, c, R - S(10), tft.color565(14, 24, 36));
+  for (int t = 0; t < 24; ++t) {
+    const float a = t * 15.0f * static_cast<float>(M_PI) / 180.0f;
+    const float ca = cosf(a), sa = sinf(a);
+    g.drawLine(c + lroundf(ca * (R - S(8))), c + lroundf(sa * (R - S(8))), c + lroundf(ca * (R - S(2))),
+               c + lroundf(sa * (R - S(2))), t % 6 == 0 ? cCyan() : cEdge());
+  }
+  const float a = s_dial_deg * static_cast<float>(M_PI) / 180.0f;
+  const int dr = R - S(24);
+  g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), S(7), s_muted ? cDim() : cCyan());
+  // Centre: speaker, crossed out while muted.
+  const uint16_t sc = s_muted ? cRed() : 0xFFFF;
+  speakerIcon(g, c - S(6), c - S(6), S(16), sc);
+  const int mx = c + S(14), my = c - S(6);
+  if (s_muted) {
+    for (int t = -1; t <= 1; ++t) {
+      g.drawLine(mx - S(6) + t, my - S(6), mx + S(6) + t, my + S(6), sc);
+      g.drawLine(mx - S(6) + t, my + S(6), mx + S(6) + t, my - S(6), sc);
+    }
+  } else {
+    g.drawArc(mx - S(8), my, S(8), S(6), -45, 45, sc);
+    g.drawArc(mx - S(8), my, S(14), S(12), -45, 45, sc);
+  }
+  displayFontSetBitmap(g, &ui::font::SansBold9);
+  g.setTextDatum(textdatum_t::middle_center);
+  g.setTextColor(s_muted ? cRed() : cDim());
+  g.drawString(s_muted ? "SESSİZ" : "SES", c, c + S(26));
+  g.pushSprite(kKnobX, kKnobY);
 }
 
 void drawUsbStatus() {
-  const bool ok = services::hid::ready();
-  s_usb_shown = ok ? 1 : 0;
-  const int w = S(150);
+  const bool kb = console::keyboardMode();
+  const bool ok = kb && services::hid::ready();
+  s_usb_shown = ok ? 1 : (kb ? 0 : 2);
+  const int w = S(230);
   const int x = kW - S(8) - w;
   tft.fillRect(x, 0, w, kTopH, cBg());
-  tft.fillCircle(x + S(8), kTopH / 2, S(5), ok ? tft.color565(80, 220, 120) : tft.color565(230, 90, 70));
+  tft.fillCircle(x + w - S(160), kTopH / 2, S(5),
+                 ok ? tft.color565(80, 220, 120) : (kb ? cRed() : tft.color565(240, 180, 60)));
   displayFontSetBitmap(tft, &ui::font::Sans8);
   tft.setTextDatum(textdatum_t::middle_left);
   tft.setTextColor(ok ? cDim() : tft.color565(230, 150, 130), cBg());
-  tft.drawString(ok ? "USB bağlı" : "USB bağlı değil", x + S(18), kTopH / 2 + 1);
+  tft.drawString(ok ? "USB bağlı" : (kb ? "USB bağlı değil" : "Kurulum modu: tuşlar kapalı"),
+                 x + w - S(150), kTopH / 2 + 1);
+  tft.setTextDatum(textdatum_t::top_left);
 }
 
 void drawBackButton() {
   const uint16_t panel = tft.color565(12, 26, 38);
   tft.fillRoundRect(ui::kSwitchX, ui::kSwitchY, ui::kSwitchW, ui::kSwitchH, S(8), panel);
   tft.drawRoundRect(ui::kSwitchX, ui::kSwitchY, ui::kSwitchW, ui::kSwitchH, S(8), cEdge());
-  // radar rings
   const int cx = ui::kSwitchX + S(21), cy = ui::kSwitchY + ui::kSwitchH / 2;
   tft.drawCircle(cx, cy, S(12), cCyan());
   tft.drawCircle(cx, cy, S(6), cCyan());
   tft.drawLine(cx, cy, cx + S(9), cy - S(8), cCyan());
   displayFontSetBitmap(tft, &ui::font::SansBold8);
   tft.setTextDatum(textdatum_t::middle_center);
-  tft.setTextColor(cText(), panel);
+  tft.setTextColor(0xFFFF, panel);
   tft.drawString("RADAR", (ui::kSwitchX + S(38) + ui::kSwitchX + ui::kSwitchW) / 2, cy + 1);
+  tft.setTextDatum(textdatum_t::top_left);
 }
 
 void drawAll() {
   tft.fillScreen(cBg());
   displayFontSetBitmap(tft, &ui::font::SansBold9);
   tft.setTextDatum(textdatum_t::middle_left);
-  tft.setTextColor(cText(), cBg());
+  tft.setTextColor(0xFFFF, cBg());
   tft.drawString("KONTROL", S(10), kTopH / 2 + 1);
   drawUsbStatus();
-  for (int i = 0; i < kCols * kRows; ++i) drawKey(i, false);
+  for (int i = 0; i < store::kSlots; ++i) drawKey(i, false);
+  drawKnob();
   displayFontSetBitmap(tft, &ui::font::Sans8);
   tft.setTextDatum(textdatum_t::middle_left);
   tft.setTextColor(cDim(), cBg());
-  tft.drawString("F13-F21: bilgisayarda istediğin kısayola ata", S(10),
+  tft.drawString("Tuşları kurulum sayfasındaki Kontrol tuşları bölümünden değiştirebilirsin", S(10),
                  ui::kSwitchY + ui::kSwitchH / 2);
   drawBackButton();
   tft.setTextDatum(textdatum_t::top_left);
+  s_gen_shown = store::generation();
+}
+
+// --- Actions -------------------------------------------------------------------------
+
+bool canSend() { return console::keyboardMode() && services::hid::ready(); }
+
+void fireKey(int i) {
+  const store::Slot& k = store::slot(i);
+  Console.printf("Deck: %s\n", k.label);
+  if (!canSend()) return;
+  if (k.kind == store::Kind::Media) {
+    services::hid::sendMedia(static_cast<Media>(k.code));
+  } else if (k.kind == store::Kind::Key && k.code != 0) {
+    services::hid::sendCombo(k.mods, k.code);
+  }
+}
+
+void volumeStep(int dir) {
+  s_dial_deg += dir * kStepDeg;
+  s_muted = false;  // Windows and macOS unmute on a volume key
+  if (canSend()) services::hid::sendMedia(dir > 0 ? Media::VolumeUp : Media::VolumeDown);
+}
+
+float angleAt(int x, int y) {
+  return atan2f(static_cast<float>(y - kKnobCy), static_cast<float>(x - kKnobCx)) * 180.0f /
+         static_cast<float>(M_PI);
 }
 
 }  // namespace
 
 void enter() {
   s_pressed = -1;
-  // Draw into the hidden buffer and show it in one go (no half-drawn screen).
+  s_flash = false;
+  s_down = false;
+  s_target = Target::None;
+  if (!s_knob_ok) {
+    s_knob.setPsram(true);
+    s_knob.setColorDepth(16);
+    s_knob_ok = s_knob.createSprite(kKnobD, kKnobD) != nullptr;
+  }
+  if (s_icon_buf == nullptr) {
+    const int px = store::iconPx();
+    s_icon_buf = static_cast<uint16_t*>(heap_caps_malloc(px * px * 2, MALLOC_CAP_SPIRAM));
+  }
   tft.beginHiddenFrame();
   drawAll();
   tft.presentHiddenFrame();
 }
 
 bool tick() {
+  if (s_gen_shown != store::generation()) {
+    enter();
+    return true;
+  }
   const unsigned long now = millis();
-  if (s_pressed >= 0 && now - s_pressed_ms >= kPressFlashMs) {
+  if (s_flash && s_pressed >= 0 && now - s_pressed_ms >= kPressFlashMs) {
     drawKey(s_pressed, false);
     s_pressed = -1;
+    s_flash = false;
   }
-  if ((services::hid::ready() ? 1 : 0) != s_usb_shown) drawUsbStatus();
-  return true;  // the deck stays until RADAR is tapped
+  const int usb = console::keyboardMode() ? (services::hid::ready() ? 1 : 0) : 2;
+  if (usb != s_usb_shown) drawUsbStatus();
+  return true;
 }
 
-Tap tap(int x, int y) {
-  if (ui::switchButtonHit(x, y)) return Tap::Back;
-  for (int i = 0; i < kCols * kRows; ++i) {
-    int kx, ky;
-    keyRect(i, &kx, &ky);
-    if (x < kx || x >= kx + kKeyW || y < ky || y >= ky + kKeyH) continue;
-    if (s_pressed >= 0 && s_pressed != i) drawKey(s_pressed, false);
-    drawKey(i, true);  // feedback first, then the (up to ~15 ms) USB report
-    s_pressed = i;
-    s_pressed_ms = millis();
-    const Key& k = kKeys[i];
-    if (k.media) {
-      services::hid::sendMedia(k.media_key);
-    } else {
-      services::hid::sendCombo(k.modifiers, k.key);
+Touch touch(int fingers, int x, int y) {
+  const unsigned long now = millis();
+  if (fingers > 0) {
+    s_last_x = x;
+    s_last_y = y;
+    if (!s_down) {
+      s_down = true;
+      s_down_x = x;
+      s_down_y = y;
+      s_down_ms = now;
+      s_max_move = 0;
+      if (s_flash && s_pressed >= 0) {  // a quick second press: clear the old highlight
+        drawKey(s_pressed, false);
+        s_pressed = -1;
+        s_flash = false;
+      }
+      if (ui::switchButtonHit(x, y)) {
+        s_target = Target::Back;
+      } else if (inKnob(x, y)) {
+        s_target = Target::Knob;
+        s_last_deg = angleAt(x, y);
+        s_accum_deg = s_total_deg = 0.0f;
+      } else if ((s_key = keyAt(x, y)) >= 0) {
+        s_target = Target::Key;
+        drawKey(s_key, true);
+        s_pressed = s_key;
+      } else {
+        s_target = Target::None;
+      }
+      return Touch::None;
     }
-    Serial.printf("Deck: %s\n", k.label);
-    return Tap::Key;
+    const int move = abs(x - s_down_x) + abs(y - s_down_y);
+    if (move > s_max_move) s_max_move = move;
+    if (s_target == Target::Knob) {
+      const int dx = x - kKnobCx, dy = y - kKnobCy;
+      if (dx * dx + dy * dy < (kKnobR / 4) * (kKnobR / 4)) return Touch::None;  // centre: no angle
+      const float deg = angleAt(x, y);
+      float d = deg - s_last_deg;
+      if (d > 180.0f) d -= 360.0f;
+      if (d < -180.0f) d += 360.0f;
+      s_last_deg = deg;
+      s_accum_deg += d;
+      s_total_deg += fabsf(d);
+      bool changed = false;
+      while (s_accum_deg >= kStepDeg) {
+        s_accum_deg -= kStepDeg;
+        volumeStep(+1);  // clockwise (screen y points down): louder
+        changed = true;
+      }
+      while (s_accum_deg <= -kStepDeg) {
+        s_accum_deg += kStepDeg;
+        volumeStep(-1);
+        changed = true;
+      }
+      if (changed) drawKnob();
+    } else if (s_target == Target::Key && keyAt(x, y) != s_key && s_pressed == s_key) {
+      drawKey(s_key, false);  // slid off the key: no press
+      s_pressed = -1;
+    }
+    return Touch::None;
   }
-  return Tap::None;
+  if (!s_down) return Touch::None;
+  s_down = false;
+  x = s_last_x;
+  y = s_last_y;
+  const Target t = s_target;
+  s_target = Target::None;
+  switch (t) {
+    case Target::Back:
+      return ui::switchButtonHit(x, y) || s_max_move < S(20) ? Touch::Back : Touch::None;
+    case Target::Knob:
+      if (s_total_deg < kTapMaxDeg && s_max_move < S(14) && now - s_down_ms < kTapMaxMs) {
+        s_muted = !s_muted;
+        if (canSend()) services::hid::sendMedia(Media::Mute);
+        drawKnob();
+      }
+      return Touch::None;
+    case Target::Key:
+      if (s_pressed == s_key) {
+        fireKey(s_key);
+        s_pressed_ms = millis();
+        s_flash = true;  // tick() lets go of the highlight
+      }
+      return Touch::None;
+    case Target::None: return Touch::None;
+  }
+  return Touch::None;
 }
 
 }  // namespace ui::deck

@@ -1,4 +1,9 @@
 #include "ui/radar3d.h"
+#if !defined(RADAR3D_HOST_TEST)
+#include "hardware/console.h"
+#else
+#define Console Serial  // desktop preview harness
+#endif
 
 #include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
@@ -1503,7 +1508,7 @@ bool groundWorkerReady() {
     s_job_done = xSemaphoreCreateBinary();
     s_worker_ok = s_gband2 && s_job_go && s_job_done &&
                   xTaskCreatePinnedToCore(groundWorkerTask, "ground", 6144, nullptr, 3, nullptr, 0) == pdPASS;
-    Serial.printf("radar3d: second-core ground drawing %s\n", s_worker_ok ? "on" : "off");
+    Console.printf("radar3d: second-core ground drawing %s\n", s_worker_ok ? "on" : "off");
   }
   return s_worker_ok;
 }
@@ -2574,7 +2579,7 @@ bool init() {
   s_frame.setColorDepth(8);
   s_frame.setPsram(true);
   if (s_frame.createSprite(kW, kH) == nullptr) {
-    Serial.println("radar3d: sprite allocation failed");
+    Console.println("radar3d: sprite allocation failed");
     return false;
   }
   s_frame.createPalette();  // 8-bit with a palette (setColorDepth(8) alone is RGB332)
@@ -3136,7 +3141,7 @@ void drawFrame() {
       if (t0 != 0 && n) {
         const uint32_t nd = std::max<uint32_t>(1, n - n_cached);  // frames that drew the ground
         const uint32_t nc = std::max<uint32_t>(1, n_cached);
-        Serial.printf("radar3d: %.1f fps; still %lu/%lu frames (camera moving %lu); "
+        Console.printf("radar3d: %.1f fps; still %lu/%lu frames (camera moving %lu); "
                       "drawn frames ms: ground %lu, lines %lu, bg-save %lu | still frames ms: restore %lu | "
                       "all ms: aircraft %lu, ui %lu, hash %lu, push %lu (%lu tiles of %d) | "
                       "ground split ms: reproject %lu, relief %lu, fill %lu | panel %lu Hz, waits %lu\n",
