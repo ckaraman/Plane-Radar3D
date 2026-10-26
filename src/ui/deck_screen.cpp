@@ -242,28 +242,19 @@ void drawKnob() {
   const int dr = R - rw / 2;
   g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), rw / 2 + S(2), 0xFFFF);
   g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), rw / 2 - S(1), arc);
-  // Centre: speaker (crossed out while muted) and the level in percent.
+  // Centre: a large speaker, crossed out while muted.
   const uint16_t sc = s_muted ? cRed() : 0xFFFF;
-  speakerIcon(g, c - S(6), c - S(22), S(12), sc);
-  const int mx = c + S(10), my = c - S(22);
+  speakerIcon(g, c - S(10), c, S(22), sc);
+  const int mx = c + S(16), my = c;
   if (s_muted) {
-    for (int t = -1; t <= 1; ++t) {
-      g.drawLine(mx - S(6) + t, my - S(6), mx + S(6) + t, my + S(6), sc);
-      g.drawLine(mx - S(6) + t, my + S(6), mx + S(6) + t, my - S(6), sc);
+    for (int t = -2; t <= 2; ++t) {
+      g.drawLine(mx - S(9) + t, my - S(9), mx + S(9) + t, my + S(9), sc);
+      g.drawLine(mx - S(9) + t, my + S(9), mx + S(9) + t, my - S(9), sc);
     }
   } else {
-    g.drawArc(mx - S(6), my, S(6), S(4), -45, 45, sc);
-    g.drawArc(mx - S(6), my, S(11), S(9), -45, 45, sc);
+    g.drawArc(mx - S(8), my, S(10), S(7), -45, 45, sc);
+    g.drawArc(mx - S(8), my, S(19), S(16), -45, 45, sc);
   }
-  char pct[8];
-  snprintf(pct, sizeof(pct), "%%%d", (level * 100 + steps / 2) / steps);
-  displayFontSetBitmap(g, &ui::font::SansBold24);
-  g.setTextDatum(textdatum_t::middle_center);
-  g.setTextColor(s_muted ? cDim() : 0xFFFF);
-  g.drawString(pct, c, c + S(8));
-  displayFontSetBitmap(g, &ui::font::SansBold8);
-  g.setTextColor(s_muted ? cRed() : cDim());
-  g.drawString(s_muted ? "SESSİZ" : "SES", c, c + S(36));
   g.pushSprite(kKnobX, kKnobY);
 }
 
