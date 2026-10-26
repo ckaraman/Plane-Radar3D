@@ -169,6 +169,7 @@ Ekran modelleri arasında renk farkı olabildiği için bu ayarlar yazılımı y
 - **Harita:** Deniz, göller ve baraj gölleri dolu, kıyı ve ana yollar çizgi olarak. Kurulum sayfasının 2. adımında harita boyutunu seçip "Cihaza kaydet"e basınca OpenStreetMap verisi indirilip USB ile gönderilir. Wi-Fi gerekmez.
 - **Saat:** Seçili menzilde 15 sn boyunca uçak yoksa açılır (menzil dışındaki uçaklar engellemez). Altında İÇ ORTAM (SHT30) ve DIŞ ORTAM sıcaklık ve nemi gösterilir.
 - **Hava durumu:** Radarın sağ altındaki HAVA düğmesiyle açılır. Dış ortamın şimdiki durumu (sıcaklık, hissedilen, nem, rüzgâr, gün doğumu/batımı), SHT30'dan ortam sıcaklığı ve nemi (rahatlık etiketiyle) ile 5 günlük tahmin (en yüksek/en düşük sıcaklık, yağış olasılığı). Veri Open-Meteo'dan 10 dakikada bir gelir; Wi-Fi yokken USB köprüsü indirip gönderir.
+- **Kontrol ekranı (stream deck, 5"):** Radarda HAVA'nın solundaki ızgara düğmesiyle açılır. Kart, USB kablosu üzerinden bilgisayara klavye olarak da tanıtılır: üst sırada önceki / oynat-dur / sonraki / ses − / ses +, sonra sessiz ve F13–F21 tuşları. F13–F21 normal klavyelerde olmadığı için hiçbir kısayolla çakışmaz; bilgisayarda AutoHotkey, OBS veya uygulamanın kısayol ayarlarından istediğin işe atanır. RADAR düğmesi ya da 30 sn dokunulmaması radara döndürür. Sağ üstteki nokta USB bağlantısını gösterir.
 
 ## Teknik notlar
 
