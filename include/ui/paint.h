@@ -47,6 +47,8 @@ uint16_t packShaded(float r, float g, float b, int x, int y, const Shade* shades
  *  peach glow bottom left (the approved design), dithered. Fills the whole canvas;
  *  optional shades are applied on the way. */
 void background(const Canvas& c, const Shade* shades = nullptr, int n = 0);
+/** The background's exact colour at (x, y) of a w x h canvas (to blend other things into). */
+void backgroundRgb(int w, int h, int x, int y, float* r, float* g, float* b);
 
 /** Rounded rectangle in colour `c` at `alpha` (0..255) over what is there, with
  *  anti-aliased edges. `border_alpha` > 0 adds a 1 px outline in `border`. */

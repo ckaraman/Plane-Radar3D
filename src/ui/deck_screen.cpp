@@ -20,6 +20,7 @@
 #include "services/host_link.h"
 #include "ui/fonts_tr.h"
 #include "ui/paint.h"
+#include "ui/ui_text.h"
 
 namespace ui::deck {
 
@@ -35,12 +36,13 @@ namespace host = services::host;
 constexpr int kW = config::kDisplayWidth;
 constexpr int kH = config::kDisplayHeight;
 constexpr int D(int v) { return v * kW / 800; }
+constexpr float Df(float v) { return v * kW / 800.0f; }
 
 // Shared top bar: RADAR pill on the right, page dots in the middle.
-constexpr int kRadarX = D(670), kRadarY = D(14), kRadarW = D(110), kRadarH = D(40);
-constexpr int kDotsY = D(34);
+constexpr int kRadarW = D(112), kRadarH = D(34), kRadarX = D(780) - kRadarW, kRadarY = D(15);
 // Page switch at the top: two halves, MÜZİK | TUŞLAR, tapped to change the page.
-constexpr int kTabW = D(220), kTabH = D(42), kTabX = (kW - kTabW) / 2, kTabY = D(13);
+constexpr int kTabW = D(176), kTabH = D(34), kTabX = (kW - kTabW) / 2, kTabY = D(15);
+constexpr int kTopCy = kTabY + kTabH / 2;  // middle line of the top bar
 
 // Keys page: 4 x 3 keys on the left, the volume knob on the right.
 constexpr int kCols = 4, kRows = 3;
@@ -51,6 +53,10 @@ constexpr int kKnobX = D(512), kKnobY = D(88), kKnobD = D(268);
 constexpr int kKnobCx = kKnobX + kKnobD / 2, kKnobCy = kKnobY + kKnobD / 2;
 constexpr float kRingR = kKnobD / 2.0f, kRingW = D(14);
 static_assert(kCols * kRows == store::kSlots, "one key per stored slot");
+// Previous / play-pause / next under the knob: always there, whatever the keys are.
+constexpr int kKCtrlY = D(410);
+constexpr int kKPrevCx = kKnobCx - D(78), kKPlayCx = kKnobCx, kKNextCx = kKnobCx + D(78);
+constexpr int kKSmallR = D(24), kKPlayR = D(30);
 
 // Music page: text, bars and controls at the bottom, over the cover.
 constexpr int kMusicPad = D(28);
@@ -275,37 +281,18 @@ bool inCircle(int x, int y, int cx, int cy, int r) {
   return dx * dx + dy * dy <= r * r;
 }
 
-/** UTF-8 text cut to fit max_w with "..." (the fonts have no ellipsis glyph). */
-template <typename Gfx>
-void fitText(Gfx& s, const char* in, int max_w, char* out, size_t cap) {
-  strlcpy(out, in, cap);
-  if (s.textWidth(out) <= max_w) return;
-  size_t n = strlen(out);
-  while (n > 0) {
-    do {
-      --n;
-    } while (n > 0 && (static_cast<uint8_t>(out[n]) & 0xC0) == 0x80);
-    out[n] = '\0';
-    char tmp[176];
-    snprintf(tmp, sizeof(tmp), "%s...", out);
-    if (s.textWidth(tmp) <= max_w) {
-      strlcpy(out, tmp, cap);
-      return;
-    }
-  }
-}
+namespace text = ui::text;
 
-template <typename Gfx>
-void radarPill(Gfx& s, const paint::Canvas& c) {
+// Text colours.
+constexpr Rgb kTextSoft{226, 229, 245}, kTextMuted{154, 161, 189}, kTextSub{184, 189, 214};
+
+void radarPill(const paint::Canvas& c) {
   paint::roundRect(c, kRadarX, kRadarY, kRadarW, kRadarH, kRadarH / 2, kWhite, 22, kWhite, 34);
-  const float cx = kRadarX + D(26), cy = kRadarY + kRadarH / 2.0f;
-  paint::arc(c, cx, cy, D(10), D(8), 0, 360, kWhite, 255);
-  paint::arc(c, cx, cy, D(5), D(3), 0, 360, kWhite, 255);
-  s.drawLine(cx, cy, cx + D(6), cy - D(6), col565(kWhite));
-  displayFontSetBitmap(s, &ui::font::SansBold8);
-  s.setTextDatum(textdatum_t::middle_left);
-  s.setTextColor(col565(kWhite));
-  s.drawString("RADAR", kRadarX + D(44), kRadarY + kRadarH / 2 + 1);
+  const float cx = kRadarX + D(22), cy = kRadarY + kRadarH / 2.0f;
+  paint::arc(c, cx, cy, Df(9), Df(7.4f), 0, 360, kWhite, 255);
+  paint::arc(c, cx, cy, Df(4.5f), Df(3), 0, 360, kWhite, 255);
+  paint::arc(c, cx, cy, Df(7.4f), 0, 20, 70, kWhite, 110);  // the sweep
+  text::drawMid(c, text::Ui13b, "RADAR", kRadarX + D(38), kTopCy, kWhite, 255, text::Align::Left, 1);
 }
 
 /** 0 = not on the page switch, 1 = its music half, 2 = its keys half. */
@@ -314,20 +301,16 @@ int tabAt(int x, int y) {
   return x < kTabX + kTabW / 2 ? 1 : 2;
 }
 
-template <typename Gfx>
-void pageTabs(Gfx& s, const paint::Canvas& c, bool music_active) {
-  const int half = kTabW / 2, pad = D(4);
-  paint::roundRect(c, kTabX, kTabY, kTabW, kTabH, kTabH / 2, kWhite, 22, kWhite, 40);
+void pageTabs(const paint::Canvas& c, bool music_active) {
+  const int half = kTabW / 2, pad = D(3);
+  paint::roundRect(c, kTabX, kTabY, kTabW, kTabH, kTabH / 2, kWhite, 20, kWhite, 36);
   const int ax = music_active ? kTabX + pad : kTabX + half;
   paint::roundRect(c, ax, kTabY + pad, half - pad, kTabH - 2 * pad, (kTabH - 2 * pad) / 2, kWhite, 255);
-  displayFontSetBitmap(s, &ui::font::SansBold8);
-  s.setTextDatum(textdatum_t::middle_center);
-  const uint16_t ink = col565({21, 24, 58}), light = col565({226, 229, 245});
-  s.setTextColor(music_active ? ink : light);
-  s.drawString("MÜZİK", kTabX + half / 2 + pad / 2, kTabY + kTabH / 2 + 1);
-  s.setTextColor(music_active ? light : ink);
-  s.drawString("TUŞLAR", kTabX + half + half / 2 - pad / 2, kTabY + kTabH / 2 + 1);
-  s.setTextDatum(textdatum_t::top_left);
+  const Rgb ink{21, 24, 58};
+  text::drawMid(c, text::Ui13b, "MÜZİK", kTabX + half / 2 + pad / 2, kTopCy, music_active ? ink : kTextSoft, 255,
+                text::Align::Center, 1);
+  text::drawMid(c, text::Ui13b, "TUŞLAR", kTabX + half + half / 2 - pad / 2, kTopCy, music_active ? kTextSoft : ink,
+                255, text::Align::Center, 1);
 }
 
 template <typename Gfx>
@@ -391,50 +374,45 @@ void blitIcon(LGFX_Sprite& s, const uint16_t* pic, int pw, int ph, int x, int y)
 void drawKeyContent(LGFX_Sprite& s, int i) {
   const Box& bx = keyBox(i);
   const int x = bx.x, y = bx.y, bw = bx.w, bh = bx.h;  // this key's size
+  const auto c = cv(s);
   const store::Slot& k = store::slot(i);
   const int cx = x + bw / 2;
   const uint16_t* pic = store::icon(i);
   const int px = store::iconPx();
   const bool has_label = k.label[0] != '\0';
-  char t[48];
-  s.setTextDatum(textdatum_t::middle_center);
-  s.setTextColor(col565({217, 220, 239}));
+  char t[64];
   if (pic != nullptr && store::fullKeyIcons()) {
     // The picture is the whole key (the helper rounded its corners and darkened its
     // bottom for the label).
     blitIcon(s, pic, bw, bh, x, y);
     if (has_label) {
-      displayFontSetBitmap(s, &ui::font::Sans8);
-      fitText(s, k.label, bw - D(12), t, sizeof(t));
-      s.setTextColor(col565({4, 5, 12}));
-      s.drawString(t, cx + 1, y + bh - D(15) + 1);
-      s.setTextColor(col565(kWhite));
-      s.drawString(t, cx, y + bh - D(15));
+      text::fit(text::Ui13, k.label, bw - D(14), t, sizeof(t));
+      text::draw(c, text::Ui13, t, cx + 1, y + bh - D(11) + 1, {4, 5, 12}, 160, text::Align::Center);
+      text::draw(c, text::Ui13, t, cx, y + bh - D(11), kWhite, 255, text::Align::Center);
     }
   } else if (pic != nullptr) {
     const int iy = has_label ? y + (bh - px - D(22)) / 2 : y + (bh - px) / 2;
     blitIcon(s, pic, px, px, cx - px / 2, iy);
     if (has_label) {
-      displayFontSetBitmap(s, &ui::font::Sans8);
-      fitText(s, k.label, bw - D(10), t, sizeof(t));
-      s.drawString(t, cx, y + bh - D(16));
+      text::fit(text::Ui13, k.label, bw - D(12), t, sizeof(t));
+      text::draw(c, text::Ui13, t, cx, y + bh - D(12), {217, 220, 239}, 255, text::Align::Center);
     }
   } else if (k.kind == store::Kind::Media) {
     mediaIcon(s, static_cast<Media>(k.code), cx, y + bh / 2 - D(10), col565({233, 234, 255}));
-    displayFontSetBitmap(s, &ui::font::Sans8);
-    fitText(s, k.label, bw - D(10), t, sizeof(t));
-    s.drawString(t, cx, y + bh - D(20));
+    text::fit(text::Ui13, k.label, bw - D(12), t, sizeof(t));
+    text::draw(c, text::Ui13, t, cx, y + bh - D(14), {217, 220, 239}, 255, text::Align::Center);
   } else if (has_label) {
-    const lgfx::GFXfont* fonts[] = {&ui::font::SansBold12, &ui::font::SansBold9, &ui::font::Sans8};
-    for (const auto* f : fonts) {
-      displayFontSetBitmap(s, f);
-      if (s.textWidth(k.label) <= bw - D(12)) break;
+    // The largest size that fits (big keys of a short set get big letters).
+    const text::Font* fonts[] = {&text::Ui22b, &text::Ui18b, &text::Ui15b, &text::Ui13b};
+    const text::Font* f = fonts[3];
+    for (const auto* cand : fonts) {
+      if ((cand == &text::Ui22b && bh < D(150)) || text::width(*cand, k.label) > bw - D(16)) continue;
+      f = cand;
+      break;
     }
-    fitText(s, k.label, bw - D(10), t, sizeof(t));
-    s.setTextColor(col565(kText));
-    s.drawString(t, cx, y + bh / 2);
+    text::fit(*f, k.label, bw - D(14), t, sizeof(t));
+    text::drawMid(c, *f, t, cx, y + bh / 2, kText, 255, text::Align::Center);
   }
-  s.setTextDatum(textdatum_t::top_left);
 }
 
 void buildRing() {
@@ -529,23 +507,38 @@ void drawKnobLevel(Gfx& s, const paint::Canvas& c, int pct, bool muted) {
 }
 
 // ------------------------------------------------------------------ pages
+/** Previous, play / pause, next: round glass buttons (play filled white). */
+template <typename Gfx>
+void drawTransport(Gfx& s, const paint::Canvas& c, int prev_cx, int play_cx, int next_cx, int cy, int small_r,
+                   int play_r) {
+  const auto& n = host::now();
+  paint::circle(c, prev_cx, cy, small_r, kWhite, 26);
+  paint::circle(c, next_cx, cy, small_r, kWhite, 26);
+  paint::circle(c, play_cx, cy, play_r, kWhite, 255);
+  mediaIcon(s, Media::Previous, prev_cx, cy, col565(kWhite));
+  mediaIcon(s, Media::Next, next_cx, cy, col565(kWhite));
+  const uint16_t ink = col565({21, 24, 58});
+  const int u = play_r * 10 / 34;  // icon unit, scaled with the button
+  if (n.valid && n.playing) {
+    s.fillRoundRect(play_cx - u - u * 7 / 10, cy - u * 12 / 10, u * 7 / 10, u * 24 / 10, D(2), ink);
+    s.fillRoundRect(play_cx + u * 3 / 10, cy - u * 12 / 10, u * 7 / 10, u * 24 / 10, D(2), ink);
+  } else {
+    s.fillTriangle(play_cx - u * 8 / 10, cy - u * 13 / 10, play_cx - u * 8 / 10, cy + u * 13 / 10,
+                   play_cx + u * 13 / 10, cy, ink);
+  }
+}
+
 void buildKeysBase() {
   auto& s = s_keys_base;
   const auto c = cv(s);
   paint::background(c);
-  displayFontSetBitmap(s, &ui::font::SansBold8);
-  s.setTextDatum(textdatum_t::middle_left);
-  s.setTextColor(col565({230, 232, 246}));
-  s.drawString("KONTROL", D(20), kDotsY + 1);
+  text::drawMid(c, text::Ui13b, "KONTROL", D(20), kTopCy, {230, 232, 246}, 255, text::Align::Left, 1);
   if (!console::keyboardMode()) {
-    displayFontSetBitmap(s, &ui::font::Sans8);
-    s.setTextColor(col565({245, 190, 120}));
-    s.setTextDatum(textdatum_t::middle_right);
-    s.drawString("Kurulum modu: tuşlar kapalı", kW - D(20), kH - D(16));
-    s.setTextDatum(textdatum_t::middle_left);
+    text::drawMid(c, text::Ui13, "Kurulum modu: tuşlar kapalı", kW - D(20), kH - D(16), {245, 190, 120}, 255,
+                  text::Align::Right);
   }
-  pageTabs(s, c, false);
-  radarPill(s, c);
+  pageTabs(c, false);
+  radarPill(c);
   for (int i = 0; i < store::kSlots; ++i) {
     const Box& b = keyBox(i);
     if (!b.shown) continue;
@@ -558,11 +551,7 @@ void buildKeysBase() {
     drawKeyContent(s, i);
   }
   drawKnobBase(s);
-  displayFontSetBitmap(s, &ui::font::Sans8);
-  s.setTextDatum(textdatum_t::middle_left);
-  s.setTextColor(col565({154, 161, 189}));
-  s.drawString("Sağa kaydır: müzik", D(20), kH - D(16));
-  s.setTextDatum(textdatum_t::top_left);
+  text::drawMid(c, text::Ui13, "Sağa kaydır: müzik", D(20), kH - D(16), kTextMuted);
   s_keys_gen = store::generation();
   s_keys_dirty = false;
 }
@@ -592,7 +581,8 @@ void buildMusicBase() {
     if (cw <= 0 || ch <= 0 || cw > kW || ch > kH) cw = kW, ch = kH;  // older helper: whole panel
     // The cover in the middle, at its own size; its edges fade into the dark page.
     const int x0 = (kW - cw) / 2, y0 = (kH - ch) / 2;
-    const float fx = std::min<float>(D(150), cw / 3.0f), fy = std::min<float>(D(90), ch / 4.0f);
+    const float fx = std::min<float>(D(60), cw / 5.0f), fy = std::min<float>(D(60), ch / 5.0f);
+    const float rim = D(150);  // dark band around the cover before the background shows
     LGFX_Sprite pic(&tft);
     pic.setPsram(true);
     pic.setColorDepth(24);  // decoded at 24 bits, faded and shaded, then dithered: no steps
@@ -608,12 +598,20 @@ void buildMusicBase() {
             const int px = x - x0;
             float a = 0.0f;
             if (ay > 0.0f && px >= 0 && px < cw) a = ay * smooth01(std::min(px + 0.5f, cw - px - 0.5f) / fx);
-            int r = kCoverBg.r, g = kCoverBg.g, b = kCoverBg.b;
+            // Closeness to the cover's box (1 inside, 0 at rim distance): the dark rim.
+            const float ox = std::max({0.0f, static_cast<float>(x0 - x), static_cast<float>(x - (x0 + cw - 1))});
+            const float oy = std::max({0.0f, static_cast<float>(y0 - y), static_cast<float>(y - (y0 + ch - 1))});
+            const float near = 1.0f - smooth01(sqrtf(ox * ox + oy * oy) / rim);
+            // Into the page's own background, through a dark rim around the cover.
+            float r, g, b;
+            paint::backgroundRgb(kW, kH, x, y, &r, &g, &b);
+            if (a > 0.0f || near > 0.0f) {
+              const float dk = near * (1.0f - a) * 0.85f;  // the dark rim, strongest at the edge
+              r += (kCoverBg.r - r) * dk, g += (kCoverBg.g - g) * dk, b += (kCoverBg.b - b) * dk;
+            }
             if (a > 0.0f) {
               const auto p = pic.readPixelRGB(px, py);
-              r = static_cast<int>(r + (p.R8() - r) * a + 0.5f);
-              g = static_cast<int>(g + (p.G8() - g) * a + 0.5f);
-              b = static_cast<int>(b + (p.B8() - b) * a + 0.5f);
+              r += (p.R8() - r) * a, g += (p.G8() - g) * a, b += (p.B8() - b) * a;
             }
             c.px[y * kW + x] = paint::packShaded(r, g, b, x, y, shades, 2);
           }
@@ -635,58 +633,33 @@ void fmtTime(char* out, size_t cap, uint32_t s) {
 template <typename Gfx>
 void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   const host::NowPlaying& n = host::now();
-  // Top: "now playing" pill, dots, RADAR.
-  if (n.valid) {
-    char raw[64], label[72];
-    snprintf(raw, sizeof(raw), n.app[0] ? "%s · %s" : "%s", n.playing ? "ŞİMDİ ÇALIYOR" : "DURAKLATILDI", n.app);
-    displayFontSetBitmap(s, &ui::font::Sans8);
-    fitText(s, raw, kTabX - D(80), label, sizeof(label));  // clear of the page switch
-    const int tw = s.textWidth(label);
-    paint::roundRect(c, D(20), D(18), tw + D(40), D(32), D(16), kWhite, 30, kWhite, 40);
-    paint::circle(c, D(37), D(34), D(4), n.playing ? kPeach : Rgb{180, 184, 210}, 255);
-    s.setTextDatum(textdatum_t::middle_left);
-    s.setTextColor(col565(kWhite));
-    s.drawString(label, D(50), D(34) + 1);
-  }
-  pageTabs(s, c, true);
-  radarPill(s, c);
+  pageTabs(c, true);
+  radarPill(c);
 
   if (!n.valid) {
-    displayFontSetBitmap(s, &ui::font::SansBold12);
-    s.setTextDatum(textdatum_t::middle_center);
-    s.setTextColor(col565(kText));
-    s.drawString("Şu an müzik çalmıyor", kW / 2, kH / 2 - D(20));
-    displayFontSetBitmap(s, &ui::font::Sans8);
-    s.setTextColor(col565({174, 180, 204}));
-    s.drawString(host::active() ? "Bilgisayarda müzik başlayınca burada görünür"
-                                : "Şarkı bilgisi Windows yardımcı programıyla gelir",
-                 kW / 2, kH / 2 + D(16));
-    s.setTextDatum(textdatum_t::middle_right);
-    s.drawString("Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY);
-    s.setTextDatum(textdatum_t::top_left);
+    text::drawMid(c, text::Ui22b, "Şu an müzik çalmıyor", kW / 2, kH / 2 - D(16), kText, 255, text::Align::Center);
+    text::drawMid(c, text::Ui13,
+                  host::active() ? "Bilgisayarda müzik başlayınca burada görünür"
+                                 : "Şarkı bilgisi Windows yardımcı programıyla gelir",
+                  kW / 2, kH / 2 + D(16), {174, 180, 204}, 255, text::Align::Center);
+    text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
     return;
   }
 
   const int tx = kMusicPad, tw = kW - 2 * kMusicPad;
-  char buf[176];
-  // Title and artist: small and quiet, the artist line placed under the title's own height.
-  displayFontSetBitmap(s, &ui::font::SansBold12);
-  s.setTextDatum(textdatum_t::bottom_left);
-  s.setTextColor(col565(kText));
-  fitText(s, n.title[0] ? n.title : "Bilinmeyen parça", tw, buf, sizeof(buf));
-  const int title_h = s.fontHeight();
-  s.drawString(buf, tx, kTitleY + title_h);
-  displayFontSetBitmap(s, &ui::font::Sans9);
-  s.setTextColor(col565({184, 189, 214}));
+  char buf[200];
+  // Title and artist: quiet sizes, the artist line placed by the fonts' own heights.
+  text::fit(text::Ui22b, n.title[0] ? n.title : "Bilinmeyen parça", tw, buf, sizeof(buf));
+  const int title_base = kTitleY + text::Ui22b.ascent;
+  text::draw(c, text::Ui22b, buf, tx, title_base, kText);
   char who[140];
   if (n.artist[0] && n.album[0]) {
     snprintf(who, sizeof(who), "%s · %s", n.artist, n.album);
   } else {
     strlcpy(who, n.artist[0] ? n.artist : n.album, sizeof(who));
   }
-  fitText(s, who, tw, buf, sizeof(buf));
-  s.drawString(buf, tx, kTitleY + title_h + D(6) + s.fontHeight());
-  s.setTextDatum(textdatum_t::top_left);
+  text::fit(text::Ui16, who, tw, buf, sizeof(buf));
+  text::draw(c, text::Ui16, buf, tx, title_base + text::Ui22b.descent + D(4) + text::Ui16.ascent, kTextSub);
 
   // Progress: times either side of a gradient bar.
   const uint32_t pos = host::positionNow();
@@ -694,12 +667,8 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   char t0[12], t1[12];
   fmtTime(t0, sizeof(t0), pos);
   fmtTime(t1, sizeof(t1), n.duration_s);
-  displayFontSetBitmap(s, &ui::font::Sans8);
-  s.setTextColor(col565({195, 200, 222}));
-  s.setTextDatum(textdatum_t::middle_left);
-  s.drawString(t0, tx, kBarY + kBarH / 2 + 1);
-  s.setTextDatum(textdatum_t::middle_right);
-  if (n.duration_s) s.drawString(t1, tx + tw, kBarY + kBarH / 2 + 1);
+  text::drawMid(c, text::Ui13, t0, tx, kBarY + kBarH / 2, {195, 200, 222});
+  if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + tw, kBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
   const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
   paint::roundRect(c, bx, kBarY, bw, kBarH, kBarH / 2, kWhite, 46);
   const float f =
@@ -707,19 +676,7 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   paint::gradientBar(c, bx, kBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
   paint::circle(c, bx + bw * f, kBarY + kBarH / 2.0f, D(7), kWhite, 255);
 
-  // Controls.
-  paint::circle(c, kPrevCx, kCtrlY, kSmallBtnR, kWhite, 26);
-  paint::circle(c, kNextCx, kCtrlY, kSmallBtnR, kWhite, 26);
-  paint::circle(c, kPlayCx, kCtrlY, kPlayR, kWhite, 255);
-  mediaIcon(s, Media::Previous, kPrevCx, kCtrlY, col565(kWhite));
-  mediaIcon(s, Media::Next, kNextCx, kCtrlY, col565(kWhite));
-  const uint16_t ink = col565({21, 24, 58});
-  if (n.playing) {
-    s.fillRoundRect(kPlayCx - D(10), kCtrlY - D(12), D(7), D(24), D(2), ink);
-    s.fillRoundRect(kPlayCx + D(3), kCtrlY - D(12), D(7), D(24), D(2), ink);
-  } else {
-    s.fillTriangle(kPlayCx - D(8), kCtrlY - D(13), kPlayCx - D(8), kCtrlY + D(13), kPlayCx + D(13), kCtrlY, ink);
-  }
+  drawTransport(s, c, kPrevCx, kPlayCx, kNextCx, kCtrlY, kSmallBtnR, kPlayR);
 
   // Volume bar, left of the controls.
   const bool muted = mutedNow();
@@ -735,11 +692,7 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
   s_shown_level = pct;
   s_shown_muted = muted;
-  displayFontSetBitmap(s, &ui::font::Sans8);
-  s.setTextColor(col565({174, 180, 204}));
-  s.setTextDatum(textdatum_t::middle_right);
-  s.drawString("Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY);
-  s.setTextDatum(textdatum_t::top_left);
+  text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
 }
 
 void ensureBuffers() {
@@ -769,6 +722,7 @@ void composeInto(Gfx& g, const paint::Canvas& c) {
     const bool muted = mutedNow();
     const int pct = levelPercent();
     drawKnobLevel(g, c, pct, muted);
+    drawTransport(g, c, kKPrevCx, kKPlayCx, kKNextCx, kKCtrlY, kKSmallR, kKPlayR);
     s_shown_level = pct;
     s_shown_muted = muted;
   } else {
@@ -931,7 +885,13 @@ Touch touch(int fingers, int x, int y) {
       } else if (tabAt(x, y) != 0) {
         s_target = Target::Tab;
       } else if (s_page == Page::Keys) {
-        if (inKnob(x, y)) {
+        if (inCircle(x, y, kKPrevCx, kKCtrlY, kKSmallR + D(10))) {
+          s_target = Target::Prev;
+        } else if (inCircle(x, y, kKPlayCx, kKCtrlY, kKPlayR + D(10))) {
+          s_target = Target::Play;
+        } else if (inCircle(x, y, kKNextCx, kKCtrlY, kKSmallR + D(10))) {
+          s_target = Target::Next;
+        } else if (inKnob(x, y)) {
           if (millis() >= s_user_until_ms) s_user_level = host::active() ? host::volume() : -1;
           s_target = Target::Knob;
           s_last_deg = angleAt(x, y);

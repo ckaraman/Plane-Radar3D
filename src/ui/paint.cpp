@@ -119,28 +119,34 @@ uint16_t packShaded(float r, float g, float b, int x, int y, const Shade* shades
   return pack(static_cast<int>(r + 0.5f), static_cast<int>(g + 0.5f), static_cast<int>(b + 0.5f), x, y);
 }
 
-void background(const Canvas& c, const Shade* shades, int n) {
+void backgroundRgb(int w, int h, int x, int y, float* pr, float* pg, float* pb) {
   // linear-gradient(160deg, #111634 0, #161a3d 40%, #1a1739 70%, #0f1730 100%)
   static const Stop kStops[] = {{0.0f, 0x11, 0x16, 0x34},
                                 {0.4f, 0x16, 0x1a, 0x3d},
                                 {0.7f, 0x1a, 0x17, 0x39},
                                 {1.0f, 0x0f, 0x17, 0x30}};
-  const float k = static_cast<float>(c.w) / 800.0f;  // design size 800 x 480
   // 160deg: towards the bottom, a little to the right.
-  const float dx = sinf(160.0f * static_cast<float>(M_PI) / 180.0f);
-  const float dy = -cosf(160.0f * static_cast<float>(M_PI) / 180.0f);
-  const float half = 0.5f * (fabsf(c.w * dx) + fabsf(c.h * dy));
+  static const float dx = sinf(160.0f * static_cast<float>(M_PI) / 180.0f);
+  static const float dy = -cosf(160.0f * static_cast<float>(M_PI) / 180.0f);
+  const float k = static_cast<float>(w) / 800.0f;  // design size 800 x 480
+  const float half = 0.5f * (fabsf(w * dx) + fabsf(h * dy));
+  const float t = 0.5f + ((x - w * 0.5f) * dx + (y - h * 0.5f) * dy) / (2.0f * half);
+  float r, g, b;
+  stopsAt(kStops, 4, t, &r, &g, &b);
+  // Peach glow bottom left (rgba(236,150,128,.22)), lavender top right (rgba(126,110,236,.38)).
+  const float a2 = 0.22f * glow(x, y, w * 0.04f, h * 1.0f, 600.0f * k, 420.0f * k, 0.70f);
+  r += (236.0f - r) * a2; g += (150.0f - g) * a2; b += (128.0f - b) * a2;
+  const float a1 = 0.38f * glow(x, y, w * 0.90f, h * 0.08f, 640.0f * k, 460.0f * k, 0.72f);
+  r += (126.0f - r) * a1; g += (110.0f - g) * a1; b += (236.0f - b) * a1;
+  *pr = r, *pg = g, *pb = b;
+}
+
+void background(const Canvas& c, const Shade* shades, int n) {
   for (int y = 0; y < c.h; ++y) {
     uint16_t* row = c.px + y * c.w;
     for (int x = 0; x < c.w; ++x) {
-      const float t = 0.5f + ((x - c.w * 0.5f) * dx + (y - c.h * 0.5f) * dy) / (2.0f * half);
       float r, g, b;
-      stopsAt(kStops, 4, t, &r, &g, &b);
-      // Peach glow bottom left (rgba(236,150,128,.22)), lavender top right (rgba(126,110,236,.38)).
-      const float a2 = 0.22f * glow(x, y, c.w * 0.04f, c.h * 1.0f, 600.0f * k, 420.0f * k, 0.70f);
-      r += (236.0f - r) * a2; g += (150.0f - g) * a2; b += (128.0f - b) * a2;
-      const float a1 = 0.38f * glow(x, y, c.w * 0.90f, c.h * 0.08f, 640.0f * k, 460.0f * k, 0.72f);
-      r += (126.0f - r) * a1; g += (110.0f - g) * a1; b += (236.0f - b) * a1;
+      backgroundRgb(c.w, c.h, x, y, &r, &g, &b);
       row[x] = packShaded(r, g, b, x, y, shades, n);
     }
   }
