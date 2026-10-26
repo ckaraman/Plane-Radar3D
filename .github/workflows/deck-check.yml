@@ -42,7 +42,7 @@ jobs:
           grep -q "CONFIG_SPIRAM_MODE_OCT 1" $B/config/sdkconfig.h || { echo "::error::built without octal PSRAM"; exit 1; }
           grep -q "CONFIG_TINYUSB_HID_ENABLED 1" $B/config/sdkconfig.h || { echo "::error::built without TinyUSB HID"; exit 1; }
           NM=$(ls ~/.pio-core-${{ matrix.env }}/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-nm 2>/dev/null || ls ~/.pio-core-${{ matrix.env }}/packages/toolchain-xtensa-esp*/bin/*-nm | head -1)
-          for sym in USBSerial tud_hid_n_report tud_cdc_n_write; do
+          for sym in HWCDC::begin USBCDC::begin tud_hid_n_report tud_cdc_n_write; do
             $NM -C $B/firmware.elf | grep -q "$sym" && echo "::notice::$sym linked" || { echo "::error::$sym missing"; exit 1; }
           done
           ls -l $B/*.bin
