@@ -26,11 +26,16 @@ uint32_t s_now_gen = 1;
 
 uint8_t* s_cover = nullptr;  // active JPEG (PSRAM)
 size_t s_cover_len = 0;
+int s_cover_w = 0, s_cover_h = 0;
+uint32_t s_cover_id = 0;
 uint32_t s_cover_gen = 1;
 
 uint8_t* s_stage = nullptr;
 size_t s_stage_len = 0, s_stage_got = 0;
 uint32_t s_stage_crc = 0;
+long s_stage_next = 1;  // chunk number expected next
+int s_stage_w = 0, s_stage_h = 0;
+uint32_t s_stage_id = 0;
 
 void seen() {
   s_last_ms = millis();
@@ -80,18 +85,22 @@ bool muted() { return s_muted; }
 const NowPlaying& now() { return s_now; }
 uint32_t nowGeneration() { return s_now_gen; }
 
-uint32_t positionNow() {
+uint32_t positionNowMs() {
   if (!s_now.valid) return 0;
-  uint32_t p = s_now.position_s;
-  if (s_now.playing) p += (millis() - s_now.position_ms) / 1000;
-  if (s_now.duration_s > 0 && p > s_now.duration_s) p = s_now.duration_s;
+  uint32_t p = s_now.pos_ms;
+  if (s_now.playing) p += millis() - s_now.anchor_ms;
+  if (s_now.duration_s > 0 && p > s_now.duration_s * 1000UL) p = s_now.duration_s * 1000UL;
   return p;
 }
+uint32_t positionNow() { return positionNowMs() / 1000; }
 
-const uint8_t* cover(size_t* len) {
+const uint8_t* cover(size_t* len, int* w, int* h) {
   if (len) *len = s_cover_len;
+  if (w) *w = s_cover_w;
+  if (h) *h = s_cover_h;
   return s_cover;
 }
+uint32_t coverId() { return s_cover_id; }
 uint32_t coverGeneration() { return s_cover_gen; }
 
 void handleVol(const char* json) {
@@ -118,16 +127,25 @@ void handleNow(const char* json) {
     strlcpy(n.app, doc["app"] | "", sizeof(n.app));
     n.duration_s = doc["d"] | 0;
     n.position_s = doc["p"] | 0;
-    n.position_ms = millis();
+    n.pos_ms = doc["pm"].is<uint32_t>() ? doc["pm"].as<uint32_t>() : n.position_s * 1000UL + 500;
+    n.anchor_ms = millis();
     n.id = doc["id"] | 0;
     n.back_s = doc["back"] | 60;
   }
-  const bool changed = n.valid != s_now.valid || n.playing != s_now.playing || n.id != s_now.id ||
-                       strcmp(n.title, s_now.title) != 0 || strcmp(n.artist, s_now.artist) != 0 ||
-                       n.duration_s != s_now.duration_s ||
-                       labs(static_cast<long>(n.position_s) - static_cast<long>(positionNow())) > 2;
+  const bool same_track = n.valid == s_now.valid && n.playing == s_now.playing && n.id == s_now.id &&
+                          strcmp(n.title, s_now.title) == 0 && strcmp(n.artist, s_now.artist) == 0 &&
+                          strcmp(n.album, s_now.album) == 0 && strcmp(n.app, s_now.app) == 0 &&
+                          n.duration_s == s_now.duration_s;
+  // The heartbeat repeats the position: within 1.5 s of ours the running clock is kept, so
+  // the bar never steps back a little every few seconds. A real seek moves it.
+  const long drift = static_cast<long>(n.pos_ms) - static_cast<long>(positionNowMs());
+  const bool keep_clock = same_track && n.valid && labs(drift) <= 1500;
+  if (keep_clock) {
+    n.pos_ms = s_now.pos_ms;
+    n.anchor_ms = s_now.anchor_ms;
+  }
   s_now = n;
-  if (changed) ++s_now_gen;
+  if (!keep_clock) ++s_now_gen;
 }
 
 void handleCoverBegin(const char* json) {
@@ -150,6 +168,10 @@ void handleCoverBegin(const char* json) {
   }
   s_stage_len = len;
   s_stage_crc = doc["crc"] | 0u;
+  s_stage_next = 1;
+  s_stage_id = doc["id"] | 0u;
+  s_stage_w = doc["w"] | 0;
+  s_stage_h = doc["h"] | 0;
   reply("COVERACK", "{\"seq\":0}");
 }
 
@@ -162,16 +184,27 @@ void handleCoverChunk(char* args) {
   }
   *data++ = '\0';
   const long seq = atol(args);
+  char body[32];
+  if (seq < s_stage_next) {  // already have it (its answer got lost): answer again
+    snprintf(body, sizeof(body), "{\"seq\":%ld}", seq);
+    reply("COVERACK", body);
+    return;
+  }
+  if (seq > s_stage_next) {  // one went missing: from there again
+    snprintf(body, sizeof(body), "{\"need\":%ld}", s_stage_next);
+    reply("COVERNAK", body);
+    return;
+  }
   uint8_t bytes[480];
   const int n = b64Decode(data, bytes, sizeof(bytes));
   if (n <= 0 || s_stage_got + n > s_stage_len) {
-    dropStage();
-    reply("ERR", "{\"msg\":\"bad_cover_chunk\"}");
+    snprintf(body, sizeof(body), "{\"need\":%ld}", s_stage_next);  // garbled line
+    reply("COVERNAK", body);
     return;
   }
   memcpy(s_stage + s_stage_got, bytes, n);
   s_stage_got += n;
-  char body[32];
+  ++s_stage_next;
   snprintf(body, sizeof(body), "{\"seq\":%ld}", seq);
   reply("COVERACK", body);
 }
@@ -187,6 +220,9 @@ void handleCoverEnd() {
   if (s_cover != nullptr) heap_caps_free(s_cover);
   s_cover = s_stage;
   s_cover_len = s_stage_len;
+  s_cover_w = s_stage_w;
+  s_cover_h = s_stage_h;
+  s_cover_id = s_stage_id;
   s_stage = nullptr;
   s_stage_len = s_stage_got = 0;
   ++s_cover_gen;

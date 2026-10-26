@@ -43,8 +43,8 @@ constexpr int kDotsY = D(34);
 // Keys page: 4 x 3 keys on the left, the volume knob on the right.
 constexpr int kCols = 4, kRows = 3;
 constexpr int kGridX = D(20), kGridY = D(68), kGap = D(10);
-constexpr int kKeyW = (D(470) - 3 * D(10)) / 4;
-constexpr int kKeyH = D(120);
+constexpr int kKeyW = store::keyW();  // (D(470) - 3 * D(10)) / 4
+constexpr int kKeyH = store::keyH();  // D(120)
 constexpr int kKnobX = D(512), kKnobY = D(88), kKnobD = D(268);
 constexpr int kKnobCx = kKnobX + kKnobD / 2, kKnobCy = kKnobY + kKnobD / 2;
 constexpr float kRingR = kKnobD / 2.0f, kRingW = D(14);
@@ -52,13 +52,17 @@ static_assert(kCols * kRows == store::kSlots, "one key per stored slot");
 
 // Music page: text, bars and controls at the bottom, over the cover.
 constexpr int kMusicPad = D(28);
-constexpr int kTitleY = D(296), kArtistY = D(338);
-constexpr int kBarY = D(380), kBarH = D(5);
+constexpr int kTitleY = D(288), kArtistY = D(330);
+constexpr int kBarY = D(374), kBarH = D(6);
 constexpr int kTimeW = D(46);
 constexpr int kCtrlY = D(436);
 constexpr int kPrevCx = D(314), kPlayCx = D(400), kNextCx = D(486);
 constexpr int kSmallBtnR = D(26), kPlayR = D(34);
-constexpr int kVolX = D(62), kVolW = D(186), kVolH = D(5);
+// Volume bar left of the controls: thick, a big handle, a tall touch area (below the
+// time bar, which takes no touches).
+constexpr int kVolX = D(66), kVolW = D(200), kVolH = D(10), kVolKnobR = D(13);
+constexpr int kVolTouchH = D(40);  // either side of kCtrlY
+constexpr Rgb kCoverBg{6, 7, 14};  // what the cover fades into
 
 // Colours (approved palette).
 constexpr Rgb kWhite{255, 255, 255};
@@ -82,6 +86,7 @@ LGFX_Sprite s_music_base(&tft);  // cover (or background) with its shades
 bool s_ready = false;
 bool s_keys_dirty = true, s_music_dirty = true;
 uint32_t s_keys_gen = 0, s_cover_gen = 0, s_now_gen = 0;
+uint32_t s_cover_for_id = 0;  // track the music base was built for
 
 struct RingPx {
   uint16_t x, y;  // canvas position
@@ -114,6 +119,11 @@ float s_last_deg = 0, s_accum_deg = 0, s_total_deg = 0;
 int s_max_move = 0;
 int s_target_level = -1;  // knob / bar with the helper, not sent yet (percent)
 unsigned long s_last_send_ms = 0;
+// While the finger is on the knob / bar (and a moment after) the level shown is the one
+// asked for: the computer's answers lag behind and would make the ring flicker.
+int s_user_level = -1;
+unsigned long s_user_until_ms = 0;
+float s_bar_x = -1;  // smoothed finger position on the volume bar
 
 // Music page.
 bool s_was_playing = false;
@@ -148,8 +158,13 @@ void saveLevel() {
   s_level_dirty = false;
 }
 
+bool userHold() {
+  return s_user_level >= 0 &&
+         ((s_down && (s_target == Target::Knob || s_target == Target::VolBar)) || millis() < s_user_until_ms);
+}
+
 int levelPercent() {
-  if (host::active()) return host::volume();
+  if (host::active()) return userHold() ? s_user_level : host::volume();
   return (constrain(s_level, 0, steps()) * 100 + steps() / 2) / steps();
 }
 bool mutedNow() { return host::active() ? host::muted() : s_muted_local; }
@@ -168,6 +183,9 @@ void hidStep(int dir) {
 void wantLevel(int pct) {
   pct = constrain(pct, 0, 100);
   if (host::active()) {
+    if (pct == s_user_level && userHold()) return;
+    s_user_level = pct;
+    s_user_until_ms = millis() + 1500;
     if (millis() - s_last_send_ms >= 40) {
       host::sendVolume(pct);  // also the level shown until the helper answers
       s_last_send_ms = millis();
@@ -310,13 +328,13 @@ void mediaIcon(Gfx& g, Media m, int cx, int cy, uint16_t c) {
 }
 
 /** A stored picture onto a sprite: magenta = see-through. */
-void blitIcon(LGFX_Sprite& s, const uint16_t* pic, int px, int x, int y) {
+void blitIcon(LGFX_Sprite& s, const uint16_t* pic, int pw, int ph, int x, int y) {
   auto* dst = static_cast<uint16_t*>(s.getBuffer());
-  for (int r = 0; r < px; ++r) {
+  for (int r = 0; r < ph; ++r) {
     const int yy = y + r;
     if (yy < 0 || yy >= kH) continue;
-    for (int q = 0; q < px; ++q) {
-      const uint16_t v = pic[r * px + q];
+    for (int q = 0; q < pw; ++q) {
+      const uint16_t v = pic[r * pw + q];
       const int xx = x + q;
       if (v == store::kTransparent || xx < 0 || xx >= kW) continue;
       dst[yy * kW + xx] = static_cast<uint16_t>((v >> 8) | (v << 8));
@@ -335,9 +353,21 @@ void drawKeyContent(LGFX_Sprite& s, int i) {
   char t[48];
   s.setTextDatum(textdatum_t::middle_center);
   s.setTextColor(col565({217, 220, 239}));
-  if (pic != nullptr) {
+  if (pic != nullptr && store::fullKeyIcons()) {
+    // The picture is the whole key (the helper rounded its corners and darkened its
+    // bottom for the label).
+    blitIcon(s, pic, kKeyW, kKeyH, x, y);
+    if (has_label) {
+      displayFontSetBitmap(s, &ui::font::Sans8);
+      fitText(s, k.label, kKeyW - D(12), t, sizeof(t));
+      s.setTextColor(col565({4, 5, 12}));
+      s.drawString(t, cx + 1, y + kKeyH - D(15) + 1);
+      s.setTextColor(col565(kWhite));
+      s.drawString(t, cx, y + kKeyH - D(15));
+    }
+  } else if (pic != nullptr) {
     const int iy = has_label ? y + (kKeyH - px - D(22)) / 2 : y + (kKeyH - px) / 2;
-    blitIcon(s, pic, px, cx - px / 2, iy);
+    blitIcon(s, pic, px, px, cx - px / 2, iy);
     if (has_label) {
       displayFontSetBitmap(s, &ui::font::Sans8);
       fitText(s, k.label, kKeyW - D(10), t, sizeof(t));
@@ -489,43 +519,64 @@ void buildKeysBase() {
   s_keys_dirty = false;
 }
 
+float smooth01(float t) {
+  t = std::min(std::max(t, 0.0f), 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
+/** True when the stored cover belongs to what is playing now. */
+bool coverForNow() {
+  size_t len = 0;
+  const auto& n = host::now();
+  return host::cover(&len) != nullptr && len > 0 && n.valid && (host::coverId() == n.id || n.id == 0);
+}
+
 void buildMusicBase() {
   auto& s = s_music_base;
   const auto c = cv(s);
   size_t len = 0;
-  const uint8_t* jpg = host::cover(&len);
+  int cw = 0, ch = 0;
+  const uint8_t* jpg = host::cover(&len, &cw, &ch);
   bool have_cover = false;
   // Shades: top for the pills, bottom for the text and controls; applied before packing.
   paint::Shade shades[2] = {{0, D(90), kInk, 140, 0}, {kH - D(300), kH, kInk, 0, 150}};
-  if (jpg != nullptr && len > 0 && host::now().valid) {
-    // Decoded at 24 bits, shaded, then dithered down: no steps in the dark fade.
-    LGFX_Sprite full(&tft);
-    full.setPsram(true);
-    full.setColorDepth(24);
-    if (full.createSprite(kW, kH) != nullptr) {
-      full.fillScreen(0);
-      have_cover = full.drawJpg(jpg, len, 0, 0, kW, kH);
+  if (coverForNow()) {
+    if (cw <= 0 || ch <= 0 || cw > kW || ch > kH) cw = kW, ch = kH;  // older helper: whole panel
+    // The cover in the middle, at its own size; its edges fade into the dark page.
+    const int x0 = (kW - cw) / 2, y0 = (kH - ch) / 2;
+    const float fx = std::min<float>(D(150), cw / 3.0f), fy = std::min<float>(D(90), ch / 4.0f);
+    LGFX_Sprite pic(&tft);
+    pic.setPsram(true);
+    pic.setColorDepth(24);  // decoded at 24 bits, faded and shaded, then dithered: no steps
+    if (pic.createSprite(cw, ch) != nullptr) {
+      pic.fillScreen(0);
+      have_cover = pic.drawJpg(jpg, len, 0, 0, cw, ch);
       if (have_cover) {
         shades[1].a1 = 235;
         for (int y = 0; y < kH; ++y) {
+          const int py = y - y0;
+          const float ay = (py < 0 || py >= ch) ? 0.0f : smooth01(std::min(py + 0.5f, ch - py - 0.5f) / fy);
           for (int x = 0; x < kW; ++x) {
-            const auto p = full.readPixelRGB(x, y);
-            c.px[y * kW + x] = paint::packShaded(p.R8(), p.G8(), p.B8(), x, y, shades, 2);
+            const int px = x - x0;
+            float a = 0.0f;
+            if (ay > 0.0f && px >= 0 && px < cw) a = ay * smooth01(std::min(px + 0.5f, cw - px - 0.5f) / fx);
+            int r = kCoverBg.r, g = kCoverBg.g, b = kCoverBg.b;
+            if (a > 0.0f) {
+              const auto p = pic.readPixelRGB(px, py);
+              r = static_cast<int>(r + (p.R8() - r) * a + 0.5f);
+              g = static_cast<int>(g + (p.G8() - g) * a + 0.5f);
+              b = static_cast<int>(b + (p.B8() - b) * a + 0.5f);
+            }
+            c.px[y * kW + x] = paint::packShaded(r, g, b, x, y, shades, 2);
           }
         }
       }
-      full.deleteSprite();
-    } else {
-      s.fillScreen(0);  // not enough memory for the 24-bit pass: straight to 16 bits
-      have_cover = s.drawJpg(jpg, len, 0, 0, kW, kH);
-      if (have_cover) {
-        paint::shade(c, 0, D(90), kInk, 140, 0);
-        paint::shade(c, kH - D(300), kH, kInk, 0, 235);
-      }
+      pic.deleteSprite();
     }
   }
   if (!have_cover) paint::background(c, shades, 2);
   s_cover_gen = host::coverGeneration();
+  s_cover_for_id = host::now().id;
   s_music_dirty = false;
 }
 
@@ -600,7 +651,8 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   if (n.duration_s) s.drawString(t1, tx + tw, kBarY + kBarH / 2 + 1);
   const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
   paint::roundRect(c, bx, kBarY, bw, kBarH, kBarH / 2, kWhite, 46);
-  const float f = n.duration_s ? std::min(1.0f, static_cast<float>(pos) / n.duration_s) : 0.0f;
+  const float f =
+      n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
   paint::gradientBar(c, bx, kBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
   paint::circle(c, bx + bw * f, kBarY + kBarH / 2.0f, D(7), kWhite, 255);
 
@@ -621,12 +673,15 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   // Volume bar, left of the controls.
   const bool muted = mutedNow();
   const int pct = levelPercent();
-  speakerIcon(s, kMusicPad + D(12), kCtrlY, D(10), col565(muted ? kMutedRed : kWhite));
+  speakerIcon(s, kMusicPad + D(10), kCtrlY, D(11), col565(muted ? kMutedRed : kWhite));
   paint::roundRect(c, kVolX, kCtrlY - kVolH / 2, kVolW, kVolH, kVolH / 2, kWhite, 46);
+  const float vx = kVolX + kVolW * (muted ? 0 : pct) / 100.0f;
   if (!muted && pct > 0) {
-    paint::gradientBar(c, kVolX, kCtrlY - kVolH / 2, std::max(1, kVolW * pct / 100), kVolH, kPink, kPink,
-                       kLavender);
+    paint::gradientBar(c, kVolX, kCtrlY - kVolH / 2, std::max(kVolH, static_cast<int>(vx - kVolX)), kVolH, kPink,
+                       kPink, kLavender);
   }
+  paint::circle(c, vx, kCtrlY, kVolKnobR + D(4), kLavender, muted ? 0 : 70);
+  paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
   s_shown_level = pct;
   s_shown_muted = muted;
   displayFontSetBitmap(s, &ui::font::Sans8);
@@ -677,7 +732,7 @@ void present() {
   if (!s_ready) return;
   if (s_page == Page::Keys) {
     if (s_keys_dirty || s_keys_gen != store::generation()) buildKeysBase();
-  } else if (s_music_dirty || s_cover_gen != host::coverGeneration()) {
+  } else if (s_music_dirty || s_cover_gen != host::coverGeneration() || s_cover_for_id != host::now().id) {
     buildMusicBase();
   }
   if (tft.getRotation() != 2) {
@@ -800,7 +855,7 @@ bool tick() {
     s_dirty = true;
   }
   if (s_page == Page::Music) {
-    if (s_cover_gen != host::coverGeneration()) s_dirty = true;
+    if (s_cover_gen != host::coverGeneration() || s_cover_for_id != n.id) s_dirty = true;
     if (n.valid && host::positionNow() != s_shown_pos) s_dirty = true;
   }
   if (store::generation() != s_keys_gen && s_page == Page::Keys) s_dirty = true;
@@ -825,6 +880,7 @@ Touch touch(int fingers, int x, int y) {
         s_target = Target::Back;
       } else if (s_page == Page::Keys) {
         if (inKnob(x, y)) {
+          if (millis() >= s_user_until_ms) s_user_level = host::active() ? host::volume() : -1;
           s_target = Target::Knob;
           s_last_deg = angleAt(x, y);
           s_accum_deg = s_total_deg = 0;
@@ -843,9 +899,11 @@ Touch touch(int fingers, int x, int y) {
           s_target = Target::Play;
         } else if (inCircle(x, y, kNextCx, kCtrlY, kSmallBtnR + D(8))) {
           s_target = Target::Next;
-        } else if (x >= kVolX - D(30) && x < kVolX + kVolW + D(14) && abs(y - kCtrlY) < D(26)) {
+        } else if (x >= D(8) && x < kVolX + kVolW + D(16) && abs(y - kCtrlY) < kVolTouchH) {
+          if (millis() >= s_user_until_ms) s_user_level = -1;
           s_target = Target::VolBar;
-          wantLevel((x - kVolX) * 100 / kVolW);
+          s_bar_x = x;
+          wantLevel(static_cast<int>(lroundf((s_bar_x - kVolX) * 100.0f / kVolW)));
           presentSoon();
         } else {
           s_target = Target::None;
@@ -882,7 +940,7 @@ Touch touch(int fingers, int x, int y) {
         const int dp = static_cast<int>(s_accum_deg / 3.6f);
         if (dp != 0) {
           s_accum_deg -= dp * 3.6f;
-          wantLevel((s_target_level >= 0 ? s_target_level : host::volume()) + dp);
+          wantLevel((userHold() ? s_user_level : host::volume()) + dp);
           presentSoon();
         }
       } else {
@@ -901,7 +959,9 @@ Touch touch(int fingers, int x, int y) {
         if (changed) presentSoon();
       }
     } else if (s_target == Target::VolBar) {
-      wantLevel((x - kVolX) * 100 / kVolW);
+      // The touch panel wobbles by a pixel or two: smooth it, so the level does not flicker.
+      s_bar_x += (x - s_bar_x) * 0.5f;
+      wantLevel(static_cast<int>(lroundf((s_bar_x - kVolX) * 100.0f / kVolW)));
       presentSoon();
     } else if (s_target == Target::Key && keyAt(x, y) != s_key && s_pressed == s_key) {
       s_pressed = -1;  // slid off the key: no press
@@ -932,7 +992,11 @@ Touch touch(int fingers, int x, int y) {
       if (s_total_deg < 8.0f && s_max_move < D(14) && now - s_down_ms < 700) {
         toggleMute();
         presentSoon();
+      } else if (s_target_level >= 0 && host::active()) {
+        host::sendVolume(s_target_level);
+        s_target_level = -1;
       }
+      if (s_user_level >= 0) s_user_until_ms = millis() + 1200;
       return Touch::None;
     case Target::Key:
       if (s_pressed == s_key) {
@@ -955,6 +1019,7 @@ Touch touch(int fingers, int x, int y) {
         host::sendVolume(s_target_level);
         s_target_level = -1;
       }
+      s_user_until_ms = millis() + 1200;  // the computer catches up meanwhile
       return Touch::None;
     case Target::None:
       return Touch::None;

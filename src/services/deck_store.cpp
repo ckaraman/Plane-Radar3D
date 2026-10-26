@@ -17,10 +17,10 @@ namespace {
 
 // Region of the data ("spiffs") partition: the map blob sits at its start (32 KB max).
 constexpr uint32_t kRegionOffset = 0x900000;
-constexpr uint32_t kRegionBytes = 0x40000;  // 256 KB
+constexpr uint32_t kRegionBytes = 0xC0000;  // 768 KB: whole-key pictures on the 5B (12 x 141 x 153 x 2)
 constexpr size_t kSector = 4096;
 constexpr uint32_t kMagic = 0x4B445250;  // "PRDK"
-constexpr size_t kHeadBytes = 6;
+constexpr size_t kHeadBytes1 = 6, kHeadBytes2 = 8;
 
 struct Header {
   uint32_t magic;
@@ -43,6 +43,7 @@ Slot s_slots[kSlots];
 const uint16_t* s_icons[kSlots] = {};
 uint8_t* s_blob = nullptr;  // PSRAM copy of the stored set (icons point into it)
 bool s_custom = false;
+bool s_full = false;
 int s_volume_steps = 16;
 uint32_t s_gen = 1;
 
@@ -69,34 +70,38 @@ void loadDefaults() {
   memcpy(s_slots, defaults, sizeof(s_slots));
   for (auto& p : s_icons) p = nullptr;
   s_custom = false;
+  s_full = false;
   s_volume_steps = 16;
 }
 
 /** Checks a blob and points slots / icons into it. */
 bool apply(const uint8_t* b, size_t n) {
-  if (n < kHeadBytes + kSlots * sizeof(Slot) || b[0] != 'D' || b[1] != 'K' || b[2] != kVersion ||
-      b[3] != kSlots) {
-    return false;
-  }
-  const int px = b[4];
-  const size_t icon_bytes = static_cast<size_t>(px) * px * 2;
+  if (n < kHeadBytes1 || b[0] != 'D' || b[1] != 'K' || (b[2] != 1 && b[2] != 2) || b[3] != kSlots) return false;
+  const bool v2 = b[2] == 2;
+  const size_t head = v2 ? kHeadBytes2 : kHeadBytes1;
+  if (n < head + kSlots * sizeof(Slot)) return false;
+  const int iw = b[4], ih = v2 ? b[5] : b[4];
+  const int steps = v2 ? b[6] : b[5];
+  const size_t icon_bytes = static_cast<size_t>(iw) * ih * 2;
+  // A set made for the other panel size: keys keep their labels, pictures are dropped.
+  const bool fits = v2 ? (iw == keyW() && ih == keyH()) : (iw == iconPx());
   Slot slots[kSlots];
-  memcpy(slots, b + kHeadBytes, sizeof(slots));
-  size_t off = kHeadBytes + sizeof(slots);
+  memcpy(slots, b + head, sizeof(slots));
+  size_t off = head + sizeof(slots);
   const uint16_t* icons[kSlots] = {};
   for (int i = 0; i < kSlots; ++i) {
     slots[i].label[kLabelBytes - 1] = '\0';
     if (static_cast<uint8_t>(slots[i].kind) > static_cast<uint8_t>(Kind::Host)) slots[i].kind = Kind::Empty;
     if (!slots[i].has_icon) continue;
     if (off + icon_bytes > n) return false;
-    // A set made for the other panel size: keys keep their labels, pictures are dropped.
-    if (px == iconPx()) icons[i] = reinterpret_cast<const uint16_t*>(b + off);
+    if (fits) icons[i] = reinterpret_cast<const uint16_t*>(b + off);
     off += icon_bytes;
   }
   if (off != n) return false;
   memcpy(s_slots, slots, sizeof(s_slots));
   memcpy(s_icons, icons, sizeof(s_icons));
-  s_volume_steps = (b[5] >= 4 && b[5] <= 100) ? b[5] : 16;
+  s_volume_steps = (steps >= 4 && steps <= 100) ? steps : 16;
+  s_full = v2;
   s_custom = true;
   return true;
 }
@@ -114,6 +119,7 @@ void freeBlob() {
 
 int iconPx() { return ui::S(48); }
 int volumeSteps() { return s_volume_steps; }
+bool fullKeyIcons() { return s_full; }
 
 void init() {
   loadDefaults();
@@ -144,7 +150,7 @@ bool custom() { return s_custom; }
 
 bool beginStaging(size_t length, uint32_t crc32) {
   abortStaging();
-  if (length < kHeadBytes || length > kRegionBytes - sizeof(Header)) return false;
+  if (length < kHeadBytes1 || length > kRegionBytes - sizeof(Header)) return false;
   s_stage = static_cast<uint8_t*>(heap_caps_malloc(length, MALLOC_CAP_SPIRAM));
   if (s_stage == nullptr) return false;
   s_stage_len = length;

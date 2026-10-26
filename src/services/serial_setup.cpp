@@ -127,8 +127,10 @@ void sendHello() {
   doc["deckv"] = services::deck::kVersion;
   doc["deckslots"] = services::deck::kSlots;
   doc["deckicon"] = services::deck::iconPx();
+  doc["deckkw"] = services::deck::keyW();  // version 2 sets: pictures fill the key
+  doc["deckkh"] = services::deck::keyH();
   doc["deckcustom"] = services::deck::custom();
-  doc["hostv"] = 1;  // Windows helper protocol (services/host_link.h)
+  doc["hostv"] = 2;  // Windows helper protocol (services/host_link.h): 2 = windowed cover, "pm"
   doc["w"] = config::kDisplayWidth;
   doc["h"] = config::kDisplayHeight;
   sendReply("HELLO", doc);
