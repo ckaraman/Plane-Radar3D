@@ -18,8 +18,6 @@ namespace {
 
 using services::hid::Media;
 
-/** Leave the deck after this long without a touch. */
-constexpr unsigned long kIdleCloseMs = 30000;
 /** How long a pressed key stays highlighted. */
 constexpr unsigned long kPressFlashMs = 140;
 
@@ -74,7 +72,6 @@ constexpr int kKeyH = (kGridH - (kRows - 1) * kGap) / kRows;
 
 int s_pressed = -1;
 unsigned long s_pressed_ms = 0;
-unsigned long s_last_touch_ms = 0;
 int s_usb_shown = -1;
 
 uint16_t cBg() { return tft.color565(6, 10, 18); }
@@ -205,7 +202,6 @@ void drawAll() {
 
 void enter() {
   s_pressed = -1;
-  s_last_touch_ms = millis();
   // Draw into the hidden buffer and show it in one go (no half-drawn screen).
   tft.beginHiddenFrame();
   drawAll();
@@ -219,11 +215,10 @@ bool tick() {
     s_pressed = -1;
   }
   if ((services::hid::ready() ? 1 : 0) != s_usb_shown) drawUsbStatus();
-  return now - s_last_touch_ms < kIdleCloseMs;
+  return true;  // the deck stays until RADAR is tapped
 }
 
 Tap tap(int x, int y) {
-  s_last_touch_ms = millis();
   if (ui::switchButtonHit(x, y)) return Tap::Back;
   for (int i = 0; i < kCols * kRows; ++i) {
     int kx, ky;

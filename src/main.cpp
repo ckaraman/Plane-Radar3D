@@ -145,8 +145,7 @@ void updateScreen() {
   }
 
 #if defined(BOARD_WS5)
-  // Stream deck: stays until RADAR, or closes by itself after a while without touches.
-  // The water reminder waits until it closes.
+  // Stream deck: stays until its RADAR button is tapped. The water reminder waits.
   if (g_screen == Screen::Deck) {
     if (!ui::deck::tick()) wakeRadar();
     return;
