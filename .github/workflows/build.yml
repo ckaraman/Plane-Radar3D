@@ -114,12 +114,21 @@ jobs:
         run: |
           export PATH="$HOME/pio-s3/bin:$PATH"
           # The library rebuild wipes .pio/build, so each env's images are copied out at once.
-          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio run -e ws5 -t merge
+          # Errors as annotations: readable without downloading the log.
+          pio_annotated() {
+            set -o pipefail
+            "$@" 2>&1 | tee pio.log || {
+              grep -nE "error|Error|undefined reference|overflow|too big" pio.log | head -40 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+              tail -12 pio.log | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
+              return 1
+            }
+          }
+          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio_annotated pio run -e ws5 -t merge
           mkdir -p ../out/ws5 ../out/ws5b
           cp .pio/build/ws5/*.bin ../out/ws5/
           # Guard: the board has octal PSRAM; a quad-PSRAM build boot-loops on it.
           grep -q "CONFIG_SPIRAM_MODE_OCT 1" .pio/build/ws5/config/sdkconfig.h || { echo "::error::ws5 built without octal PSRAM"; exit 1; }
-          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5b" pio run -e ws5b -t merge
+          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5b" pio_annotated pio run -e ws5b -t merge
           cp .pio/build/ws5b/*.bin ../out/ws5b/
           grep -q "CONFIG_SPIRAM_MODE_OCT 1" .pio/build/ws5b/config/sdkconfig.h || { echo "::error::ws5b built without octal PSRAM"; exit 1; }
           ls -l ../out/ws5 ../out/ws5b
