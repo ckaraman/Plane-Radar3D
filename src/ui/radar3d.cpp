@@ -96,15 +96,6 @@ constexpr float kCamDistOverR = 2.1f;  // camera ground distance / outer radius
 // --- Layout ---
 using ui::S;
 constexpr int kTopBarH = S(22);
-// Arrow keys like a keyboard, bottom left: up above down, left/down/right in a row.
-// Big enough for the resistive panel; the 4 px gap keeps neighbouring keys apart.
-constexpr int kBtnSize = S(42);
-constexpr int kPadStep = kBtnSize + S(4);
-constexpr int kPadLeft = S(6);
-constexpr int kPadTop = kH - S(4) - kBtnSize - kPadStep;
-constexpr int kPadW = 2 * kPadStep + kBtnSize;
-constexpr int kPadH = kPadStep + kBtnSize;
-constexpr int kPitchStepDeg = 4;
 // Tilt range: steeper views turn the disc into a circle that leaves the sides of the
 // wide screen black, flatter ones squash it; within this range it fills the width.
 constexpr int kPitchMinDeg = 14;
@@ -118,7 +109,6 @@ constexpr int kInfoLW = S(168);
 constexpr int kInfoRW = S(150);
 constexpr int kInfoRX = kW - kInfoRW - S(4);
 constexpr int kTapRadiusPx = S(38);
-constexpr float kYawStepDeg = 30.0f;
 
 // The radar is drawn in horizontal bands into a small buffer in internal RAM (fast,
 // no cache misses) and each band is copied straight into the panel's frame buffer:
@@ -161,6 +151,9 @@ float s_dt = 0.2f;  // seconds since the previous frame (clamped)
 float ease(float tau) { return 1.0f - expf(-s_dt / tau); }
 
 float s_yaw_target = 20.0f;
+float s_pitch_cur = -1.0f;  // camera tilt (deg), fractional while dragging; < 0: from prefs
+bool s_dragging = false;    // a finger is turning the map
+float s_yaw_vel = 0.0f;     // deg/s the map keeps turning after the finger lifts
 // While an aircraft the user tapped is selected, the camera turns to keep it on the
 // screen's centre line, in front of home. Deselecting returns to the saved heading.
 bool s_follow = false;
@@ -214,7 +207,8 @@ LabelPos s_label_pos[services::adsb::kMaxAircraft];
 Cam makeCam() {
   Cam c;
   const float yaw = s_yaw_cur * kDegToRad;
-  c.pitch_deg = std::max(kPitchMinDeg, std::min<int>(kPitchMaxDeg, services::display_prefs::get().pitch_deg));
+  if (s_pitch_cur < 0.0f) s_pitch_cur = services::display_prefs::get().pitch_deg;
+  c.pitch_deg = std::max<float>(kPitchMinDeg, std::min<float>(kPitchMaxDeg, s_pitch_cur));
   const float pitch = c.pitch_deg * kDegToRad;
   c.cyaw = cosf(yaw);
   c.syaw = sinf(yaw);
@@ -534,11 +528,11 @@ bool overlapsUi(int x, int y, int w, int h) {
   const Box fixed[] = {
       {0, 0, kW, kTopBarH + S(2)},
       {0, kTopBarH, s_selected[0] ? 0 : kW, kStripH + S(2)},       // legend strip
-      {kPadLeft - S(2), kPadTop - S(2), kPadW + S(4), kPadH + S(4)},        // arrow keys
+
       {S(2), kInfoY - S(2), (s_selected[0] && !infoInLabel()) ? kInfoLW + S(4) : 0, kInfoH + S(4)},  // info
       {kInfoRX - S(2), kInfoY - S(2), (s_selected[0] && !infoInLabel()) ? kInfoRW + S(4) : 0, kInfoH + S(4)},
       {ui::kSwitchX - S(2), ui::kSwitchY - S(2), ui::kSwitchW + S(4), ui::kSwitchH + S(4)},  // HAVA
-      {ui::kWaterBtnX - S(2), ui::kWaterBtnY - S(2), ui::kWaterBtnW + S(4), ui::kWaterBtnH + S(4)},  // SU
+      {ui::kRadarWaterX - S(2), ui::kWaterBtnY - S(2), ui::kWaterBtnW + S(4), ui::kWaterBtnH + S(4)},  // SU
   };
   for (const Box& b : fixed) {
     if (intersects(me, b)) return true;
@@ -2355,47 +2349,6 @@ void drawLegendStrip() {
   }
 }
 
-enum class Arrow { Left, Right, Up, Down };
-
-struct PadButton {
-  int x, y;
-  Arrow dir;
-};
-PadButton padButton(int i) {
-  const int row2 = kPadTop + kPadStep;
-  switch (i) {
-    case 0: return {kPadLeft, row2, Arrow::Left};
-    case 1: return {kPadLeft + 2 * kPadStep, row2, Arrow::Right};
-    case 2: return {kPadLeft + kPadStep, kPadTop, Arrow::Up};
-    default: return {kPadLeft + kPadStep, row2, Arrow::Down};
-  }
-}
-
-void drawButton(int x, int y, Arrow dir) {
-  s_spr.fillRoundRect(x, y, kBtnSize, kBtnSize, S(7), kPanel);
-  s_spr.drawRoundRect(x, y, kBtnSize, kBtnSize, S(7), kRing);
-  const int cx = x + kBtnSize / 2, cy = y + kBtnSize / 2;
-  constexpr int a = S(8), b = S(5);
-  switch (dir) {
-    case Arrow::Left:
-      thickLine(cx + b, cy - a, cx - b, cy, kCyan);
-      thickLine(cx - b, cy, cx + b, cy + a, kCyan);
-      break;
-    case Arrow::Right:
-      thickLine(cx - b, cy - a, cx + b, cy, kCyan);
-      thickLine(cx + b, cy, cx - b, cy + a, kCyan);
-      break;
-    case Arrow::Up:
-      thickLine(cx - a, cy + b, cx, cy - b, kCyan);
-      thickLine(cx, cy - b, cx + a, cy + b, kCyan);
-      break;
-    case Arrow::Down:
-      thickLine(cx - a, cy - b, cx, cy + b, kCyan);
-      thickLine(cx, cy + b, cx + a, cy - b, kCyan);
-      break;
-  }
-}
-
 /** Bottom right: opens the forecast screen. Sun + cloud and "HAVA". */
 void drawSwitchButton() {
   using namespace ui;
@@ -2414,12 +2367,10 @@ void drawSwitchButton() {
 }
 
 void drawControls() {
-  for (int i = 0; i < 4; ++i) {
-    const PadButton b = padButton(i);
-    drawButton(b.x, b.y, b.dir);
-  }
+  // No arrow keys: the map is turned and tilted by dragging. Water bottom left,
+  // forecast bottom right.
   drawSwitchButton();
-  ui::drawWaterButton(s_spr, ui::kWaterBtnX, ui::kWaterBtnY, ui::kWaterBtnW, ui::kWaterBtnH, kPanel,
+  ui::drawWaterButton(s_spr, ui::kRadarWaterX, ui::kWaterBtnY, ui::kWaterBtnW, ui::kWaterBtnH, kPanel,
                       kRing, kCyan, kText, kBg);
 }
 
@@ -2588,6 +2539,18 @@ void applyPaletteTo(LGFX_Sprite& g, bool force) {
 void applyPalette() { applyPaletteTo(s_spr, false); }
 
 void animateYaw() {
+  if (s_yaw_vel != 0.0f && !s_dragging) {  // glide on after a flick, slowing down
+    s_yaw_target = s_yaw_cur = fmodf(s_yaw_cur + s_yaw_vel * s_dt + 360.0f, 360.0f);
+    s_yaw_vel *= expf(-s_dt / 0.35f);
+    if (fabsf(s_yaw_vel) < 4.0f) {
+      s_yaw_vel = 0.0f;
+      auto p = services::display_prefs::get();
+      p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_cur)) % 360;
+      services::display_prefs::setNoSave(p);
+      s_prefs_dirty_ms = millis();
+    }
+    return;
+  }
   float diff = fmodf(s_yaw_target - s_yaw_cur + 540.0f, 360.0f) - 180.0f;
   // Following: small corrections are taken in one go (see followSelected).
   if (fabsf(diff) < 0.05f || (s_follow && fabsf(diff) < 1.5f)) {
@@ -3075,7 +3038,8 @@ void drawFrame() {
     // Kept only when the camera stood still since the previous frame too: saving costs
     // a copy and a hash (~25 ms), wasted if it moves on in the next frame.
     // Kept once the camera has reached its target (it stands still from here on).
-    if (s_bg != nullptr && s_tiles_ok && fabsf(s_yaw_cur - s_yaw_target) < 0.01f) {
+    if (s_bg != nullptr && s_tiles_ok && fabsf(s_yaw_cur - s_yaw_target) < 0.01f && !s_dragging &&
+        s_yaw_vel == 0.0f) {
       memcpy(s_bg, s_band_mem, static_cast<size_t>(kW) * kH);
       hashTiles(s_bg, s_bg_hash);
       s_bg_key = bk;
@@ -3210,29 +3174,6 @@ bool hostHitPos(const char* callsign, int* x, int* y) {
 #endif
 
 bool handleTap(int x, int y) {
-  for (int i = 0; i < 4; ++i) {
-    const PadButton b = padButton(i);
-    if (x >= b.x - S(2) && x < b.x + kBtnSize + S(2) && y >= b.y - S(2) && y < b.y + kBtnSize + S(2)) {
-      auto p = services::display_prefs::get();
-      if (i == 0 || i == 1) {
-        // Right arrow turns the view to the right (the map swings left), left to the left.
-        s_follow = false;  // turning by hand ends following the selected aircraft
-        s_yaw_target += i == 0 ? kYawStepDeg : -kYawStepDeg;
-        s_yaw_target = fmodf(s_yaw_target + 360.0f, 360.0f);
-        p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_target)) % 360;
-      } else if (i == 2) {
-        p.pitch_deg = static_cast<uint8_t>(std::min(kPitchMaxDeg, std::max(kPitchMinDeg, p.pitch_deg + kPitchStepDeg)));
-      } else {
-        p.pitch_deg = static_cast<uint8_t>(std::max(kPitchMinDeg, std::min(kPitchMaxDeg, p.pitch_deg - kPitchStepDeg)));
-      }
-      // Kept in RAM now, written to flash once the buttons have been left alone for a
-      // few seconds: a flash write stalls the drawing for a moment, which made every
-      // tap of the arrows stutter.
-      services::display_prefs::setNoSave(p);
-      s_prefs_dirty_ms = millis();
-      return true;
-    }
-  }
   if (y < kTopBarH + S(6)) {
     ui::radar::rangeNext();
     return true;
@@ -3276,5 +3217,40 @@ bool handleTap(int x, int y) {
   }
   return false;
 }
+
+// ---------------------------------------------------------------- touch gestures
+constexpr float kDragDegPerPx = 0.35f;     // a full screen width turns ~280 deg
+constexpr float kTiltDegPerPx = 0.05f;     // ~240 px from flattest to steepest
+
+void dragBegin() {
+  s_dragging = true;
+  s_follow = false;  // turning by hand ends following the selected aircraft
+  s_yaw_vel = 0.0f;
+  s_yaw_target = s_yaw_cur;
+}
+
+void dragBy(int dx, int dy) {
+  if (!s_dragging) dragBegin();
+  // The map follows the finger: dragging right swings it right.
+  s_yaw_cur = s_yaw_target = fmodf(s_yaw_cur - dx * kDragDegPerPx + 360.0f, 360.0f);
+  // Dragging down looks more from above, up flatter.
+  if (s_pitch_cur < 0.0f) s_pitch_cur = services::display_prefs::get().pitch_deg;
+  s_pitch_cur = std::max<float>(kPitchMinDeg, std::min<float>(kPitchMaxDeg, s_pitch_cur + dy * kTiltDegPerPx));
+}
+
+void dragEnd(float vx_px_s) {
+  if (!s_dragging) return;
+  s_dragging = false;
+  s_yaw_vel = std::max(-300.0f, std::min(300.0f, -vx_px_s * kDragDegPerPx));
+  if (fabsf(s_yaw_vel) < 20.0f) s_yaw_vel = 0.0f;  // a slow release just stops
+  auto p = services::display_prefs::get();
+  p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_cur)) % 360;
+  p.pitch_deg = static_cast<uint8_t>(lroundf(s_pitch_cur));
+  s_pitch_cur = p.pitch_deg;  // settle on a whole degree (what is saved)
+  services::display_prefs::setNoSave(p);
+  s_prefs_dirty_ms = millis();  // written to flash once left alone for a few seconds
+}
+
+void pinchStep(int dir) { ui::radar::rangeStep(dir); }
 
 }  // namespace ui::radar3d

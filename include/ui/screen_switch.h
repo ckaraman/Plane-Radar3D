@@ -35,6 +35,15 @@ inline bool waterButtonHit(int x, int y) {
   return hitBox(x, y, kWaterBtnX, kWaterBtnY, kWaterBtnW, kWaterBtnH);
 }
 
+#if defined(BOARD_WS5)
+// 5" radar screen: no arrow keys (the map is turned by dragging), the water button
+// sits bottom left.
+constexpr int kRadarWaterX = S(4);
+inline bool radarWaterButtonHit(int x, int y) {
+  return hitBox(x, y, kRadarWaterX, kWaterBtnY, kWaterBtnW, kWaterBtnH);
+}
+#endif
+
 /**
  * The water button: a rounded box with a tiny droplet avatar (eyes + smile).
  * Works on any LovyanGFX target; colours are whatever the target uses

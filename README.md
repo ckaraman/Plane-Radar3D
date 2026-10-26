@@ -41,7 +41,7 @@ Hat dokunmatik ve CH422G ile ortak, SHT30 adresi 0x44. Sensörü karta yapışt�
 - **Harita:** 256 renkli zemin; tepeler kuzeybatıdan gelen ışığa göre gölgelenir, yükseldikçe yeşilden kuru ota ve kayaya döner. Deniz, göller, kıyı ve ana yollar (otoyollar kalın) çizilir. Yerleşim alanları gri, ormanlar koyu yeşil. Harita alanının dışı düz kara olarak görünür.
 - **Havalimanları:** 60 km içindeki havalimanları kule/terminal simgesi ve üç harfli koduyla, pistleri yere yatık şerit olarak.
 - **Önemli yerler:** İsim yerine simge: köprü, kule, stadyum, cami, tarihi yapı, müze, hayvanat bahçesi, park. En fazla 6 tane; önce her türden birer tane seçilir, sonra ikinciler (bu sırayla). Simgeye dokununca adı birkaç saniye görünür.
-- **Kamera:** ‹ › ile 360° döner, ˄ ˅ ile eğim 14–26° arasında. Harita her açıda ekrana sığacak kadar büyük çizilir.
+- **Dokunmatik kontrol:** Parmakla sağa/sola sürükleyince harita döner (360°), yukarı/aşağı sürükleyince eğilir (14–26°); hızlı bırakınca bir süre süzülür. İki parmakla açınca menzil küçülür, kapatınca büyür. Üst şeride dokunmak da menzili değiştirir. Su düğmesi sol altta, HAVA sağ altta.
 - **Uçak seçme:** Dokunulan uçak seçilir ve kamera onu küçük adımlarla yumuşakça takip eder.
 
 ### Ayarlar menüsü (5")

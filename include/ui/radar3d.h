@@ -20,6 +20,14 @@ void drawFrame();
  *  range change (tap the top bar). Returns true when something changed. */
 bool handleTap(int x, int y);
 
+/** Touch gestures (5"): one finger turns (x) and tilts (y) the map, by pixels moved
+ *  since the last call; on release the turn glides on with the finger's speed
+ *  (px/s). Two fingers pinching: range one preset smaller (dir < 0) or larger. */
+void dragBegin();
+void dragBy(int dx, int dy);
+void dragEnd(float vx_px_s);
+void pinchStep(int dir);
+
 /** The shared full-screen frame sprite (nullptr if it could not be allocated).
  *  The forecast screen draws into it with its own palette. */
 LGFX_Sprite* frame();

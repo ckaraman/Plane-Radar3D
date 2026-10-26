@@ -265,7 +265,11 @@ void onTouchTap(int x, int y) {
     openWeather();
     return;
   }
+#if defined(BOARD_WS5)
+  if (ui::radarWaterButtonHit(x, y)) {
+#else
   if (ui::waterButtonHit(x, y)) {
+#endif
     openWater();
     return;
   }
@@ -274,6 +278,99 @@ void onTouchTap(int x, int y) {
   }
 }
 
+#if defined(BOARD_WS5)
+// 5" (capacitive, multi-touch): a short touch is a tap; a finger that moves more than
+// a few pixels turns (sideways) and tilts (up/down) the map; two fingers pinching
+// change the range. Holding still for 1.5 s opens the settings.
+void pollTouch() {
+  constexpr int kSlop = 12;  // px a tap may wander before it counts as a drag
+  static bool gesture = false, pinch = false;
+  static int last_x = 0, last_y = 0;
+  static unsigned long last_ms = 0;
+  static float vel_x = 0.0f, pinch_base = 0.0f;
+  lgfx::touch_point_t tps[2];
+  const int n = tft.getTouch(tps, 2);
+  const unsigned long now = millis();
+  const bool on_radar = g_screen == Screen::Radar && !ui::water::overlayActive();
+  if (n > 0) {
+    if (!g_touch_down) {
+      g_touch_down = true;
+      g_touch_long_fired = false;
+      g_touch_down_ms = now;
+      g_touch_first_x = tps[0].x;
+      g_touch_first_y = tps[0].y;
+      g_touch_sum_x = 0;
+      g_touch_sum_y = 0;
+      g_touch_samples = 0;
+      gesture = pinch = false;
+      last_x = tps[0].x;
+      last_y = tps[0].y;
+      last_ms = now;
+      vel_x = 0.0f;
+    }
+    if (on_radar && n >= 2) {  // pinch: range one step per clear change of the finger gap
+      const float d = hypotf(static_cast<float>(tps[0].x - tps[1].x), static_cast<float>(tps[0].y - tps[1].y));
+      if (!pinch) {
+        if (gesture) ui::radar3d::dragEnd(0.0f);
+        pinch = gesture = true;
+        pinch_base = d;
+      } else if (pinch_base > 20.0f) {
+        if (d > pinch_base * 1.4f) {  // fingers apart: closer in
+          ui::radar3d::pinchStep(-1);
+          pinch_base = d;
+        } else if (d < pinch_base * 0.7f) {  // together: wider
+          ui::radar3d::pinchStep(1);
+          pinch_base = d;
+        }
+      }
+      return;
+    }
+    if (pinch) return;  // after a pinch the last finger does nothing until all lift
+    const int x = tps[0].x, y = tps[0].y;
+    if (!gesture && on_radar &&
+        (abs(x - g_touch_first_x) > kSlop || abs(y - g_touch_first_y) > kSlop)) {
+      gesture = true;
+      ui::radar3d::dragBegin();
+    }
+    if (gesture) {
+      ui::radar3d::dragBy(x - last_x, y - last_y);
+      const unsigned long dt = now - last_ms;
+      if (dt > 0) vel_x = 0.5f * vel_x + 0.5f * (x - last_x) * 1000.0f / dt;
+      last_x = x;
+      last_y = y;
+      last_ms = now;
+      return;
+    }
+    g_touch_sum_x += x;
+    g_touch_sum_y += y;
+    ++g_touch_samples;
+    if (!g_touch_long_fired && now - g_touch_down_ms >= config::kTouchLongPressMs) {
+      g_touch_long_fired = true;
+      ui::settingsMenuRun();
+      // Back from the menu: repaint whatever screen is active.
+      repaintScreen();
+      g_touch_down = false;
+    }
+    return;
+  }
+  if (g_touch_down) {
+    g_touch_down = false;
+    if (gesture) {
+      // A flick glides on; a finger that stopped before lifting just stops.
+      if (!pinch) ui::radar3d::dragEnd(now - last_ms < 100 ? vel_x : 0.0f);
+      return;
+    }
+    if (!g_touch_long_fired && now - g_touch_down_ms < 800) {
+      if (g_touch_samples > 0) {
+        onTouchTap(static_cast<int>(g_touch_sum_x / g_touch_samples),
+                   static_cast<int>(g_touch_sum_y / g_touch_samples));
+      } else {
+        onTouchTap(g_touch_first_x, g_touch_first_y);
+      }
+    }
+  }
+}
+#else
 void pollTouch() {
   lgfx::touch_point_t tp;
   const bool down = tft.getTouch(&tp) > 0;
@@ -314,6 +411,7 @@ void pollTouch() {
     }
   }
 }
+#endif
 
 // ADS-B and weather fetches block for ~1-2 s each (HTTPS), so they run on their
 // own task on core 0; the render loop keeps dead-reckoning on core 1.
