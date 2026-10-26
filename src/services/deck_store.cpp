@@ -86,7 +86,7 @@ bool apply(const uint8_t* b, size_t n) {
   const uint16_t* icons[kSlots] = {};
   for (int i = 0; i < kSlots; ++i) {
     slots[i].label[kLabelBytes - 1] = '\0';
-    if (static_cast<uint8_t>(slots[i].kind) > static_cast<uint8_t>(Kind::Key)) slots[i].kind = Kind::Empty;
+    if (static_cast<uint8_t>(slots[i].kind) > static_cast<uint8_t>(Kind::Host)) slots[i].kind = Kind::Empty;
     if (!slots[i].has_icon) continue;
     if (off + icon_bytes > n) return false;
     // A set made for the other panel size: keys keep their labels, pictures are dropped.

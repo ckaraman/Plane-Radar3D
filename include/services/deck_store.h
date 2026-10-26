@@ -32,6 +32,7 @@ enum class Kind : uint8_t {
   Empty = 0,
   Media = 1,  // code: services::hid::Media
   Key = 2,    // code: Arduino key code (KEY_F13..., 'a'..'z', '0'..'9'), mods: hid::kCtrl...
+  Host = 3,   // carried out by the Windows helper (services/host_link.h): sends PR:KEY
 };
 
 struct Slot {

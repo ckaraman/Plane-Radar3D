@@ -577,7 +577,9 @@ void loop() {
       // 5": the radar redraws as fast as it can (camera moves smoothly); the other
       // screens keep the slow cadence.
       const unsigned long interval =
-          g_screen == Screen::Radar ? config::kRadarFrameIntervalMs : config::kRadarRedrawIntervalMs;
+          g_screen == Screen::Radar ? config::kRadarFrameIntervalMs
+          : g_screen == Screen::Deck ? 33UL  // knob and music page move smoothly
+                                     : config::kRadarRedrawIntervalMs;
       if (millis() - g_last_redraw_ms >= interval) {
         g_last_redraw_ms = millis();
         updateScreen();

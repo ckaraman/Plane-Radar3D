@@ -6,8 +6,10 @@
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 #include "config.h"
 #include "hardware/console.h"
@@ -15,71 +17,126 @@
 #include "hardware/display_font.h"
 #include "services/deck_store.h"
 #include "services/hid_keys.h"
+#include "services/host_link.h"
 #include "ui/fonts_tr.h"
-#include "ui/screen_switch.h"
-#include "ui/ui_scale.h"
+#include "ui/paint.h"
 
 namespace ui::deck {
 
 namespace {
 
 using services::hid::Media;
+using paint::Rgb;
 namespace store = services::deck;
+namespace host = services::host;
 
-constexpr unsigned long kPressFlashMs = 140;
-/** Knob: a full turn goes from silent to full volume, so one volume key per 360 / steps
- *  degrees (macOS: 16 steps, Windows: 50; set on the setup page). */
-float stepDeg() { return 360.0f / static_cast<float>(services::deck::volumeSteps()); }
-/** The estimated level is saved this long after the last change (flash wear). */
-constexpr unsigned long kSaveLevelMs = 3000;
-/** A touch on the knob that turns less than this, short and still, is a tap (mute). */
-constexpr float kTapMaxDeg = 8.0f;
-constexpr unsigned long kTapMaxMs = 700;
-
-// --- Layout: title bar, 4 x 3 keys on the left, the knob on the right, RADAR bottom right.
+// ------------------------------------------------------------------ layout
+// The approved design is drawn at 800 x 480; the 5B panel (1024 x 600) scales it.
 constexpr int kW = config::kDisplayWidth;
-constexpr int kTopH = S(34);
-constexpr int kGap = S(8);
-constexpr int kMargin = S(8);
-constexpr int kAreaY = kTopH + S(4);
-constexpr int kAreaH = ui::kSwitchY - S(6) - kAreaY;
-constexpr int kKnobD = S(200) < kAreaH ? S(200) : kAreaH;
-constexpr int kKnobX = kW - kMargin - kKnobD;
-constexpr int kKnobY = kAreaY + (kAreaH - kKnobD) / 2;
-constexpr int kKnobR = kKnobD / 2 - S(2);
-constexpr int kCols = 4;
-constexpr int kRows = 3;
-constexpr int kKeysW = kKnobX - S(12) - kMargin;
-constexpr int kKeyW = (kKeysW - (kCols - 1) * kGap) / kCols;
-constexpr int kKeyH = (kAreaH - (kRows - 1) * kGap) / kRows;
+constexpr int kH = config::kDisplayHeight;
+constexpr int D(int v) { return v * kW / 800; }
+
+// Shared top bar: RADAR pill on the right, page dots in the middle.
+constexpr int kRadarX = D(670), kRadarY = D(14), kRadarW = D(110), kRadarH = D(40);
+constexpr int kDotsY = D(34);
+
+// Keys page: 4 x 3 keys on the left, the volume knob on the right.
+constexpr int kCols = 4, kRows = 3;
+constexpr int kGridX = D(20), kGridY = D(68), kGap = D(10);
+constexpr int kKeyW = (D(470) - 3 * D(10)) / 4;
+constexpr int kKeyH = D(120);
+constexpr int kKnobX = D(512), kKnobY = D(88), kKnobD = D(268);
+constexpr int kKnobCx = kKnobX + kKnobD / 2, kKnobCy = kKnobY + kKnobD / 2;
+constexpr float kRingR = kKnobD / 2.0f, kRingW = D(14);
 static_assert(kCols * kRows == store::kSlots, "one key per stored slot");
 
-uint16_t cBg() { return tft.color565(6, 10, 18); }
-uint16_t cKey() { return tft.color565(18, 30, 46); }
-uint16_t cKeyDown() { return tft.color565(60, 150, 210); }
-uint16_t cEdge() { return tft.color565(48, 86, 110); }
-uint16_t cDim() { return tft.color565(125, 139, 150); }
-uint16_t cCyan() { return tft.color565(110, 210, 255); }
-uint16_t cRed() { return tft.color565(235, 90, 80); }
+// Music page: text, bars and controls at the bottom, over the cover.
+constexpr int kMusicPad = D(28);
+constexpr int kTitleY = D(296), kArtistY = D(338);
+constexpr int kBarY = D(380), kBarH = D(5);
+constexpr int kTimeW = D(46);
+constexpr int kCtrlY = D(436);
+constexpr int kPrevCx = D(314), kPlayCx = D(400), kNextCx = D(486);
+constexpr int kSmallBtnR = D(26), kPlayR = D(34);
+constexpr int kVolX = D(62), kVolW = D(186), kVolH = D(5);
 
-LGFX_Sprite s_knob(&tft);
-bool s_knob_ok = false;
-// Volume as the deck thinks it is: the USB keyboard cannot read the PC's level, so the
-// deck counts its own steps. Turning past either end keeps sending keys, which brings the
-// count back in line after the volume was changed elsewhere (the PC stops at 0 / max).
-int s_level = -1;  // 0..volumeSteps(); -1 = not loaded yet
-bool s_muted = false;
+// Colours (approved palette).
+constexpr Rgb kWhite{255, 255, 255};
+constexpr Rgb kText{243, 244, 251};
+constexpr Rgb kInk{8, 10, 24};
+constexpr Rgb kPeach{255, 180, 140};
+constexpr Rgb kPink{243, 166, 182};
+constexpr Rgb kLavender{185, 166, 255};
+constexpr Rgb kFaceA{38, 43, 87}, kFaceB{21, 25, 56};
+constexpr Rgb kMutedRed{245, 120, 120};
+
+uint16_t col565(Rgb c) { return tft.color565(c.r, c.g, c.b); }
+
+// ------------------------------------------------------------------ state
+enum class Page { Music, Keys };
+Page s_page = Page::Keys;
+
+LGFX_Sprite s_canvas(&tft);      // only for an upside-down screen
+LGFX_Sprite s_keys_base(&tft);   // keys page without the moving parts
+LGFX_Sprite s_music_base(&tft);  // cover (or background) with its shades
+bool s_ready = false;
+bool s_keys_dirty = true, s_music_dirty = true;
+uint32_t s_keys_gen = 0, s_cover_gen = 0, s_now_gen = 0;
+
+struct RingPx {
+  uint16_t x, y;  // canvas position
+  uint16_t ang;   // 0..36000 (0.01 degree, 0 = top, clockwise)
+  uint8_t cov;    // radial coverage of the ring band
+  uint8_t pad;
+};
+RingPx* s_ring = nullptr;
+int s_ring_n = 0;
+
+// Volume: from the helper when it runs, else counted locally from the keys sent.
+int s_level = -1;  // 0..volumeSteps() without the helper
+bool s_muted_local = false;
 unsigned long s_level_changed_ms = 0;
 bool s_level_dirty = false;
+int s_shown_level = -1;  // last level drawn (percent)
+bool s_shown_muted = false;
+
+// Key press / touch.
+int s_pressed = -1;
+unsigned long s_pressed_ms = 0;
+bool s_flash = false;
+enum class Target { None, Key, Knob, Back, Prev, Play, Next, VolBar, Swipe };
+Target s_target = Target::None;
+bool s_down = false;
+int s_key = -1;
+int s_down_x = 0, s_down_y = 0, s_last_x = 0, s_last_y = 0;
+unsigned long s_down_ms = 0;
+float s_last_deg = 0, s_accum_deg = 0, s_total_deg = 0;
+int s_max_move = 0;
+int s_target_level = -1;  // knob / bar with the helper, not sent yet (percent)
+unsigned long s_last_send_ms = 0;
+
+// Music page.
+bool s_was_playing = false;
+uint32_t s_last_id = 0;
+unsigned long s_stopped_ms = 0;
+uint32_t s_shown_pos = 0xFFFFFFFF;
+
+bool s_dirty = true;  // canvas needs to be put together and shown
+unsigned long s_last_present_ms = 0;
+
+paint::Canvas cv(LGFX_Sprite& s) { return {static_cast<uint16_t*>(s.getBuffer()), kW, kH}; }
+
+// ------------------------------------------------------------------ volume
+int steps() { return store::volumeSteps(); }
 
 void loadLevel() {
   Preferences p;
-  int v = services::deck::volumeSteps() / 2;
+  int v = steps() / 2;
   if (p.begin("deck", true)) {
     v = p.getInt("vol", v);
     p.end();
   }
-  s_level = constrain(v, 0, services::deck::volumeSteps());
+  s_level = constrain(v, 0, steps());
 }
 
 void saveLevel() {
@@ -91,27 +148,53 @@ void saveLevel() {
   s_level_dirty = false;
 }
 
-int s_pressed = -1;  // key drawn pressed
-unsigned long s_pressed_ms = 0;
-bool s_flash = false;  // released, highlight still showing
-int s_usb_shown = -1;
-uint32_t s_gen_shown = 0;
-uint16_t* s_icon_buf = nullptr;  // one icon composed onto the key colour
+int levelPercent() {
+  if (host::active()) return host::volume();
+  return (constrain(s_level, 0, steps()) * 100 + steps() / 2) / steps();
+}
+bool mutedNow() { return host::active() ? host::muted() : s_muted_local; }
+bool canSendHid() { return console::keyboardMode() && services::hid::ready(); }
 
-// Touch state.
-enum class Target { None, Key, Knob, Back };
-Target s_target = Target::None;
-bool s_down = false;
-int s_key = -1;
-int s_down_x = 0, s_down_y = 0;
-int s_last_x = 0, s_last_y = 0;  // last finger position (none on release)
-unsigned long s_down_ms = 0;
-float s_last_deg = 0.0f, s_accum_deg = 0.0f, s_total_deg = 0.0f;
-int s_max_move = 0;
+/** One local volume step (no helper): a volume key, the count follows. */
+void hidStep(int dir) {
+  s_level = constrain(s_level + dir, 0, steps());
+  s_level_changed_ms = millis();
+  s_level_dirty = true;
+  s_muted_local = false;
+  if (canSendHid()) services::hid::sendMedia(dir > 0 ? Media::VolumeUp : Media::VolumeDown);
+}
 
+/** Absolute level wanted (percent): to the helper, else as volume keys. */
+void wantLevel(int pct) {
+  pct = constrain(pct, 0, 100);
+  if (host::active()) {
+    if (millis() - s_last_send_ms >= 40) {
+      host::sendVolume(pct);  // also the level shown until the helper answers
+      s_last_send_ms = millis();
+      s_target_level = -1;
+    } else {
+      s_target_level = pct;  // tick() sends it
+    }
+    return;
+  }
+  const int want = (pct * steps() + 50) / 100;
+  while (s_level < want) hidStep(+1);
+  while (s_level > want) hidStep(-1);
+}
+
+void toggleMute() {
+  if (host::active()) {
+    host::sendMute();
+  } else {
+    s_muted_local = !s_muted_local;
+    if (canSendHid()) services::hid::sendMedia(Media::Mute);
+  }
+}
+
+// ------------------------------------------------------------------ drawing helpers
 void keyRect(int i, int* x, int* y) {
-  *x = kMargin + (i % kCols) * (kKeyW + kGap);
-  *y = kAreaY + (i / kCols) * (kKeyH + kGap);
+  *x = kGridX + (i % kCols) * (kKeyW + kGap);
+  *y = kGridY + (i / kCols) * (kKeyH + kGap);
 }
 
 int keyAt(int x, int y) {
@@ -123,15 +206,65 @@ int keyAt(int x, int y) {
   return -1;
 }
 
-constexpr int kKnobCx = kKnobX + kKnobD / 2;
-constexpr int kKnobCy = kKnobY + kKnobD / 2;
+bool inRadar(int x, int y) {
+  return x >= kRadarX - D(10) && x < kRadarX + kRadarW + D(10) && y >= 0 && y < kRadarY + kRadarH + D(10);
+}
 
 bool inKnob(int x, int y) {
   const int dx = x - kKnobCx, dy = y - kKnobCy;
-  return dx * dx + dy * dy <= (kKnobR + S(10)) * (kKnobR + S(10));
+  return dx * dx + dy * dy <= (kKnobD / 2 + D(10)) * (kKnobD / 2 + D(10));
 }
 
-// --- Drawing -----------------------------------------------------------------------
+bool inCircle(int x, int y, int cx, int cy, int r) {
+  const int dx = x - cx, dy = y - cy;
+  return dx * dx + dy * dy <= r * r;
+}
+
+/** UTF-8 text cut to fit max_w with "..." (the fonts have no ellipsis glyph). */
+template <typename Gfx>
+void fitText(Gfx& s, const char* in, int max_w, char* out, size_t cap) {
+  strlcpy(out, in, cap);
+  if (s.textWidth(out) <= max_w) return;
+  size_t n = strlen(out);
+  while (n > 0) {
+    do {
+      --n;
+    } while (n > 0 && (static_cast<uint8_t>(out[n]) & 0xC0) == 0x80);
+    out[n] = '\0';
+    char tmp[176];
+    snprintf(tmp, sizeof(tmp), "%s...", out);
+    if (s.textWidth(tmp) <= max_w) {
+      strlcpy(out, tmp, cap);
+      return;
+    }
+  }
+}
+
+template <typename Gfx>
+void radarPill(Gfx& s, const paint::Canvas& c) {
+  paint::roundRect(c, kRadarX, kRadarY, kRadarW, kRadarH, kRadarH / 2, kWhite, 22, kWhite, 34);
+  const float cx = kRadarX + D(26), cy = kRadarY + kRadarH / 2.0f;
+  paint::arc(c, cx, cy, D(10), D(8), 0, 360, kWhite, 255);
+  paint::arc(c, cx, cy, D(5), D(3), 0, 360, kWhite, 255);
+  s.drawLine(cx, cy, cx + D(6), cy - D(6), col565(kWhite));
+  displayFontSetBitmap(s, &ui::font::SansBold8);
+  s.setTextDatum(textdatum_t::middle_left);
+  s.setTextColor(col565(kWhite));
+  s.drawString("RADAR", kRadarX + D(44), kRadarY + kRadarH / 2 + 1);
+}
+
+void pageDots(const paint::Canvas& c, bool music_active) {
+  const int cx = kW / 2;
+  const int wide = D(22), dot = D(7);
+  // Left dot = music, right dot = keys; the active one is a pill.
+  if (music_active) {
+    paint::roundRect(c, cx - D(4) - wide, kDotsY - dot / 2, wide, dot, dot / 2, kWhite, 255);
+    paint::circle(c, cx + D(4) + dot / 2.0f, kDotsY, dot / 2.0f, kWhite, 100);
+  } else {
+    paint::circle(c, cx - D(4) - dot / 2.0f, kDotsY, dot / 2.0f, kWhite, 100);
+    paint::roundRect(c, cx + D(4), kDotsY - dot / 2, wide, dot, dot / 2, kWhite, 255);
+  }
+}
 
 template <typename Gfx>
 void speakerIcon(Gfx& g, int cx, int cy, int s, uint16_t c) {
@@ -140,183 +273,459 @@ void speakerIcon(Gfx& g, int cx, int cy, int s, uint16_t c) {
   g.fillRect(cx - s / 3, cy - s / 2, s * 2 / 3 + 1, s, c);
 }
 
-/** Built-in pictures for media keys without one of their own. */
-void mediaIcon(Media m, int cx, int cy, uint16_t c) {
-  const int s = S(14);
+template <typename Gfx>
+void mediaIcon(Gfx& g, Media m, int cx, int cy, uint16_t c) {
+  const int s = D(13);
   switch (m) {
     case Media::Previous:
-      tft.fillRect(cx - s, cy - s, S(3), 2 * s, c);
-      tft.fillTriangle(cx - s + S(3), cy, cx, cy - s, cx, cy + s, c);
-      tft.fillTriangle(cx, cy, cx + s, cy - s, cx + s, cy + s, c);
+      g.fillRoundRect(cx - s, cy - s, D(4), 2 * s, D(1), c);
+      g.fillTriangle(cx - s + D(3), cy, cx + s, cy - s, cx + s, cy + s, c);
       break;
     case Media::Next:
-      tft.fillTriangle(cx - s, cy - s, cx - s, cy + s, cx, cy, c);
-      tft.fillTriangle(cx, cy - s, cx, cy + s, cx + s - S(3), cy, c);
-      tft.fillRect(cx + s - S(3), cy - s, S(3), 2 * s, c);
+      g.fillTriangle(cx - s, cy - s, cx - s, cy + s, cx + s - D(3), cy, c);
+      g.fillRoundRect(cx + s - D(4), cy - s, D(4), 2 * s, D(1), c);
       break;
     case Media::PlayPause:
-      tft.fillTriangle(cx - s, cy - s, cx - s, cy + s, cx + S(2), cy, c);
-      tft.fillRect(cx + S(5), cy - s, S(4), 2 * s, c);
-      tft.fillRect(cx + S(12), cy - s, S(4), 2 * s, c);
+      g.fillTriangle(cx - s, cy - s, cx - s, cy + s, cx + D(3), cy, c);
+      g.fillRoundRect(cx + D(6), cy - s, D(4), 2 * s, D(1), c);
+      g.fillRoundRect(cx + D(13), cy - s, D(4), 2 * s, D(1), c);
       break;
     case Media::VolumeUp:
     case Media::VolumeDown:
     case Media::Mute: {
-      speakerIcon(tft, cx - S(6), cy, s, c);
-      const int mx = cx + S(12);
+      speakerIcon(g, cx - D(6), cy, s, c);
+      const int mx = cx + D(12);
       if (m == Media::Mute) {
         for (int t = -1; t <= 1; ++t) {
-          tft.drawLine(mx - S(5) + t, cy - S(5), mx + S(5) + t, cy + S(5), c);
-          tft.drawLine(mx - S(5) + t, cy + S(5), mx + S(5) + t, cy - S(5), c);
+          g.drawLine(mx - D(5) + t, cy - D(5), mx + D(5) + t, cy + D(5), c);
+          g.drawLine(mx - D(5) + t, cy + D(5), mx + D(5) + t, cy - D(5), c);
         }
       } else {
-        tft.fillRect(mx - S(6), cy - S(1), S(12), S(3), c);
-        if (m == Media::VolumeUp) tft.fillRect(mx - S(1), cy - S(6), S(3), S(12), c);
+        g.fillRect(mx - D(6), cy - D(1), D(12), D(3), c);
+        if (m == Media::VolumeUp) g.fillRect(mx - D(1), cy - D(6), D(3), D(12), c);
       }
       break;
     }
   }
 }
 
-void drawKey(int i, bool down) {
+/** A stored picture onto a sprite: magenta = see-through. */
+void blitIcon(LGFX_Sprite& s, const uint16_t* pic, int px, int x, int y) {
+  auto* dst = static_cast<uint16_t*>(s.getBuffer());
+  for (int r = 0; r < px; ++r) {
+    const int yy = y + r;
+    if (yy < 0 || yy >= kH) continue;
+    for (int q = 0; q < px; ++q) {
+      const uint16_t v = pic[r * px + q];
+      const int xx = x + q;
+      if (v == store::kTransparent || xx < 0 || xx >= kW) continue;
+      dst[yy * kW + xx] = static_cast<uint16_t>((v >> 8) | (v << 8));
+    }
+  }
+}
+
+void drawKeyContent(LGFX_Sprite& s, int i) {
   int x, y;
   keyRect(i, &x, &y);
   const store::Slot& k = store::slot(i);
-  const uint16_t fill = down ? cKeyDown() : cKey();
-  tft.fillRoundRect(x, y, kKeyW, kKeyH, S(10), fill);
-  tft.drawRoundRect(x, y, kKeyW, kKeyH, S(10), down ? 0xFFFF : cEdge());
-  if (k.kind == store::Kind::Empty && !k.label[0] && !store::icon(i)) return;
   const int cx = x + kKeyW / 2;
   const uint16_t* pic = store::icon(i);
   const int px = store::iconPx();
   const bool has_label = k.label[0] != '\0';
-  tft.setTextColor(0xFFFF, fill);
-  tft.setTextDatum(textdatum_t::middle_center);
-  if (pic != nullptr && s_icon_buf != nullptr) {
-    // Picture: magenta pixels take the key colour, then one push.
-    for (int p = 0; p < px * px; ++p) s_icon_buf[p] = pic[p] == store::kTransparent ? fill : pic[p];
-    const int iy = has_label ? y + S(5) : y + (kKeyH - px) / 2;
-    tft.pushImage(cx - px / 2, iy, px, px, reinterpret_cast<const lgfx::rgb565_t*>(s_icon_buf));
+  char t[48];
+  s.setTextDatum(textdatum_t::middle_center);
+  s.setTextColor(col565({217, 220, 239}));
+  if (pic != nullptr) {
+    const int iy = has_label ? y + (kKeyH - px - D(22)) / 2 : y + (kKeyH - px) / 2;
+    blitIcon(s, pic, px, cx - px / 2, iy);
     if (has_label) {
-      displayFontSetBitmap(tft, &ui::font::Sans8);
-      tft.drawString(k.label, cx, y + kKeyH - S(10));
+      displayFontSetBitmap(s, &ui::font::Sans8);
+      fitText(s, k.label, kKeyW - D(10), t, sizeof(t));
+      s.drawString(t, cx, y + kKeyH - D(16));
     }
   } else if (k.kind == store::Kind::Media) {
-    mediaIcon(static_cast<Media>(k.code), cx, y + kKeyH / 2 - S(9), down ? 0xFFFF : cCyan());
-    displayFontSetBitmap(tft, &ui::font::Sans8);
-    tft.drawString(k.label, cx, y + kKeyH - S(12));
-  } else {
-    // Text only: the largest font that fits the key.
-    const lgfx::GFXfont* fonts[] = {&ui::font::SansBold18, &ui::font::SansBold12, &ui::font::SansBold9,
-                                    &ui::font::Sans8};
+    mediaIcon(s, static_cast<Media>(k.code), cx, y + kKeyH / 2 - D(10), col565({233, 234, 255}));
+    displayFontSetBitmap(s, &ui::font::Sans8);
+    fitText(s, k.label, kKeyW - D(10), t, sizeof(t));
+    s.drawString(t, cx, y + kKeyH - D(20));
+  } else if (has_label) {
+    const lgfx::GFXfont* fonts[] = {&ui::font::SansBold12, &ui::font::SansBold9, &ui::font::Sans8};
     for (const auto* f : fonts) {
-      displayFontSetBitmap(tft, f);
-      if (tft.textWidth(k.label) <= kKeyW - S(10)) break;
+      displayFontSetBitmap(s, f);
+      if (s.textWidth(k.label) <= kKeyW - D(12)) break;
     }
-    tft.drawString(k.label, cx, y + kKeyH / 2);
+    fitText(s, k.label, kKeyW - D(10), t, sizeof(t));
+    s.setTextColor(col565(kText));
+    s.drawString(t, cx, y + kKeyH / 2);
   }
-  tft.setTextDatum(textdatum_t::top_left);
+  s.setTextDatum(textdatum_t::top_left);
 }
 
-void drawKnob() {
-  if (!s_knob_ok) return;
-  LGFX_Sprite& g = s_knob;
-  const int c = kKnobD / 2, R = kKnobR;
-  g.fillScreen(cBg());
-  // Ring: the level as an arc from the top, clockwise; a full ring = full volume.
-  const int steps = services::deck::volumeSteps();
-  const int level = s_level < 0 ? 0 : (s_level > steps ? steps : s_level);
-  const int rw = S(14);  // ring width
-  g.fillCircle(c, c, R, tft.color565(28, 48, 66));
-  g.fillCircle(c, c, R - rw, tft.color565(14, 24, 36));
-  const uint16_t arc = s_muted ? cDim() : cCyan();
-  const float end_deg = -90.0f + 360.0f * level / steps;
-  if (level >= steps) {
-    g.fillCircle(c, c, R - S(1), arc);
-    g.fillCircle(c, c, R - rw + S(1), tft.color565(14, 24, 36));
-  } else if (level > 0) {
-    g.fillArc(c, c, R - S(1), R - rw + S(1), -90.0f, end_deg, arc);
+void buildRing() {
+  if (s_ring != nullptr) return;
+  std::vector<RingPx> v;
+  const float ro = kRingR, ri = kRingR - kRingW;
+  for (int y = kKnobY - 1; y <= kKnobY + kKnobD + 1; ++y) {
+    for (int x = kKnobX - 1; x <= kKnobX + kKnobD + 1; ++x) {
+      const float dx = x + 0.5f - kKnobCx, dy = y + 0.5f - kKnobCy;
+      const float d = sqrtf(dx * dx + dy * dy);
+      const float cov =
+          std::min(std::max(ro - d + 0.5f, 0.0f), 1.0f) * std::min(std::max(d - ri + 0.5f, 0.0f), 1.0f);
+      if (cov <= 0.0f) continue;
+      float a = atan2f(dx, -dy) * 180.0f / static_cast<float>(M_PI);
+      if (a < 0) a += 360.0f;
+      v.push_back({static_cast<uint16_t>(x), static_cast<uint16_t>(y), static_cast<uint16_t>(a * 100.0f),
+                   static_cast<uint8_t>(cov * 255.0f + 0.5f), 0});
+    }
   }
-  // Knob end: a dot on the ring at the current level (also at zero, at the top).
-  const float a = end_deg * static_cast<float>(M_PI) / 180.0f;
-  const int dr = R - rw / 2;
-  g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), rw / 2 + S(2), 0xFFFF);
-  g.fillCircle(c + lroundf(cosf(a) * dr), c + lroundf(sinf(a) * dr), rw / 2 - S(1), arc);
-  // Centre: a large speaker, crossed out while muted.
-  const uint16_t sc = s_muted ? cRed() : 0xFFFF;
-  speakerIcon(g, c - S(10), c, S(22), sc);
-  const int mx = c + S(16), my = c;
-  if (s_muted) {
+  s_ring = static_cast<RingPx*>(heap_caps_malloc(v.size() * sizeof(RingPx), MALLOC_CAP_SPIRAM));
+  if (s_ring == nullptr) return;
+  memcpy(s_ring, v.data(), v.size() * sizeof(RingPx));
+  s_ring_n = static_cast<int>(v.size());
+}
+
+/** Knob face and the empty ring track (part of the keys base). */
+void drawKnobBase(LGFX_Sprite& s) {
+  const auto c = cv(s);
+  paint::arc(c, kKnobCx, kKnobCy, kRingR, kRingR - kRingW, 0, 360, kWhite, 26);
+  // Face: a soft radial shading, lighter towards the upper left.
+  const float r = kRingR - kRingW, lx = kKnobCx - r * 0.2f, ly = kKnobCy - r * 0.36f;
+  uint16_t* px = c.px;
+  for (int y = static_cast<int>(kKnobCy - r - 1); y <= kKnobCy + r + 1; ++y) {
+    if (y < 0 || y >= kH) continue;
+    for (int x = static_cast<int>(kKnobCx - r - 1); x <= kKnobCx + r + 1; ++x) {
+      const float dx = x + 0.5f - kKnobCx, dy = y + 0.5f - kKnobCy;
+      const float cov = std::min(std::max(r - sqrtf(dx * dx + dy * dy) + 0.5f, 0.0f), 1.0f);
+      if (cov <= 0.0f) continue;
+      const float ex = x - lx, ey = y - ly;
+      const float t = std::min(sqrtf(ex * ex + ey * ey) / (r * 1.35f), 1.0f);
+      const float u = t * t * (3.0f - 2.0f * t);
+      const float cr = kFaceA.r + (kFaceB.r - kFaceA.r) * u, cg = kFaceA.g + (kFaceB.g - kFaceA.g) * u,
+                  cb = kFaceA.b + (kFaceB.b - kFaceA.b) * u;
+      int r0, g0, b0;
+      paint::unpack(px[y * kW + x], &r0, &g0, &b0);
+      px[y * kW + x] = paint::pack(static_cast<int>(r0 + (cr - r0) * cov + 0.5f),
+                                   static_cast<int>(g0 + (cg - g0) * cov + 0.5f),
+                                   static_cast<int>(b0 + (cb - b0) * cov + 0.5f), x, y);
+    }
+  }
+}
+
+/** The moving part of the knob: filled arc, its end dot, the speaker. */
+template <typename Gfx>
+void drawKnobLevel(Gfx& s, const paint::Canvas& c, int pct, bool muted) {
+  uint16_t* px = c.px;
+  const int lvl = constrain(pct, 0, 100) * 360;  // 0.01 degree
+  const float edge = 57.3f / kRingR * 100.0f;    // one pixel of arc, in 0.01 degree
+  const Rgb dim{150, 156, 190};
+  for (int i = 0; i < s_ring_n; ++i) {
+    const RingPx& p = s_ring[i];
+    if (p.ang > lvl + edge) continue;
+    float cov = p.cov / 255.0f;
+    if (p.ang > lvl - edge) cov *= std::min(std::max((lvl - p.ang) / edge + 0.5f, 0.0f), 1.0f);
+    if (cov <= 0.0f) continue;
+    const Rgb col =
+        muted ? dim : paint::ramp(kPeach, kPink, kLavender, lvl > 0 ? static_cast<float>(p.ang) / lvl : 0.0f);
+    uint16_t& d = px[p.y * kW + p.x];
+    int r, g, b;
+    paint::unpack(d, &r, &g, &b);
+    d = paint::pack(static_cast<int>(r + (col.r - r) * cov), static_cast<int>(g + (col.g - g) * cov),
+                    static_cast<int>(b + (col.b - b) * cov), p.x, p.y);
+  }
+  const float a = (lvl / 100.0f) * static_cast<float>(M_PI) / 180.0f;
+  const float mr = kRingR - kRingW / 2.0f;
+  const float ex = kKnobCx + sinf(a) * mr, ey = kKnobCy - cosf(a) * mr;
+  paint::circle(c, ex, ey, D(15), muted ? dim : kLavender, 110);
+  paint::circle(c, ex, ey, D(11), kWhite, 255);
+  // Speaker in the middle, waves or a cross.
+  const uint16_t sc = col565(muted ? kMutedRed : kText);
+  speakerIcon(s, kKnobCx - D(12), kKnobCy, D(22), sc);
+  const int mx = kKnobCx + D(16);
+  if (muted) {
     for (int t = -2; t <= 2; ++t) {
-      g.drawLine(mx - S(9) + t, my - S(9), mx + S(9) + t, my + S(9), sc);
-      g.drawLine(mx - S(9) + t, my + S(9), mx + S(9) + t, my - S(9), sc);
+      s.drawLine(mx - D(9) + t, kKnobCy - D(9), mx + D(9) + t, kKnobCy + D(9), sc);
+      s.drawLine(mx - D(9) + t, kKnobCy + D(9), mx + D(9) + t, kKnobCy - D(9), sc);
     }
   } else {
-    g.drawArc(mx - S(8), my, S(10), S(7), -45, 45, sc);
-    g.drawArc(mx - S(8), my, S(19), S(16), -45, 45, sc);
+    paint::arc(c, mx - D(8), kKnobCy, D(11), D(8), 50, 130, kText, 255);
+    paint::arc(c, mx - D(8), kKnobCy, D(21), D(18), 50, 130, kText, 255);
   }
-  g.pushSprite(kKnobX, kKnobY);
 }
 
-void drawUsbStatus() {
-  const bool kb = console::keyboardMode();
-  const bool ok = kb && services::hid::ready();
-  s_usb_shown = ok ? 1 : (kb ? 0 : 2);
-  const int w = S(230);
-  const int x = kW - S(8) - w;
-  tft.fillRect(x, 0, w, kTopH, cBg());
-  tft.fillCircle(x + w - S(160), kTopH / 2, S(5),
-                 ok ? tft.color565(80, 220, 120) : (kb ? cRed() : tft.color565(240, 180, 60)));
-  displayFontSetBitmap(tft, &ui::font::Sans8);
-  tft.setTextDatum(textdatum_t::middle_left);
-  tft.setTextColor(ok ? cDim() : tft.color565(230, 150, 130), cBg());
-  tft.drawString(ok ? "USB bağlı" : (kb ? "USB bağlı değil" : "Kurulum modu: tuşlar kapalı"),
-                 x + w - S(150), kTopH / 2 + 1);
-  tft.setTextDatum(textdatum_t::top_left);
+// ------------------------------------------------------------------ pages
+void buildKeysBase() {
+  auto& s = s_keys_base;
+  const auto c = cv(s);
+  paint::background(c);
+  displayFontSetBitmap(s, &ui::font::SansBold8);
+  s.setTextDatum(textdatum_t::middle_left);
+  s.setTextColor(col565({230, 232, 246}));
+  s.drawString("KONTROL", D(20), kDotsY + 1);
+  if (!console::keyboardMode()) {
+    displayFontSetBitmap(s, &ui::font::Sans8);
+    s.setTextColor(col565({245, 190, 120}));
+    s.drawString("Kurulum modu: tuşlar kapalı", D(130), kDotsY + 1);
+  }
+  pageDots(c, false);
+  radarPill(s, c);
+  for (int i = 0; i < store::kSlots; ++i) {
+    int x, y;
+    keyRect(i, &x, &y);
+    const store::Slot& k = store::slot(i);
+    if (k.kind == store::Kind::Empty && !k.label[0] && !store::icon(i)) {
+      paint::roundRect(c, x, y, kKeyW, kKeyH, D(18), kWhite, 0, kWhite, 40);
+      continue;
+    }
+    paint::roundRect(c, x, y, kKeyW, kKeyH, D(18), kWhite, 15, kWhite, 26);
+    drawKeyContent(s, i);
+  }
+  drawKnobBase(s);
+  displayFontSetBitmap(s, &ui::font::Sans8);
+  s.setTextDatum(textdatum_t::middle_left);
+  s.setTextColor(col565({154, 161, 189}));
+  s.drawString("Sola kaydır: müzik", D(20), kH - D(16));
+  s.setTextDatum(textdatum_t::top_left);
+  s_keys_gen = store::generation();
+  s_keys_dirty = false;
 }
 
-void drawBackButton() {
-  const uint16_t panel = tft.color565(12, 26, 38);
-  tft.fillRoundRect(ui::kSwitchX, ui::kSwitchY, ui::kSwitchW, ui::kSwitchH, S(8), panel);
-  tft.drawRoundRect(ui::kSwitchX, ui::kSwitchY, ui::kSwitchW, ui::kSwitchH, S(8), cEdge());
-  const int cx = ui::kSwitchX + S(21), cy = ui::kSwitchY + ui::kSwitchH / 2;
-  tft.drawCircle(cx, cy, S(12), cCyan());
-  tft.drawCircle(cx, cy, S(6), cCyan());
-  tft.drawLine(cx, cy, cx + S(9), cy - S(8), cCyan());
-  displayFontSetBitmap(tft, &ui::font::SansBold8);
-  tft.setTextDatum(textdatum_t::middle_center);
-  tft.setTextColor(0xFFFF, panel);
-  tft.drawString("RADAR", (ui::kSwitchX + S(38) + ui::kSwitchX + ui::kSwitchW) / 2, cy + 1);
-  tft.setTextDatum(textdatum_t::top_left);
+void buildMusicBase() {
+  auto& s = s_music_base;
+  const auto c = cv(s);
+  size_t len = 0;
+  const uint8_t* jpg = host::cover(&len);
+  bool have_cover = false;
+  // Shades: top for the pills, bottom for the text and controls; applied before packing.
+  paint::Shade shades[2] = {{0, D(90), kInk, 140, 0}, {kH - D(300), kH, kInk, 0, 150}};
+  if (jpg != nullptr && len > 0 && host::now().valid) {
+    // Decoded at 24 bits, shaded, then dithered down: no steps in the dark fade.
+    LGFX_Sprite full(&tft);
+    full.setPsram(true);
+    full.setColorDepth(24);
+    if (full.createSprite(kW, kH) != nullptr) {
+      full.fillScreen(0);
+      have_cover = full.drawJpg(jpg, len, 0, 0, kW, kH);
+      if (have_cover) {
+        shades[1].a1 = 235;
+        for (int y = 0; y < kH; ++y) {
+          for (int x = 0; x < kW; ++x) {
+            const auto p = full.readPixelRGB(x, y);
+            c.px[y * kW + x] = paint::packShaded(p.R8(), p.G8(), p.B8(), x, y, shades, 2);
+          }
+        }
+      }
+      full.deleteSprite();
+    } else {
+      s.fillScreen(0);  // not enough memory for the 24-bit pass: straight to 16 bits
+      have_cover = s.drawJpg(jpg, len, 0, 0, kW, kH);
+      if (have_cover) {
+        paint::shade(c, 0, D(90), kInk, 140, 0);
+        paint::shade(c, kH - D(300), kH, kInk, 0, 235);
+      }
+    }
+  }
+  if (!have_cover) paint::background(c, shades, 2);
+  s_cover_gen = host::coverGeneration();
+  s_music_dirty = false;
 }
 
-void drawAll() {
-  tft.fillScreen(cBg());
-  displayFontSetBitmap(tft, &ui::font::SansBold9);
-  tft.setTextDatum(textdatum_t::middle_left);
-  tft.setTextColor(0xFFFF, cBg());
-  tft.drawString("KONTROL", S(10), kTopH / 2 + 1);
-  drawUsbStatus();
-  for (int i = 0; i < store::kSlots; ++i) drawKey(i, false);
-  drawKnob();
-  displayFontSetBitmap(tft, &ui::font::Sans8);
-  tft.setTextDatum(textdatum_t::middle_left);
-  tft.setTextColor(cDim(), cBg());
-  tft.drawString("Tuşları kurulum sayfasındaki Kontrol tuşları bölümünden değiştirebilirsin", S(10),
-                 ui::kSwitchY + ui::kSwitchH / 2);
-  drawBackButton();
-  tft.setTextDatum(textdatum_t::top_left);
-  s_gen_shown = store::generation();
+void fmtTime(char* out, size_t cap, uint32_t s) {
+  snprintf(out, cap, "%lu:%02lu", static_cast<unsigned long>(s / 60), static_cast<unsigned long>(s % 60));
 }
 
-// --- Actions -------------------------------------------------------------------------
+template <typename Gfx>
+void drawMusicFront(Gfx& s, const paint::Canvas& c) {
+  const host::NowPlaying& n = host::now();
+  // Top: "now playing" pill, dots, RADAR.
+  if (n.valid) {
+    char label[64];
+    snprintf(label, sizeof(label), n.app[0] ? "%s · %s" : "%s", n.playing ? "ŞİMDİ ÇALIYOR" : "DURAKLATILDI",
+             n.app);
+    displayFontSetBitmap(s, &ui::font::Sans8);
+    const int tw = s.textWidth(label);
+    paint::roundRect(c, D(20), D(18), tw + D(40), D(32), D(16), kWhite, 30, kWhite, 40);
+    paint::circle(c, D(37), D(34), D(4), n.playing ? kPeach : Rgb{180, 184, 210}, 255);
+    s.setTextDatum(textdatum_t::middle_left);
+    s.setTextColor(col565(kWhite));
+    s.drawString(label, D(50), D(34) + 1);
+  }
+  pageDots(c, true);
+  radarPill(s, c);
 
-bool canSend() { return console::keyboardMode() && services::hid::ready(); }
+  if (!n.valid) {
+    displayFontSetBitmap(s, &ui::font::SansBold12);
+    s.setTextDatum(textdatum_t::middle_center);
+    s.setTextColor(col565(kText));
+    s.drawString("Şu an müzik çalmıyor", kW / 2, kH / 2 - D(20));
+    displayFontSetBitmap(s, &ui::font::Sans8);
+    s.setTextColor(col565({174, 180, 204}));
+    s.drawString(host::active() ? "Bilgisayarda müzik başlayınca burada görünür"
+                                : "Şarkı bilgisi Windows yardımcı programıyla gelir",
+                 kW / 2, kH / 2 + D(16));
+    s.setTextDatum(textdatum_t::middle_right);
+    s.drawString("Sağa kaydır: tuşlar", kW - kMusicPad, kCtrlY);
+    s.setTextDatum(textdatum_t::top_left);
+    return;
+  }
 
+  const int tx = kMusicPad, tw = kW - 2 * kMusicPad;
+  char buf[176];
+  displayFontSetBitmap(s, &ui::font::SansBold18);
+  s.setTextDatum(textdatum_t::top_left);
+  s.setTextColor(col565(kText));
+  fitText(s, n.title[0] ? n.title : "Bilinmeyen parça", tw, buf, sizeof(buf));
+  s.drawString(buf, tx, kTitleY);
+  displayFontSetBitmap(s, &ui::font::Sans12);
+  s.setTextColor(col565({214, 217, 236}));
+  char who[140];
+  if (n.artist[0] && n.album[0]) {
+    snprintf(who, sizeof(who), "%s · %s", n.artist, n.album);
+  } else {
+    strlcpy(who, n.artist[0] ? n.artist : n.album, sizeof(who));
+  }
+  fitText(s, who, tw, buf, sizeof(buf));
+  s.drawString(buf, tx, kArtistY);
+
+  // Progress: times either side of a gradient bar.
+  const uint32_t pos = host::positionNow();
+  s_shown_pos = pos;
+  char t0[12], t1[12];
+  fmtTime(t0, sizeof(t0), pos);
+  fmtTime(t1, sizeof(t1), n.duration_s);
+  displayFontSetBitmap(s, &ui::font::Sans8);
+  s.setTextColor(col565({195, 200, 222}));
+  s.setTextDatum(textdatum_t::middle_left);
+  s.drawString(t0, tx, kBarY + kBarH / 2 + 1);
+  s.setTextDatum(textdatum_t::middle_right);
+  if (n.duration_s) s.drawString(t1, tx + tw, kBarY + kBarH / 2 + 1);
+  const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
+  paint::roundRect(c, bx, kBarY, bw, kBarH, kBarH / 2, kWhite, 46);
+  const float f = n.duration_s ? std::min(1.0f, static_cast<float>(pos) / n.duration_s) : 0.0f;
+  paint::gradientBar(c, bx, kBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
+  paint::circle(c, bx + bw * f, kBarY + kBarH / 2.0f, D(7), kWhite, 255);
+
+  // Controls.
+  paint::circle(c, kPrevCx, kCtrlY, kSmallBtnR, kWhite, 26);
+  paint::circle(c, kNextCx, kCtrlY, kSmallBtnR, kWhite, 26);
+  paint::circle(c, kPlayCx, kCtrlY, kPlayR, kWhite, 255);
+  mediaIcon(s, Media::Previous, kPrevCx, kCtrlY, col565(kWhite));
+  mediaIcon(s, Media::Next, kNextCx, kCtrlY, col565(kWhite));
+  const uint16_t ink = col565({21, 24, 58});
+  if (n.playing) {
+    s.fillRoundRect(kPlayCx - D(10), kCtrlY - D(12), D(7), D(24), D(2), ink);
+    s.fillRoundRect(kPlayCx + D(3), kCtrlY - D(12), D(7), D(24), D(2), ink);
+  } else {
+    s.fillTriangle(kPlayCx - D(8), kCtrlY - D(13), kPlayCx - D(8), kCtrlY + D(13), kPlayCx + D(13), kCtrlY, ink);
+  }
+
+  // Volume bar, left of the controls.
+  const bool muted = mutedNow();
+  const int pct = levelPercent();
+  speakerIcon(s, kMusicPad + D(12), kCtrlY, D(10), col565(muted ? kMutedRed : kWhite));
+  paint::roundRect(c, kVolX, kCtrlY - kVolH / 2, kVolW, kVolH, kVolH / 2, kWhite, 46);
+  if (!muted && pct > 0) {
+    paint::gradientBar(c, kVolX, kCtrlY - kVolH / 2, std::max(1, kVolW * pct / 100), kVolH, kPink, kPink,
+                       kLavender);
+  }
+  s_shown_level = pct;
+  s_shown_muted = muted;
+  displayFontSetBitmap(s, &ui::font::Sans8);
+  s.setTextColor(col565({174, 180, 204}));
+  s.setTextDatum(textdatum_t::middle_right);
+  s.drawString("Sağa kaydır: tuşlar", kW - kMusicPad, kCtrlY);
+  s.setTextDatum(textdatum_t::top_left);
+}
+
+void ensureBuffers() {
+  if (s_ready) return;
+  for (LGFX_Sprite* s : {&s_keys_base, &s_music_base}) {
+    if (s->getBuffer() != nullptr) continue;
+    s->setPsram(true);
+    s->setColorDepth(16);
+    if (s->createSprite(kW, kH) == nullptr) {
+      Console.println("deck: not enough PSRAM for the screens");
+      return;
+    }
+  }
+  buildRing();
+  s_ready = true;
+}
+
+/** The moving parts on top of a page's base, into canvas c (drawn on with g). */
+template <typename Gfx>
+void composeInto(Gfx& g, const paint::Canvas& c) {
+  if (s_page == Page::Keys) {
+    memcpy(c.px, s_keys_base.getBuffer(), kW * kH * 2);
+    if (s_pressed >= 0) {
+      int x, y;
+      keyRect(s_pressed, &x, &y);
+      paint::roundRect(c, x, y, kKeyW, kKeyH, D(18), kLavender, 60, {214, 202, 255}, 150);
+    }
+    const bool muted = mutedNow();
+    const int pct = levelPercent();
+    drawKnobLevel(g, c, pct, muted);
+    s_shown_level = pct;
+    s_shown_muted = muted;
+  } else {
+    memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
+    drawMusicFront(g, c);
+  }
+}
+
+/** Put the current page together and show it. */
+void present() {
+  if (!s_ready) return;
+  if (s_page == Page::Keys) {
+    if (s_keys_dirty || s_keys_gen != store::generation()) buildKeysBase();
+  } else if (s_music_dirty || s_cover_gen != host::coverGeneration()) {
+    buildMusicBase();
+  }
+  if (tft.getRotation() != 2) {
+    // Straight into the hidden frame buffer (same pixel format), then shown.
+    tft.beginHiddenFrame();
+    composeInto(tft, paint::Canvas{tft.hiddenBuffer(), kW, kH});
+    tft.presentHiddenFrame();
+  } else {
+    // Screen mounted upside down: put together upright, copy turned.
+    if (s_canvas.getBuffer() == nullptr) {
+      s_canvas.setPsram(true);
+      s_canvas.setColorDepth(16);
+      if (s_canvas.createSprite(kW, kH) == nullptr) return;
+    }
+    composeInto(s_canvas, cv(s_canvas));
+    tft.beginHiddenFrame();
+    uint16_t* fb = tft.hiddenBuffer();
+    const auto* src = static_cast<const uint16_t*>(s_canvas.getBuffer());
+    for (int i = 0, n = kW * kH; i < n; ++i) fb[n - 1 - i] = src[i];
+    tft.presentHiddenFrame();
+  }
+  s_dirty = false;
+  s_last_present_ms = millis();
+}
+
+/** Show soon, at most ~30 frames a second (a knob turn can ask for many). */
+void presentSoon() {
+  s_dirty = true;
+  if (millis() - s_last_present_ms >= 33) present();
+}
+
+void setPage(Page p) {
+  if (p == s_page) return;
+  s_page = p;
+  s_pressed = -1;
+  s_flash = false;
+  present();
+}
+
+// ------------------------------------------------------------------ actions
 void fireKey(int i) {
   const store::Slot& k = store::slot(i);
   Console.printf("Deck: %s\n", k.label);
-  if (!canSend()) return;
+  if (k.kind == store::Kind::Host) {
+    host::sendKey(i);
+    return;
+  }
+  if (!canSendHid()) return;
   if (k.kind == store::Kind::Media) {
     services::hid::sendMedia(static_cast<Media>(k.code));
   } else if (k.kind == store::Kind::Key && k.code != 0) {
@@ -324,16 +733,12 @@ void fireKey(int i) {
   }
 }
 
-void volumeStep(int dir) {
-  s_level = constrain(s_level + dir, 0, services::deck::volumeSteps());
-  s_level_changed_ms = millis();
-  s_level_dirty = true;
-  s_muted = false;  // Windows and macOS unmute on a volume key
-  if (canSend()) services::hid::sendMedia(dir > 0 ? Media::VolumeUp : Media::VolumeDown);
+void media(Media m) {
+  if (canSendHid()) services::hid::sendMedia(m);
 }
 
 float angleAt(int x, int y) {
-  return atan2f(static_cast<float>(y - kKnobCy), static_cast<float>(x - kKnobCx)) * 180.0f /
+  return atan2f(static_cast<float>(x - kKnobCx), static_cast<float>(kKnobCy - y)) * 180.0f /
          static_cast<float>(M_PI);
 }
 
@@ -341,38 +746,66 @@ float angleAt(int x, int y) {
 
 void enter() {
   if (s_level < 0) loadLevel();
+  ensureBuffers();
   s_pressed = -1;
   s_flash = false;
   s_down = false;
   s_target = Target::None;
-  if (!s_knob_ok) {
-    s_knob.setPsram(true);
-    s_knob.setColorDepth(16);
-    s_knob_ok = s_knob.createSprite(kKnobD, kKnobD) != nullptr;
+  s_keys_dirty = true;  // USB mode or keys may have changed meanwhile
+  const auto& n = host::now();
+  s_page = (n.valid && n.playing) ? Page::Music : Page::Keys;
+  s_was_playing = n.valid && n.playing;
+  s_last_id = n.id;
+  s_now_gen = host::nowGeneration();
+  if (!s_ready) {
+    tft.fillScreen(TFT_BLACK);
+    return;
   }
-  if (s_icon_buf == nullptr) {
-    const int px = store::iconPx();
-    s_icon_buf = static_cast<uint16_t*>(heap_caps_malloc(px * px * 2, MALLOC_CAP_SPIRAM));
-  }
-  tft.beginHiddenFrame();
-  drawAll();
-  tft.presentHiddenFrame();
+  present();
 }
 
 bool tick() {
-  if (s_gen_shown != store::generation()) {
-    enter();
-    return true;
-  }
+  if (!s_ready) return true;
   const unsigned long now = millis();
-  if (s_flash && s_pressed >= 0 && now - s_pressed_ms >= kPressFlashMs) {
-    drawKey(s_pressed, false);
+  if (s_flash && s_pressed >= 0 && now - s_pressed_ms >= 140) {
     s_pressed = -1;
     s_flash = false;
+    s_dirty = true;
   }
-  if (s_level_dirty && now - s_level_changed_ms >= kSaveLevelMs) saveLevel();
-  const int usb = console::keyboardMode() ? (services::hid::ready() ? 1 : 0) : 2;
-  if (usb != s_usb_shown) drawUsbStatus();
+  if (s_level_dirty && now - s_level_changed_ms >= 3000) saveLevel();
+  if (s_target_level >= 0 && host::active() && now - s_last_send_ms >= 40) {
+    host::sendVolume(s_target_level);
+    s_last_send_ms = now;
+    s_target_level = -1;
+  }
+
+  // What is playing: to the music page when music starts, back to the keys after a stop.
+  const auto& n = host::now();
+  if (s_now_gen != host::nowGeneration()) {
+    s_now_gen = host::nowGeneration();
+    const bool playing = n.valid && n.playing;
+    if (playing && (!s_was_playing || n.id != s_last_id) && s_page == Page::Keys && !s_down) {
+      s_page = Page::Music;
+    }
+    if (!playing && s_was_playing) s_stopped_ms = now;
+    if (playing) s_stopped_ms = 0;
+    s_was_playing = playing;
+    s_last_id = n.id;
+    s_dirty = true;
+  }
+  if (s_page == Page::Music && !(n.valid && n.playing) && s_stopped_ms != 0 && n.back_s >= 0 &&
+      now - s_stopped_ms >= static_cast<unsigned long>(n.back_s) * 1000UL && !s_down) {
+    s_stopped_ms = 0;
+    s_page = Page::Keys;
+    s_dirty = true;
+  }
+  if (s_page == Page::Music) {
+    if (s_cover_gen != host::coverGeneration()) s_dirty = true;
+    if (n.valid && host::positionNow() != s_shown_pos) s_dirty = true;
+  }
+  if (store::generation() != s_keys_gen && s_page == Page::Keys) s_dirty = true;
+  if (levelPercent() != s_shown_level || mutedNow() != s_shown_muted) s_dirty = true;
+  if (s_dirty) present();
   return true;
 }
 
@@ -387,31 +820,56 @@ Touch touch(int fingers, int x, int y) {
       s_down_y = y;
       s_down_ms = now;
       s_max_move = 0;
-      if (s_flash && s_pressed >= 0) {  // a quick second press: clear the old highlight
-        drawKey(s_pressed, false);
-        s_pressed = -1;
-        s_flash = false;
-      }
-      if (ui::switchButtonHit(x, y)) {
+      s_key = -1;
+      if (inRadar(x, y)) {
         s_target = Target::Back;
-      } else if (inKnob(x, y)) {
-        s_target = Target::Knob;
-        s_last_deg = angleAt(x, y);
-        s_accum_deg = s_total_deg = 0.0f;
-      } else if ((s_key = keyAt(x, y)) >= 0) {
-        s_target = Target::Key;
-        drawKey(s_key, true);
-        s_pressed = s_key;
+      } else if (s_page == Page::Keys) {
+        if (inKnob(x, y)) {
+          s_target = Target::Knob;
+          s_last_deg = angleAt(x, y);
+          s_accum_deg = s_total_deg = 0;
+        } else if ((s_key = keyAt(x, y)) >= 0) {
+          s_target = Target::Key;
+          s_pressed = s_key;
+          s_flash = false;
+          presentSoon();
+        } else {
+          s_target = Target::None;
+        }
+      } else if (host::now().valid) {
+        if (inCircle(x, y, kPrevCx, kCtrlY, kSmallBtnR + D(8))) {
+          s_target = Target::Prev;
+        } else if (inCircle(x, y, kPlayCx, kCtrlY, kPlayR + D(8))) {
+          s_target = Target::Play;
+        } else if (inCircle(x, y, kNextCx, kCtrlY, kSmallBtnR + D(8))) {
+          s_target = Target::Next;
+        } else if (x >= kVolX - D(30) && x < kVolX + kVolW + D(14) && abs(y - kCtrlY) < D(26)) {
+          s_target = Target::VolBar;
+          wantLevel((x - kVolX) * 100 / kVolW);
+          presentSoon();
+        } else {
+          s_target = Target::None;
+        }
       } else {
         s_target = Target::None;
       }
       return Touch::None;
     }
-    const int move = abs(x - s_down_x) + abs(y - s_down_y);
+    const int dx = x - s_down_x, dy = y - s_down_y;
+    const int move = abs(dx) + abs(dy);
     if (move > s_max_move) s_max_move = move;
+    // A sideways slide anywhere but on the knob / volume bar turns the page.
+    if (s_target != Target::Knob && s_target != Target::VolBar && s_target != Target::Swipe &&
+        abs(dx) > D(40) && abs(dx) > 2 * abs(dy)) {
+      if (s_target == Target::Key) {
+        s_pressed = -1;
+        presentSoon();
+      }
+      s_target = Target::Swipe;
+    }
     if (s_target == Target::Knob) {
-      const int dx = x - kKnobCx, dy = y - kKnobCy;
-      if (dx * dx + dy * dy < (kKnobR / 4) * (kKnobR / 4)) return Touch::None;  // centre: no angle
+      const int kx = x - kKnobCx, ky = y - kKnobCy;
+      if (kx * kx + ky * ky < (kKnobD / 8) * (kKnobD / 8)) return Touch::None;  // centre: no angle
       const float deg = angleAt(x, y);
       float d = deg - s_last_deg;
       if (d > 180.0f) d -= 360.0f;
@@ -419,25 +877,39 @@ Touch touch(int fingers, int x, int y) {
       s_last_deg = deg;
       s_accum_deg += d;
       s_total_deg += fabsf(d);
-      bool changed = false;
-      const float step = stepDeg();
-      while (s_accum_deg >= step) {
-        s_accum_deg -= step;
-        volumeStep(+1);  // clockwise (screen y points down): louder
-        changed = true;
+      if (host::active()) {
+        // With the helper: a full turn is 0..100 %, set directly.
+        const int dp = static_cast<int>(s_accum_deg / 3.6f);
+        if (dp != 0) {
+          s_accum_deg -= dp * 3.6f;
+          wantLevel((s_target_level >= 0 ? s_target_level : host::volume()) + dp);
+          presentSoon();
+        }
+      } else {
+        const float step = 360.0f / steps();
+        bool changed = false;
+        while (s_accum_deg >= step) {
+          s_accum_deg -= step;
+          hidStep(+1);
+          changed = true;
+        }
+        while (s_accum_deg <= -step) {
+          s_accum_deg += step;
+          hidStep(-1);
+          changed = true;
+        }
+        if (changed) presentSoon();
       }
-      while (s_accum_deg <= -step) {
-        s_accum_deg += step;
-        volumeStep(-1);
-        changed = true;
-      }
-      if (changed) drawKnob();
+    } else if (s_target == Target::VolBar) {
+      wantLevel((x - kVolX) * 100 / kVolW);
+      presentSoon();
     } else if (s_target == Target::Key && keyAt(x, y) != s_key && s_pressed == s_key) {
-      drawKey(s_key, false);  // slid off the key: no press
-      s_pressed = -1;
+      s_pressed = -1;  // slid off the key: no press
+      presentSoon();
     }
     return Touch::None;
   }
+
   if (!s_down) return Touch::None;
   s_down = false;
   x = s_last_x;
@@ -446,12 +918,20 @@ Touch touch(int fingers, int x, int y) {
   s_target = Target::None;
   switch (t) {
     case Target::Back:
-      return ui::switchButtonHit(x, y) || s_max_move < S(20) ? Touch::Back : Touch::None;
+      return inRadar(x, y) || s_max_move < D(20) ? Touch::Back : Touch::None;
+    case Target::Swipe: {
+      const int dx = x - s_down_x;
+      if (dx > D(60)) {
+        setPage(Page::Keys);  // finger to the right: keys
+      } else if (dx < -D(60)) {
+        setPage(Page::Music);  // to the left: music
+      }
+      return Touch::None;
+    }
     case Target::Knob:
-      if (s_total_deg < kTapMaxDeg && s_max_move < S(14) && now - s_down_ms < kTapMaxMs) {
-        s_muted = !s_muted;
-        if (canSend()) services::hid::sendMedia(Media::Mute);
-        drawKnob();
+      if (s_total_deg < 8.0f && s_max_move < D(14) && now - s_down_ms < 700) {
+        toggleMute();
+        presentSoon();
       }
       return Touch::None;
     case Target::Key:
@@ -461,7 +941,23 @@ Touch touch(int fingers, int x, int y) {
         s_flash = true;  // tick() lets go of the highlight
       }
       return Touch::None;
-    case Target::None: return Touch::None;
+    case Target::Prev:
+      media(Media::Previous);
+      return Touch::None;
+    case Target::Play:
+      media(Media::PlayPause);
+      return Touch::None;
+    case Target::Next:
+      media(Media::Next);
+      return Touch::None;
+    case Target::VolBar:
+      if (s_target_level >= 0 && host::active()) {
+        host::sendVolume(s_target_level);
+        s_target_level = -1;
+      }
+      return Touch::None;
+    case Target::None:
+      return Touch::None;
   }
   return Touch::None;
 }

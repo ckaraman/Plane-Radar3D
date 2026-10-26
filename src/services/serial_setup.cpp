@@ -1,6 +1,7 @@
 #include "services/serial_setup.h"
 #include "hardware/console.h"
 #include "services/deck_store.h"
+#include "services/host_link.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -127,6 +128,9 @@ void sendHello() {
   doc["deckslots"] = services::deck::kSlots;
   doc["deckicon"] = services::deck::iconPx();
   doc["deckcustom"] = services::deck::custom();
+  doc["hostv"] = 1;  // Windows helper protocol (services/host_link.h)
+  doc["w"] = config::kDisplayWidth;
+  doc["h"] = config::kDisplayHeight;
   sendReply("HELLO", doc);
 }
 
@@ -515,6 +519,16 @@ void handleLine(char* line) {
     console::switchTo(console::Mode::Setup);
   } else if (strcmp(command, "USBNORMAL") == 0) {
     console::switchTo(console::Mode::Keyboard);
+  } else if (strcmp(command, "VOL") == 0) {
+    services::host::handleVol(args);
+  } else if (strcmp(command, "NOW") == 0) {
+    services::host::handleNow(args);
+  } else if (strcmp(command, "COVERBEGIN") == 0) {
+    services::host::handleCoverBegin(args);  // small acked chunks: fine in keyboard mode
+  } else if (strcmp(command, "COVER") == 0) {
+    services::host::handleCoverChunk(args);
+  } else if (strcmp(command, "COVEREND") == 0) {
+    services::host::handleCoverEnd();
   } else if (strcmp(command, "DECKBEGIN") == 0) {
     if (uploadAllowed()) handleDeckBegin(args);
   } else if (strcmp(command, "DECK") == 0) {
