@@ -43,6 +43,7 @@ DEFAULT_SETTINGS = {
     "send_volume": True,        # real volume on the card
     "steps": 50,                # volume keys per full knob turn without the helper (Windows: 2 %)
     "close_quits": False,       # closing the window ends the program (else it stays in the tray)
+    "hq_cover": True,           # small covers swapped for the large one from the iTunes catalogue
 }
 
 

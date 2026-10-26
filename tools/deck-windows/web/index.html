@@ -54,6 +54,13 @@
   .grid { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
   .key { aspect-ratio: 1.05; border-radius: 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--line); cursor: pointer; padding: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; line-height: 1.15; overflow: hidden; text-align: center; }
   .key img { width: 52%; height: 52%; object-fit: contain; pointer-events: none; }
+  /* As on the card: a picture is the whole key, the label on top at the bottom. */
+  .key.pic { position: relative; padding: 0; justify-content: flex-end; }
+  .key.pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .key.pic.icon img { inset: 8% 8% 22% 8%; width: 84%; height: 70%; object-fit: contain; }
+  .key.pic.icon.nolabel img { inset: 8%; height: 84%; }
+  .key.pic span { position: relative; width: 100%; padding: 14px 4px 6px; color: #fff; background: linear-gradient(rgba(4,5,14,0), rgba(4,5,14,0.7)); }
+  .key.pic.icon span { background: none; }
   .key svg { width: 40%; height: 40%; pointer-events: none; }
   .key[aria-pressed="true"] { background: var(--sel-bg); border: 1.5px solid var(--sel-line); font-weight: 600; }
   .key.empty { border-style: dashed; color: var(--muted); background: transparent; }
@@ -165,6 +172,7 @@
       </div>
       <div class="card" style="flex: 1 1 520px; max-width: 760px; padding-top: 6px; padding-bottom: 6px">
         <div class="opt"><label for="s-music">Müzik çalınca kartta Müzik ekranını aç</label><input type="checkbox" id="s-music"></div>
+        <div class="opt"><label for="s-hq">Kapak küçükse yüksek çözünürlüklüsünü internetten bul<br><span class="small">Tarayıcılar (YouTube Music) küçük kapak verir; aynı şarkının büyük kapağı iTunes kataloğundan alınır.</span></label><input type="checkbox" id="s-hq"></div>
         <div class="opt"><label for="s-back">Müzik durunca tuşlar ekranına dön</label>
           <select class="in" id="s-back" style="width: auto; min-height: 40px">
             <option value="0">Hemen</option><option value="60">1 dakika sonra</option><option value="300">5 dakika sonra</option><option value="-1">Dönme</option>
@@ -246,19 +254,42 @@
   function setMsg(kind, text) { const m = $('#up-msg'); m.className = 'msg ' + kind; m.textContent = text; m.hidden = !text; }
   function saveSoon() { clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => api().save_slots(S.slots), 400); }
 
-  // A picture file / drop -> 128 px PNG data URL (the program makes the card's size from it).
+  // A picture file / drop -> PNG data URL of at most 320 px, its own shape (the program
+  // fills or fits the card's key with it).
   function toDataUrl(file) {
     return new Promise((res) => {
       const url = URL.createObjectURL(file), img = new Image();
       img.onload = () => {
-        const c = document.createElement('canvas'); c.width = c.height = 128;
-        const k = Math.min(128 / img.naturalWidth, 128 / img.naturalHeight), w = img.naturalWidth * k, h = img.naturalHeight * k;
-        const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, (128 - w) / 2, (128 - h) / 2, w, h);
+        const k = Math.min(1, 320 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url); res(c.toDataURL('image/png'));
       };
       img.onerror = () => { URL.revokeObjectURL(url); res(''); };
       img.src = url;
     });
+  }
+
+  // A see-through picture (program icon, logo) sits inside the key; a photo fills it
+  // (deck/blob.py is_icon decides the same way for the card).
+  const iconCache = new Map();
+  function isIcon(url) {
+    if (iconCache.has(url)) return iconCache.get(url);
+    const p = new Promise((res) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas'); c.width = c.height = 48;
+        const g = c.getContext('2d'); g.drawImage(img, 0, 0, 48, 48);
+        const d = g.getImageData(0, 0, 48, 48).data;
+        let clear = 0; for (let i = 3; i < d.length; i += 4) if (d[i] < 250) clear++;
+        res(clear > 0.03 * 48 * 48);
+      };
+      img.onerror = () => res(true);
+      img.src = url;
+    });
+    iconCache.set(url, p);
+    return p;
   }
 
   // ------------------------------------------------------------ keys grid
@@ -281,7 +312,12 @@
           [S.slots[from], S.slots[i]] = [S.slots[i], S.slots[from]];
           S.sel = i; saveSoon(); renderGrid(); renderEditor();
         } });
-      if (s.img) b.append(el('img', { src: s.img, alt: '' }));
+      if (s.img) {
+        b.classList.add('pic');
+        if (!s.label) b.classList.add('nolabel');
+        isIcon(s.img).then((icon) => b.classList.toggle('icon', icon));
+        b.append(el('img', { src: s.img, alt: '' }));
+      }
       else if (iconFor(a)) { const d = el('span'); d.innerHTML = iconFor(a); b.append(d.firstChild); }
       if (s.label) b.append(el('span', { text: s.label }));
       else if (empty) b.append(el('span', { text: 'Boş' }));
@@ -417,8 +453,10 @@
   $('#b-test').addEventListener('click', () => api().test(S.slots[S.sel].action));
   $('#b-send').addEventListener('click', async () => {
     clearTimeout(S.saveTimer);
-    const ok = await api().send_to_card(S.slots);
-    if (!ok) { const st = await api().live(); setMsg('err', st.upload.error || 'Kart bağlı değil.'); return; }
+    $('#b-send').disabled = true; setMsg('info', 'Kart aranıyor…');
+    let ok = false;
+    try { ok = await api().send_to_card(S.slots); } catch (e) { ok = false; }
+    if (!ok) { const st = await api().live(); $('#b-send').disabled = false; setMsg('err', 'Gönderilemedi: ' + ((st.upload && st.upload.error) || 'kart bağlı değil.') + ' Ayrıntı: Ayarlar › Tanılama kaydı.'); return; }
     $('#up-bar').hidden = false; setMsg('info', 'Hazırlanıyor…');
   });
 
@@ -437,9 +475,10 @@
     S.settings.music_screen = $('#s-music').checked;
     S.settings.back_seconds = parseInt($('#s-back').value, 10);
     S.settings.close_quits = $('#s-close').checked;
+    S.settings.hq_cover = $('#s-hq').checked;
     api().save_settings(S.settings);
   }
-  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close']) $(id).addEventListener('change', saveSettings);
+  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close', '#s-hq']) $(id).addEventListener('change', saveSettings);
   $('#b-exit').addEventListener('click', () => { if (confirm('Program tamamen kapansın mı? Kartın tuşlarından site ve program açma, gerçek ses ve müzik ekranı program yeniden açılana kadar çalışmaz.')) api().exit(); });
   $('#b-release').addEventListener('click', async () => { const st = await api().release(!S.device.released); applyDevice(st); });
 
@@ -451,7 +490,7 @@
     $('#c-port').textContent = d.connected ? (d.port + (d.usb === 'kb' ? ', klavye modu' : ', kurulum modu')) : (d.released ? 'Bırakıldı (kurulum sayfası için)' : 'Bağlı değil');
     $('#c-fw').textContent = d.fw || '–';
     $('#b-release').textContent = d.released ? 'Bağlantıyı geri al' : 'Kurulum sayfası için bağlantıyı bırak';
-    $('#b-send').disabled = !d.connected;
+    $('#b-send').disabled = !!(S.upload && S.upload.running) || !(d.connected || d.released);
   }
   function applyLive(st) {
     applyDevice(st.device);
@@ -467,6 +506,7 @@
     $('#np-artist').textContent = playing ? [n.a, n.al].filter(Boolean).join(' · ') : '';
     $('#np-app').textContent = playing ? (n.play ? 'Çalıyor' : 'Duraklatıldı') + (n.app ? ' · ' + n.app : '') : '';
     const u = st.upload || {};
+    S.upload = u;
     if (u.running) { $('#up-bar').hidden = false; $('#up-bar').value = u.pct; setMsg('info', u.text); }
     else if (!$('#up-bar').hidden) { $('#up-bar').hidden = true; setMsg(u.error ? 'err' : 'ok', u.error ? 'Gönderilemedi: ' + u.error : (u.text || 'Tuşlar karta gönderildi.')); }
   }
@@ -479,6 +519,7 @@
     $('#s-music').checked = !!S.settings.music_screen;
     $('#s-back').value = String(S.settings.back_seconds);
     $('#s-close').checked = !!S.settings.close_quits;
+    $('#s-hq').checked = S.settings.hq_cover !== false;
     $('#c-app').textContent = 'Plane Radar Deck ' + st.version;
     renderGrid(); renderEditor(); applyLive(st);
     setInterval(async () => { try { applyLive(await api().live()); } catch (_) { /* window closing */ } }, 1000);

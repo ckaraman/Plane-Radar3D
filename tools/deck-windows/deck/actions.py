@@ -13,6 +13,15 @@ if IS_WIN:
     from ctypes import wintypes
 
     user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    user32.GetWindow.restype = wintypes.HWND
+    user32.GetWindow.argtypes = (wintypes.HWND, wintypes.UINT)
+    user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+    user32.BringWindowToTop.argtypes = (wintypes.HWND,)
+    user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+    user32.IsIconic.argtypes = (wintypes.HWND,)
+    user32.GetWindowLongW.argtypes = (wintypes.HWND, ctypes.c_int)
+    user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
 
 # ------------------------------------------------------------------ browsers
 KNOWN_BROWSERS = (
@@ -52,21 +61,85 @@ def browsers():
     return out
 
 
+def default_browser_exe():
+    """The program Windows opens https links with (its .exe file name), or None."""
+    if not IS_WIN:
+        return None
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice") as k:
+            prog = winreg.QueryValueEx(k, "ProgId")[0]
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog + r"\shell\open\command") as k:
+            cmd = winreg.QueryValue(k, None)
+    except OSError:
+        return None
+    cmd = cmd.strip()
+    exe = cmd[1:].split('"', 1)[0] if cmd.startswith('"') else cmd.split(" ", 1)[0]
+    return os.path.basename(exe) or None
+
+
 def open_site(url, browser=""):
     url = (url or "").strip()
     if not url:
         return
     if "://" not in url:
         url = "https://" + url
+    allow_foreground()
+    exe = None
     if browser:
         for b in browsers():
             if b["id"] == browser:
                 subprocess.Popen([b["path"], url])
-                return
-    os.startfile(url)  # default browser
+                exe = os.path.basename(b["path"])
+                break
+    if exe is None:
+        os.startfile(url)  # default browser
+        exe = default_browser_exe()
+    # A browser that is already open gets the new tab in its window, often behind the
+    # others (Windows keeps the foreground for the program the user last used): bring it up.
+    if exe:
+        for _ in range(12):
+            time.sleep(0.25)
+            if _front_window_of(exe):
+                break
 
 
 # ------------------------------------------------------------------ programs
+def allow_foreground():
+    """Let the program we start (or a running one we tell to open something) come to the
+    front. Windows only allows that to the program that had the last input, so a
+    harmless key event of our own first."""
+    if not IS_WIN:
+        return
+    user32.keybd_event(0x87, 0, 0, 0)  # F24: no program reacts to it
+    user32.keybd_event(0x87, 0, 2, 0)
+    user32.AllowSetForegroundWindow(-1)  # ASFW_ANY
+
+
+def force_foreground(hwnd):
+    """Raise a window even when Windows' foreground lock is on."""
+    SW_RESTORE, SW_SHOW = 9, 5
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, SW_RESTORE)
+    else:
+        user32.ShowWindow(hwnd, SW_SHOW)
+    fg = user32.GetForegroundWindow()
+    if fg == hwnd:
+        return True
+    kernel32 = ctypes.WinDLL("kernel32")
+    me = kernel32.GetCurrentThreadId()
+    other = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+    attached = bool(other and other != me and user32.AttachThreadInput(me, other, True))
+    try:
+        allow_foreground()
+        user32.BringWindowToTop(hwnd)
+        ok = bool(user32.SetForegroundWindow(hwnd))
+    finally:
+        if attached:
+            user32.AttachThreadInput(me, other, False)
+    return ok or user32.GetForegroundWindow() == hwnd
+
+
 def _front_window_of(exe_name):
     """Bring a running program's main window to the front; False if none."""
     if not IS_WIN or not exe_name:
@@ -78,10 +151,15 @@ def _front_window_of(exe_name):
     if not pids:
         return False
     found = []
+    GW_OWNER, GWL_EXSTYLE, WS_EX_TOOLWINDOW = 4, -20, 0x80
 
     @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def each(hwnd, _):
-        if user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+        # Top-level, visible, titled, no tool window: the program's real windows, the
+        # topmost first (EnumWindows goes front to back).
+        if user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0 \
+                and not user32.GetWindow(hwnd, GW_OWNER) \
+                and not (user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW):
             pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value in pids:
@@ -92,14 +170,7 @@ def _front_window_of(exe_name):
     user32.EnumWindows(each, 0)
     if not found:
         return False
-    hwnd = found[0]
-    SW_RESTORE = 9
-    if user32.IsIconic(hwnd):
-        user32.ShowWindow(hwnd, SW_RESTORE)
-    # Windows only lets a program take the foreground after a key event of its own.
-    user32.keybd_event(0x12, 0, 0, 0)  # Alt down
-    user32.keybd_event(0x12, 0, 2, 0)  # Alt up
-    user32.SetForegroundWindow(hwnd)
+    force_foreground(found[0])
     return True
 
 
@@ -122,6 +193,7 @@ def open_app(path, front=True):
         target = lnk_target(path)
         if _front_window_of(os.path.basename(target)):
             return
+    allow_foreground()
     if path.lower().startswith("shell:"):
         subprocess.Popen(["explorer.exe", path])
     elif os.path.exists(path) or path.lower().endswith(".lnk"):
@@ -133,6 +205,7 @@ def open_app(path, front=True):
 def open_folder(path):
     path = os.path.expandvars((path or "").strip().strip('"'))
     if path:
+        allow_foreground()
         os.startfile(path)
 
 

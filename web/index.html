@@ -2008,7 +2008,8 @@
     renderDeck();
   }
 
-  // The picture is kept as a 128 px PNG (enough for both panels, small in storage).
+  // The picture is kept as a PNG of at most 256 px in its own shape (a photo fills the
+  // key, a see-through icon is fitted into it when the keys are sent).
   async function deckPicked(ev) {
     const f = ev.target.files && ev.target.files[0];
     if (!f) return;
@@ -2017,13 +2018,12 @@
       const img = new Image();
       img.src = url;
       await img.decode();
+      const W = img.naturalWidth || 256, H = img.naturalHeight || 256, k = Math.min(1, 256 / Math.max(W, H));
       const c = document.createElement('canvas');
-      c.width = c.height = 128;
+      c.width = Math.max(1, Math.round(W * k)); c.height = Math.max(1, Math.round(H * k));
       const g = c.getContext('2d');
-      const k = Math.min(128 / (img.naturalWidth || 128), 128 / (img.naturalHeight || 128));
-      const w = (img.naturalWidth || 128) * k, h = (img.naturalHeight || 128) * k;
       g.imageSmoothingQuality = 'high';
-      g.drawImage(img, (128 - w) / 2, (128 - h) / 2, w, h);
+      g.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);
       deck.slots[deck.sel].img = c.toDataURL('image/png');
       setMsg($('#msg-deck'), '', '');
@@ -2060,19 +2060,69 @@
     return out;
   }
 
-  async function buildDeckBlob(px) {
+  // Firmware 0.32+: the picture is the whole key (as the Windows helper makes it): a photo
+  // fills it, a see-through icon sits large in it with room for the label.
+  async function deckKeyPixels(dataUrl, kw, kh, radius, hasLabel) {
+    const img = new Image();
+    img.src = dataUrl;
+    await img.decode();
+    const probe = document.createElement('canvas'); probe.width = probe.height = 48;
+    const pg = probe.getContext('2d'); pg.drawImage(img, 0, 0, 48, 48);
+    const pd = pg.getImageData(0, 0, 48, 48).data;
+    let clear = 0; for (let i = 3; i < pd.length; i += 4) if (pd[i] < 250) clear++;
+    const icon = clear > 0.03 * 48 * 48;
+    const c = document.createElement('canvas'); c.width = kw; c.height = kh;
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.beginPath(); g.roundRect(0, 0, kw, kh, radius); g.clip();
+    const W = img.naturalWidth, H = img.naturalHeight;
+    if (icon) {
+      const m = Math.max(2, Math.round(kw * 0.08)), band = hasLabel ? Math.round(kh * 0.2) : 0;
+      const aw = kw - 2 * m, ah = kh - 2 * m - band, k = Math.min(aw / W, ah / H);
+      g.drawImage(img, (kw - W * k) / 2, m + (ah - H * k) / 2, W * k, H * k);
+    } else {
+      const k = Math.max(kw / W, kh / H);
+      g.drawImage(img, (kw - W * k) / 2, (kh - H * k) / 2, W * k, H * k);
+      if (hasLabel) {
+        const gr = g.createLinearGradient(0, kh * 0.55, 0, kh);
+        gr.addColorStop(0, 'rgba(4,5,14,0)'); gr.addColorStop(1, 'rgba(4,5,14,0.72)');
+        g.fillStyle = gr; g.fillRect(0, kh * 0.55, kw, kh * 0.45);
+      }
+    }
+    const d = g.getImageData(0, 0, kw, kh).data, out = new Uint8Array(kw * kh * 2);
+    for (let p = 0; p < kw * kh; p++) {
+      const a = d[p * 4 + 3];
+      let v = 0xF81F;
+      if (a >= 64) {
+        const mix = (ch, i) => Math.round((ch * a + DECK_KEY_BG[i] * (255 - a)) / 255);
+        const r = mix(d[p * 4], 0), gg = mix(d[p * 4 + 1], 1), b = mix(d[p * 4 + 2], 2);
+        v = ((r >> 3) << 11) | ((gg >> 2) << 5) | (b >> 3);
+        if (v === 0xF81F) v = 0xF81E;
+      }
+      out[p * 2] = v & 255; out[p * 2 + 1] = v >> 8;
+    }
+    return out;
+  }
+
+  async function buildDeckBlob(dev) {
     const enc = new TextEncoder();
-    const head = new Uint8Array(6 + 28 * DECK_SLOTS);
-    head.set([0x44, 0x4B, 1, DECK_SLOTS, px, parseInt($('#deck-os').value, 10) || 16]);
+    const px = dev.deckicon || 72, full = dev.deckkw > 0 && dev.deckkh > 0;
+    const hb = full ? 8 : 6, steps = parseInt($('#deck-os').value, 10) || 16;
+    const head = new Uint8Array(hb + 28 * DECK_SLOTS);
+    head.set(full ? [0x44, 0x4B, 2, DECK_SLOTS, dev.deckkw, dev.deckkh, steps, 0] : [0x44, 0x4B, 1, DECK_SLOTS, px, steps]);
+    const radius = Math.round(18 * (dev.w || 800) / 800);
     const icons = [];
     for (let i = 0; i < DECK_SLOTS; i++) {
-      const s = deck.slots[i], o = 6 + 28 * i, a = s.action || 'none';
+      const s = deck.slots[i], o = hb + 28 * i, a = s.action || 'none';
       let kind = 0, code = 0, mods = 0;
       if (a[0] === 'm') { kind = 1; code = parseInt(a.slice(1), 10); }
       else if (a[0] === 'k') { kind = 2; code = parseInt(a.slice(1), 10); }
       else if (a === 'combo' && s.key) { kind = 2; code = s.key.charCodeAt(0); mods = s.mods & 15; }
       head[o] = kind; head[o + 1] = code; head[o + 2] = mods;
-      if (s.img) { icons.push(await deckIconPixels(s.img, px)); head[o + 3] = 1; }
+      if (s.img) {
+        icons.push(full ? await deckKeyPixels(s.img, dev.deckkw, dev.deckkh, radius, !!s.label) : await deckIconPixels(s.img, px));
+        head[o + 3] = 1;
+      }
       let lb = enc.encode(s.label || '');
       if (lb.length > 23) { let n = 23; while (n > 0 && (lb[n] & 0xC0) === 0x80) n--; lb = lb.slice(0, n); }
       head.set(lb, o + 4);
@@ -2097,7 +2147,7 @@
     bar.hidden = false; bar.value = 0;
     try {
       setMsg(msg, 'info', 'Resimler hazırlanıyor…');
-      const blob = await buildDeckBlob(dev.deckicon || 72);
+      const blob = await buildDeckBlob(dev);
       await ensureSetupUsb(msg);
       setMsg(msg, 'info', 'Tuşlar cihaza gönderiliyor…');
       const ack = async (cmd, timeout) => {

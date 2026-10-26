@@ -1,7 +1,9 @@
 """Protocol tests against a fake card on a pseudo terminal (Linux CI / dev box)."""
 
 import base64
+import io
 import json
+import struct
 import os
 import pty
 import sys
@@ -27,6 +29,7 @@ class FakeCard:
         self.cover = None
         self.deck = None
         self._stage = b""
+        self.drop_once = False
         threading.Thread(target=self._run, daemon=True).start()
 
     def say(self, text):
@@ -50,14 +53,26 @@ class FakeCard:
     def _handle(self, line):
         tag, _, rest = line[3:].partition(" ")
         if tag == "HELLO":
-            self.say('PR:HELLO ' + json.dumps({"fw": "5in-0.31.0", "usb": self.usb, "hostv": 1, "w": 800, "h": 480, "deckicon": 72}))
+            self.say('PR:HELLO ' + json.dumps({"fw": "5in-0.32.0", "usb": self.usb, "hostv": 2, "w": 800, "h": 480,
+                                               "deckicon": 72, "deckv": 2, "deckkw": 110, "deckkh": 120}))
         elif tag in ("COVERBEGIN", "DECKBEGIN"):
-            self._stage, self._meta = b"", json.loads(rest)
+            self._stage, self._meta, self._next = b"", json.loads(rest), 1
             self.say("PR:%s {\"seq\":0}" % ("COVERACK" if tag == "COVERBEGIN" else "DECKACK"))
         elif tag in ("COVER", "DECK"):
             seq, data = rest.split(" ", 1)
-            self._stage += base64.b64decode(data)
-            self.say("PR:%s {\"seq\":%s}" % ("COVERACK" if tag == "COVER" else "DECKACK", seq))
+            seq = int(seq)
+            ack = "COVERACK" if tag == "COVER" else "DECKACK"
+            if self.drop_once and seq == 3:  # one line lost on the cable
+                self.drop_once = False
+                return
+            if seq < self._next:
+                self.say("PR:%s {\"seq\":%d}" % (ack, seq))
+            elif seq > self._next:
+                self.say("PR:%sNAK {\"need\":%d}" % (tag, self._next))
+            else:
+                self._stage += base64.b64decode(data)
+                self._next += 1
+                self.say("PR:%s {\"seq\":%d}" % (ack, seq))
         elif tag in ("COVEREND", "DECKEND"):
             ok = len(self._stage) == self._meta["len"] and zlib.crc32(self._stage) & 0xFFFFFFFF == self._meta["crc"]
             if tag == "COVEREND":
@@ -100,15 +115,17 @@ def test_all():
     d.send_json("VOL", {"v": 42, "m": False})
     assert wait(lambda: any(l.startswith('PR:VOL {"v":42') for l in card.lines))
 
-    # Cover in small chunks.
+    # Cover in small chunks, a few on the way; one is lost and sent again.
     jpeg = bytes(range(256)) * 40
-    assert d.send_cover(jpeg, 3)
+    card.drop_once = True
+    assert d.send_cover(jpeg, 3, 480, 480)
     assert card.cover == jpeg
+    assert '"w": 480' in next(l for l in card.lines if l.startswith("PR:COVERBEGIN"))
 
     # Key set through setup mode and back.
     slots = [{"label": "YouTube", "img": "", "action": {"type": "site", "url": "x"}}] + \
             [{"label": "", "img": "", "action": {"type": "none"}}] * 11
-    data = blob.build(slots, 72, 50)
+    data = blob.build(slots, 72, 50, (110, 120, 18))
     steps = []
     d.upload_deck(data, lambda p, t: steps.append(p))
     assert card.deck == data and steps[-1] == 100
@@ -128,7 +145,127 @@ def test_blob():
     assert b[6] == blob.KIND_HOST and b[6 + 4:6 + 28].rstrip(b"\0").decode() == "Çok uzun bir Türkçe "
 
 
+def _png(w, h, rgba):
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGBA", (w, h), rgba).save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def test_blob_v2():
+    from PIL import Image, ImageDraw
+
+    photo = _png(300, 200, (200, 30, 30, 255))
+    icon_img = Image.new("RGBA", (128, 128), (0, 0, 0, 0))
+    ImageDraw.Draw(icon_img).ellipse([20, 20, 108, 108], fill=(30, 200, 30, 255))
+    buf = io.BytesIO()
+    icon_img.save(buf, "PNG")
+    icon = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    slots = [{"label": "Foto", "img": photo, "action": {"type": "none"}},
+             {"label": "", "img": icon, "action": {"type": "none"}}] + \
+            [{"label": "", "img": "", "action": {"type": "none"}}] * 10
+    b = blob.build(slots, 72, 50, (110, 120, 18))
+    assert b[:8] == b"DK\x02\x0c\x6e\x78\x32\x00"
+    assert len(b) == 8 + 28 * 12 + 2 * 110 * 120 * 2
+    pic = b[8 + 28 * 12:8 + 28 * 12 + 110 * 120 * 2]
+    px = lambda x, y: struct.unpack_from("<H", pic, 2 * (y * 110 + x))[0]
+    assert px(0, 0) == blob.TRANSPARENT          # rounded corner
+    assert px(55, 20) != blob.TRANSPARENT        # photo fills the key
+    assert (px(55, 20) >> 11) > 20               # red
+    assert (px(55, 115) >> 11) < (px(55, 20) >> 11)  # darker at the bottom for the label
+    ic = b[8 + 28 * 12 + 110 * 120 * 2:]
+    ipx = lambda x, y: struct.unpack_from("<H", ic, 2 * (y * 110 + x))[0]
+    assert ipx(55, 60) != blob.TRANSPARENT and ipx(3, 60) == blob.TRANSPARENT  # icon large, inside
+    assert blob.is_icon(Image.open(io.BytesIO(base64.b64decode(icon.split(",")[1]))).convert("RGBA"))
+
+
+def test_cover_and_position():
+    from PIL import Image
+
+    from deck import media
+
+    buf = io.BytesIO()
+    im = Image.new("RGB", (480, 360), (0, 0, 0))
+    im.paste(Image.new("RGB", (480, 270), (90, 120, 200)), (0, 45))  # a letterboxed video frame
+    im.save(buf, "JPEG")
+    jpeg, w, h = media.cover_jpeg(buf.getvalue(), 800, 480)
+    assert (w, h) == (800, 450), (w, h)  # bars gone, as large as the screen allows
+    assert Image.open(io.BytesIO(jpeg)).size == (800, 450)
+
+    # Position: a browser that keeps reporting the resume point must not pull the bar back.
+    class T:
+        def __init__(self, s):
+            self.s = s
+
+        def total_seconds(self):
+            return self.s
+
+    class TL:
+        start_time, end_time, last_updated_time = T(0), T(200), None
+
+        def __init__(self, p):
+            self.position = T(p)
+
+    class Props:
+        title, artist, album_title, thumbnail = "Song", "Artist", "", None
+
+    class Info:
+        def __init__(self, playing):
+            self.playback_status = "P" if playing else "S"
+
+    media.Status = type("S", (), {"PLAYING": "P"})
+    sess = {"tl": TL(30), "play": True}
+
+    class Sess:
+        source_app_user_model_id = "chrome"
+
+        async def try_get_media_properties_async(self):
+            return Props()
+
+        def get_playback_info(self):
+            return Info(sess["play"])
+
+        def get_timeline_properties(self):
+            return sess["tl"]
+
+    class Mgr:
+        def get_current_session(self):
+            return Sess()
+
+    import asyncio
+
+    media.MediaManager = None  # no thread
+    seen = []
+    w = media.MediaWatcher(lambda st, c: seen.append(st), log=lambda m: None)
+    run = lambda: asyncio.new_event_loop().run_until_complete(w._poll(Mgr()))
+    clock = [1000.0]
+    real_monotonic = media.time.monotonic
+    media.time.monotonic = lambda: clock[0]
+    run()
+    assert abs(w.position() - 30) < 0.01
+    clock[0] += 4.5
+    run()  # still says 30: our clock runs on
+    assert abs(w.position() - 34.5) < 0.01
+    clock[0] += 5
+    sess["tl"] = TL(39)  # a late report close to ours: kept
+    run()
+    assert abs(w.position() - 39.5) < 0.01
+    sess["tl"] = TL(120)  # a seek
+    run()
+    assert abs(w.position() - 120) < 0.01
+    sess["play"] = False
+    sess["tl"] = TL(121)
+    clock[0] += 1
+    run()
+    clock[0] += 10
+    assert abs(w.position() - 121) < 0.01  # paused: stands still
+    media.time.monotonic = real_monotonic
+
+
 if __name__ == "__main__":
     test_blob()
+    test_blob_v2()
+    test_cover_and_position()
     test_all()
     print("tests ok")

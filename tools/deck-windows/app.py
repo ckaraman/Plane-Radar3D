@@ -12,7 +12,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 
 
@@ -94,8 +94,13 @@ class Api:
         return True
 
     def send_to_card(self, slots):
-        self._core.config.set_slots(slots)
-        return self._core.send_keys_to_card()
+        try:
+            self._core.config.set_slots(slots)
+            return self._core.send_keys_to_card()
+        except Exception as e:  # noqa: BLE001 - shown in the window, not lost
+            log("send: %s" % e)
+            self._core.upload.update(running=False, pct=0, text="", error=str(e) or "Gönderilemedi")
+            return False
 
     def test(self, action):
         from deck import actions
@@ -220,7 +225,9 @@ def _deep_selftest():
         return "%.2f muted=%s" % (ep.GetMasterVolumeLevelScalar(), ep.GetMute())
 
     step("volume", vol)
-    step("cover", lambda: len(media.cover_jpeg(_test_png(), 800, 480)))
+    step("cover", lambda: media.cover_jpeg(_test_png(), 800, 480)[1:])
+    step("itunes", lambda: len(media.lookup_cover("Bohemian Rhapsody", "Queen") or b""))
+    step("browser", lambda: actions.default_browser_exe())
     with open("selftest.txt", "w", encoding="utf-8") as f:
         f.write("\n".join(out))
 
@@ -275,6 +282,8 @@ def run():
     lock = threading.Lock()
 
     def open_editor(*_):
+        if core.device.released:  # "Tuşları düzenle" takes the card back
+            core.device.release(False)
         with lock:
             w = api._window
             if w is not None:

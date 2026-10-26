@@ -8,6 +8,7 @@ card is also a USB keyboard. Uploads (the key set) switch the card to setup mode
 
 import base64
 import json
+import queue
 import threading
 import time
 import zlib
@@ -41,6 +42,8 @@ class Device:
         self.pending = None                 # (tags, event, holder)
         self.released = False               # user asked to leave the port to the setup page
         self.busy = False                   # an upload runs: the watcher keeps out
+        self.stream_lock = threading.Lock() # one chunked transfer at a time
+        self._stream = None                 # (tags, queue) of the running transfer
         self._stop = False
         self._reader = None
         threading.Thread(target=self._watch, name="device-watch", daemon=True).start()
@@ -56,6 +59,8 @@ class Device:
             "connected": self.connected, "port": self.port, "released": self.released,
             "fw": h.get("fw"), "usb": h.get("usb"), "hostv": h.get("hostv"),
             "w": h.get("w", 800), "h": h.get("h", 480), "deckicon": h.get("deckicon", 72),
+            "deckv": h.get("deckv", 1), "deckkw": h.get("deckkw"), "deckkh": h.get("deckkh"),
+            "busy": self.busy,
         }
 
     def release(self, released):
@@ -70,19 +75,43 @@ class Device:
 
     # ------------------------------------------------------------------ connection
     def _watch(self):
+        setup_since = None
         while not self._stop:
             if self.ser is None and not self.released and not self.busy:
                 port = find_port(PID_KEYBOARD)
                 if port:
+                    setup_since = None
                     self._open(port)
+                elif find_port(PID_SETUP):
+                    # Left in setup mode (an upload that broke off, the setup page): after a
+                    # short wait, back to keyboard mode so the keys work again.
+                    setup_since = setup_since or time.time()
+                    if time.time() - setup_since > 8:
+                        setup_since = None
+                        sp = find_port(PID_SETUP)
+                        if sp and self._open(sp, setup=True):
+                            self.log("card was in setup mode: back to keyboard mode")
+                            self.request("PR:USBNORMAL", ["USBMODE"], 3)
+                            self._close()
+                else:
+                    setup_since = None
             time.sleep(1.0)
 
-    def _open(self, port):
+    def _open(self, port, setup=False):
         try:
-            ser = serial.Serial(port, 115200, timeout=0.2, write_timeout=2)
+            ser = serial.Serial()
+            ser.port, ser.baudrate, ser.timeout, ser.write_timeout = port, 115200, 0.2, 2
+            if setup:
+                # USB-Serial/JTAG resets the chip on some DTR / RTS changes: leave both alone.
+                ser.dtr, ser.rts = False, False
+            ser.open()
         except (serial.SerialException, OSError) as e:
-            self.log("port %s: %s" % (port, e))
+            msg = "port %s: %s" % (port, e)
+            if msg != getattr(self, "_last_port_error", None):  # not every second
+                self._last_port_error = msg
+                self.log(msg)
             return False
+        self._last_port_error = None
         self.ser, self.port, self.hello = ser, port, None
         self._reader = threading.Thread(target=self._read_loop, args=(ser,), name="device-read", daemon=True)
         self._reader.start()
@@ -138,6 +167,10 @@ class Device:
             data = json.loads(rest) if rest else {}
         except ValueError:
             return
+        st = self._stream
+        if st and tag in st[0]:
+            st[1].put((tag, data))
+            return
         p = self.pending
         if p and tag in p[0]:
             p[2].append((tag, data))
@@ -179,81 +212,131 @@ class Device:
         return self.send("PR:%s %s" % (tag, json.dumps(obj, ensure_ascii=False, separators=(",", ":"))))
 
     # ------------------------------------------------------------------ uploads
-    def _chunked(self, begin_tag, chunk_tag, end_tag, ack_tag, blob, chunk, extra=None, end_tags=("OK", "ERR")):
+    def _transfer(self, prefix, blob, chunk, window, extra=None, abort=lambda: False,
+                  progress=lambda f: None, end_timeout=10):
+        """BEGIN / numbered chunks / END for COVER or DECK. With window > 1 several chunks
+        are on the way at once; the card answers each with <prefix>ACK, a repeated one
+        again, a gap with <prefix>NAK {"need": n} (firmware 0.32+)."""
+        ack, nak = prefix + "ACK", prefix + "NAK"
         meta = {"len": len(blob), "crc": zlib.crc32(blob) & 0xFFFFFFFF}
         if extra:
             meta.update(extra)
-        r = self.request("PR:%s %s" % (begin_tag, json.dumps(meta)), [ack_tag, "ERR"], 5)
-        if not r or r[0] != ack_tag:
-            raise RuntimeError((r[1].get("msg") if r else "no answer") or "error")
-        seq = 1
-        for off in range(0, len(blob), chunk):
-            part = base64.b64encode(blob[off:off + chunk]).decode("ascii")
-            for attempt in range(3):
-                r = self.request("PR:%s %d %s" % (chunk_tag, seq, part), [ack_tag, "ERR"], 4)
-                if r and r[0] == ack_tag and r[1].get("seq") == seq:
-                    break
-                if r and r[0] == "ERR":
-                    raise RuntimeError(r[1].get("msg", "error"))
-            else:
-                raise RuntimeError("no answer")
-            seq += 1
-        r = self.request("PR:" + end_tag, list(end_tags), 10)
-        if not r or r[0] != "OK":
-            raise RuntimeError((r[1].get("msg") if r else "no answer") or "error")
+        with self.stream_lock:
+            r = self.request("PR:%sBEGIN %s" % (prefix, json.dumps(meta)), [ack, "ERR"], 5)
+            if not r or r[0] != ack:
+                raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
+            parts = [base64.b64encode(blob[o:o + chunk]).decode("ascii") for o in range(0, len(blob), chunk)]
+            n = len(parts)
+            q = queue.Queue()
+            self._stream = ({ack, nak, "ERR"}, q)
+            try:
+                done, nxt, rewound, stalls = 0, 1, 0, 0  # done = highest chunk the card has
+                while done < n:
+                    if abort():
+                        raise RuntimeError("aborted")
+                    while nxt <= n and nxt - done <= window:
+                        if not self.send("PR:%s %d %s" % (prefix, nxt, parts[nxt - 1])):
+                            raise RuntimeError("bağlantı koptu")
+                        nxt += 1
+                    try:
+                        tag, data = q.get(timeout=3 if window > 1 else 5)
+                    except queue.Empty:
+                        stalls += 1
+                        if stalls > 4 or (window == 1 and stalls > 2):
+                            raise RuntimeError("yanıt yok")
+                        nxt = done + 1  # send the rest again
+                        continue
+                    if tag == "ERR":
+                        raise RuntimeError(data.get("msg", "hata"))
+                    if tag == ack:
+                        stalls = 0
+                        seq = int(data.get("seq", 0))
+                        if seq > done:
+                            done = seq
+                            progress(done / n)
+                    elif tag == nak:
+                        need = int(data.get("need", done + 1))
+                        done = max(done, need - 1)
+                        if need != rewound:  # once per gap (the chunks behind it say it too)
+                            rewound, nxt = need, need
+            finally:
+                self._stream = None
+            r = self.request("PR:%sEND" % prefix, ["OK", "ERR"], end_timeout)
+            if not r or r[0] != "OK":
+                raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
+            return r[1]
 
-    def send_cover(self, jpeg, track_id):
-        """Album cover in keyboard mode: small acknowledged chunks (see the module doc)."""
+    def send_cover(self, jpeg, track_id, w=0, h=0, abort=lambda: False):
+        """Album cover in keyboard mode: small chunks (the TinyUSB port loses long bursts),
+        a few on the way at once with firmware 0.32+."""
         if not self.connected or self.busy:
             return False
+        win = 4 if (self.hello or {}).get("hostv", 1) >= 2 else 1
         try:
-            self._chunked("COVERBEGIN", "COVER", "COVEREND", "COVERACK", jpeg, 180, {"id": track_id})
+            t0 = time.time()
+            self._transfer("COVER", jpeg, 180, win, {"id": track_id, "w": w, "h": h},
+                           abort=lambda: abort() or self.busy)
+            self.log("cover: %d KB in %.1f s" % (len(jpeg) // 1024, time.time() - t0))
             return True
         except RuntimeError as e:
-            self.log("cover: %s" % e)
+            if str(e) != "aborted":
+                self.log("cover: %s" % e)
             return False
 
     def upload_deck(self, blob, progress=lambda pct, text: None):
         """The key set: to setup mode, upload, back to keyboard mode."""
         if self.busy:
-            raise RuntimeError("busy")
-        self.busy = True
+            raise RuntimeError("Başka bir gönderim sürüyor")
+        self.busy = True  # the cover transfer stops, the watcher keeps out
+        step = "başlangıç"
         try:
+            with self.stream_lock:
+                pass  # a cover on its way has noticed busy and stopped
             progress(2, "Kart kurulum moduna geçiyor…")
-            if self.connected:
-                self.request("PR:USBSETUP", ["USBMODE"], 3)
-            self._close()
-            port = None
-            for _ in range(40):
-                time.sleep(0.5)
-                port = find_port(PID_SETUP)
-                if port:
-                    break
-            if not port:
-                raise RuntimeError("Kart kurulum modunda görünmedi")
-            time.sleep(0.8)
-            if not self._open(port):
-                raise RuntimeError("Kart kurulum modunda yanıt vermedi")
+            step = "kurulum moduna geçiş"
+            self.log("upload: %d KB, card %s" % (len(blob) // 1024, "connected" if self.connected else "not connected"))
+            already_setup = self.connected and (self.hello or {}).get("usb") == "setup"
+            if self.connected and not already_setup:
+                r = self.request("PR:USBSETUP", ["USBMODE", "ERR"], 3)
+                self.log("upload: USBSETUP -> %s" % (r,))
+            if not already_setup:
+                self._close()
+                port = None
+                for _ in range(40):
+                    time.sleep(0.5)
+                    port = find_port(PID_SETUP)
+                    if port:
+                        break
+                if not port:
+                    raise RuntimeError("Kart kurulum modunda görünmedi (USB 303A:1001 yok)")
+                self.log("upload: setup port %s" % port)
+                time.sleep(0.8)
+                step = "kurulum portu"
+                opened = False
+                for _ in range(3):
+                    if self._open(port, setup=True):
+                        opened = True
+                        break
+                    time.sleep(1.0)
+                if not opened:
+                    raise RuntimeError("Kart kurulum modunda yanıt vermedi (%s)" % port)
             progress(10, "Tuşlar gönderiliyor…")
-            total = len(blob)
-            meta = {"len": total, "crc": zlib.crc32(blob) & 0xFFFFFFFF}
-            r = self.request("PR:DECKBEGIN " + json.dumps(meta), ["DECKACK", "ERR"], 5)
-            if not r or r[0] != "DECKACK":
-                raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
-            seq, CH = 1, 360
-            for off in range(0, total, CH):
-                part = base64.b64encode(blob[off:off + CH]).decode("ascii")
-                r = self.request("PR:DECK %d %s" % (seq, part), ["DECKACK", "ERR"], 5)
-                if not r or r[0] != "DECKACK" or r[1].get("seq") != seq:
-                    raise RuntimeError((r[1].get("msg") if r and r[0] == "ERR" else "bağlantı koptu"))
-                seq += 1
-                progress(10 + int(85 * min(1, (off + CH) / total)), "Tuşlar gönderiliyor…")
-            r = self.request("PR:DECKEND", ["OK", "ERR"], 10)
-            if not r or r[0] != "OK":
-                raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
+            step = "gönderim"
+            win = 4 if int((self.hello or {}).get("deckv", 1)) >= 2 else 1
+            t0 = time.time()
+            self._transfer("DECK", blob, 360, win,
+                           progress=lambda f: progress(10 + int(85 * f), "Tuşlar gönderiliyor…"))
+            self.log("upload: sent in %.1f s" % (time.time() - t0))
             progress(97, "Kart klavye moduna dönüyor…")
+            step = "klavye moduna dönüş"
             self.request("PR:USBNORMAL", ["USBMODE"], 3)
             self._close()
+        except RuntimeError as e:
+            self.log("upload failed at %s: %s" % (step, e))
+            if self.ser is not None and (self.hello or {}).get("usb") == "setup":
+                self.request("PR:USBNORMAL", ["USBMODE"], 3)  # do not leave the card in setup mode
+                self._close()
+            raise
         finally:
             self.busy = False  # the watcher reconnects in keyboard mode
         for _ in range(30):

@@ -50,6 +50,13 @@ class VolumeWatcher:
                     cmd, arg = self._q.get(timeout=0.25)
                 except queue.Empty:
                     cmd = None
+                # A knob turn sends many levels: only the newest one counts.
+                while cmd == "set" and not self._q.empty():
+                    nxt = self._q.get_nowait()
+                    if nxt[0] != "set":
+                        self._q.put(nxt)
+                        break
+                    arg = nxt[1]
                 if cmd == "set":
                     ep.SetMasterVolumeLevelScalar(arg / 100.0, None)
                     if arg > 0 and ep.GetMute():

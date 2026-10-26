@@ -1,7 +1,9 @@
 """The key set sent to the card. Format: firmware include/services/deck_store.h.
 
-'D' 'K' 1 12 icon_px volume_steps, 12 x 28-byte slots (kind, code, mods, has_icon,
-label[24] UTF-8), then the pictures (icon_px^2 RGB565 little endian, magenta = see-through).
+Version 1: 'D' 'K' 1 12 icon_px volume_steps; small square pictures above the label.
+Version 2: 'D' 'K' 2 12 key_w key_h volume_steps 0; each picture is the whole key.
+Then 12 x 28-byte slots (kind, code, mods, has_icon, label[24] UTF-8), then the pictures
+(RGB565 little endian, magenta = see-through).
 """
 
 import base64
@@ -101,14 +103,90 @@ def icon_pixels(img, px):
     return bytes(out)
 
 
-def build(slots, icon_px, volume_steps):
-    head = bytearray(b"DK" + bytes([1, len(slots), icon_px & 0xFF, max(4, min(100, int(volume_steps)))]))
+def _to565(img):
+    out = bytearray()
+    for r, g, b, a in img.getdata():
+        if a < 64:
+            v = TRANSPARENT
+        else:
+            r = (r * a + KEY_BG[0] * (255 - a)) // 255
+            g = (g * a + KEY_BG[1] * (255 - a)) // 255
+            b = (b * a + KEY_BG[2] * (255 - a)) // 255
+            v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+            if v == TRANSPARENT:
+                v = 0xF81E
+        out += struct.pack("<H", v)
+    return bytes(out)
+
+
+def is_icon(img):
+    """True for a picture with a see-through background (a program icon, a logo)."""
+    alpha = img.getchannel("A")
+    hist = alpha.histogram()
+    see_through = sum(hist[:250])
+    return see_through > 0.03 * img.width * img.height
+
+
+def _round_mask(w, h, radius):
+    from PIL import ImageDraw
+
+    k = 4
+    big = Image.new("L", (w * k, h * k), 0)
+    ImageDraw.Draw(big).rounded_rectangle([0, 0, w * k - 1, h * k - 1], radius=radius * k, fill=255)
+    return big.resize((w, h), Image.LANCZOS)
+
+
+def key_picture(img, kw, kh, radius, has_label):
+    """The whole key (kw x kh RGBA): a photo fills it (cropped), an icon sits large in it,
+    with room left for the label the card writes at the bottom."""
+    from PIL import ImageChops
+
+    canvas = Image.new("RGBA", (kw, kh), (0, 0, 0, 0))
+    if is_icon(img):
+        img = img.crop(img.getbbox() or (0, 0, img.width, img.height))  # no empty border
+        m = max(2, round(kw * 0.08))
+        band = round(kh * 0.2) if has_label else 0
+        aw, ah = kw - 2 * m, kh - 2 * m - band
+        k = min(aw / img.width, ah / img.height)
+        fit = img.resize((max(1, round(img.width * k)), max(1, round(img.height * k))), Image.LANCZOS)
+        canvas.paste(fit, ((kw - fit.width) // 2, m + (ah - fit.height) // 2), fit)
+    else:
+        k = max(kw / img.width, kh / img.height)
+        big = img.resize((max(kw, round(img.width * k)), max(kh, round(img.height * k))), Image.LANCZOS)
+        left, top = (big.width - kw) // 2, (big.height - kh) // 2
+        canvas = big.crop((left, top, left + kw, top + kh)).convert("RGBA")
+        if has_label:  # darker towards the bottom, so the white label reads well
+            shade = Image.new("RGBA", (kw, kh), (0, 0, 0, 0))
+            px = shade.load()
+            start = int(kh * 0.55)
+            for y in range(start, kh):
+                a = int(185 * ((y - start) / max(1, kh - start)) ** 1.2)
+                for x in range(kw):
+                    px[x, y] = (4, 5, 14, a)
+            canvas = Image.alpha_composite(canvas, shade)
+    alpha = ImageChops.multiply(canvas.getchannel("A"), _round_mask(kw, kh, radius))
+    canvas.putalpha(alpha)
+    return canvas
+
+
+def build(slots, icon_px, volume_steps, key=None):
+    """key = (key_w, key_h, corner_radius) of the card's keys: version 2 (pictures fill the
+    key); None: version 1 with icon_px square pictures (older firmware)."""
+    steps = max(4, min(100, int(volume_steps)))
+    if key:
+        kw, kh, radius = key
+        head = bytearray(b"DK" + bytes([2, len(slots), kw & 0xFF, kh & 0xFF, steps, 0]))
+    else:
+        head = bytearray(b"DK" + bytes([1, len(slots), icon_px & 0xFF, steps]))
     icons = []
     for i, s in enumerate(slots):
         kind, code, mods = slot_kind(i, s.get("action", {}))
         img = image_from_data_url(s.get("img", ""))
         has = 1 if img is not None else 0
         if has:
-            icons.append(icon_pixels(img, icon_px))
+            if key:
+                icons.append(_to565(key_picture(img, kw, kh, radius, bool(s.get("label")))))
+            else:
+                icons.append(icon_pixels(img, icon_px))
         head += bytes([kind, code & 0xFF, mods & 0xFF, has]) + label_bytes(s.get("label", ""))
     return bytes(head) + b"".join(icons)

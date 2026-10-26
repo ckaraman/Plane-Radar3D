@@ -6,7 +6,7 @@ import time
 from . import actions, blob
 from .config import Config
 from .device import Device
-from .media import MediaWatcher, cover_jpeg
+from .media import MediaWatcher, cover_jpeg, cover_size, lookup_cover
 from .volume import VolumeWatcher
 
 
@@ -18,8 +18,10 @@ class Core:
         self.volume = VolumeWatcher(self._volume_changed, log=log)
         self.media = MediaWatcher(self._media_changed, log=log)
         self.now = {"none": True}
-        self._cover = None          # (jpeg bytes, id) waiting for the card
-        self._cover_sent_id = None
+        self._cover = None          # (jpeg, track id, w, h, version) for the card
+        self._cover_ver = 0
+        self._cover_sent = None     # version the card has
+        self._cover_lock = threading.Lock()
         self._last_now_sent = 0.0
         self._was_connected = False
         self.upload = {"running": False, "pct": 0, "text": "", "error": ""}
@@ -52,22 +54,46 @@ class Core:
     def _media_changed(self, state, cover):
         self.now = state
         if cover is not None and not state.get("none"):
-            st = self.device.status()
-            try:
-                self._cover = (cover_jpeg(cover, st["w"], st["h"]), state.get("id", 0))
-            except Exception as e:  # noqa: BLE001 - a picture Pillow cannot read
-                self.log("cover: %s" % e)
+            threading.Thread(target=self._make_cover, args=(cover, dict(state)), name="cover", daemon=True).start()
         self._send_now()
 
+    def _make_cover(self, raw, state):
+        """Screen-sized JPEG from the media session's picture; a small one (browsers often
+        give 120-300 px) is swapped for the shop's large cover when it is the same song."""
+        st = self.device.status()
+        w, h = int(st.get("w") or 800), int(st.get("h") or 480)
+        try:
+            src = raw
+            size = max(cover_size(raw))
+            if size < 400 and self.config.settings.get("hq_cover", True):
+                try:
+                    better = lookup_cover(state.get("t"), state.get("a"))
+                    if better:
+                        self.log("cover: %d px -> shop cover %d px" % (size, max(cover_size(better))))
+                        src = better
+                except Exception as e:  # noqa: BLE001 - offline, not found
+                    self.log("cover lookup: %s" % e)
+            jpeg, cw, ch = cover_jpeg(src, w, h)
+        except Exception as e:  # noqa: BLE001 - a picture Pillow cannot read
+            self.log("cover: %s" % e)
+            return
+        with self._cover_lock:
+            if self.now.get("id") != state.get("id"):
+                return  # the song changed meanwhile
+            self._cover_ver += 1
+            self._cover = (jpeg, state.get("id", 0), cw, ch, self._cover_ver)
+
+    def _now_msg(self):
+        if not self.config.settings.get("music_screen", True) or self.now.get("none"):
+            return {"none": True}
+        msg = dict(self.now)
+        pos = self.media.position()
+        msg["p"], msg["pm"] = int(pos), int(pos * 1000)
+        msg["back"] = int(self.config.settings.get("back_seconds", 60))
+        return msg
+
     def _send_now(self):
-        if not self.config.settings.get("music_screen", True):
-            msg = {"none": True}
-        elif self.now.get("none"):
-            msg = {"none": True}
-        else:
-            msg = dict(self.now)
-            msg["back"] = int(self.config.settings.get("back_seconds", 60))
-        self.device.send_json("NOW", msg)
+        self.device.send_json("NOW", self._now_msg())
         self._last_now_sent = time.time()
 
     def _pump(self):
@@ -81,7 +107,7 @@ class Core:
                 continue
             if not self._was_connected:  # (re)connected: tell it everything
                 self._was_connected = True
-                self._cover_sent_id = None
+                self._cover_sent = None
                 last_vol = 0.0
                 self._last_now_sent = 0.0
             if time.time() - last_vol >= 2.0:
@@ -93,25 +119,39 @@ class Core:
             if time.time() - self._last_now_sent >= 5.0:
                 self._send_now()
             c = self._cover
-            if c and c[1] != self._cover_sent_id and self.config.settings.get("music_screen", True) \
-                    and not self.now.get("none"):
-                if dev.send_cover(c[0], c[1]):
-                    self._cover_sent_id = c[1]
-                    self._send_now()
-                else:
-                    time.sleep(3)
+            if c and c[4] != self._cover_sent and c[1] == self.now.get("id") \
+                    and self.config.settings.get("music_screen", True) and not self.now.get("none"):
+                if dev.send_cover(c[0], c[1], c[2], c[3], abort=lambda: self._cover is not c):
+                    self._cover_sent = c[4]
+                elif self._cover is c:
+                    time.sleep(2)
 
     # ------------------------------------------------------------------ editor
     def send_keys_to_card(self):
         """Builds the key set and uploads it (runs in a thread; see self.upload)."""
         if self.upload["running"]:
             return False
+        if self.device.released:  # sending means: take the card back
+            self.device.release(False)
+        for _ in range(24):
+            if self.device.connected:
+                break
+            time.sleep(0.25)
         if not self.device.connected:
-            self.upload.update(running=False, pct=0, text="", error="Kart bağlı değil.")
+            self.upload.update(running=False, pct=0, text="", error="Kart bağlı değil. USB kablosunu ve kurulum sayfasının kartı bırakmış olduğunu kontrol et.")
             return False
         slots, settings = self.config.snapshot()
         st = self.device.status()
-        data = blob.build(slots, int(st.get("deckicon") or 72), settings.get("steps", 50))
+        key = None
+        if st.get("deckkw") and st.get("deckkh"):  # firmware 0.32+: pictures fill the key
+            key = (int(st["deckkw"]), int(st["deckkh"]), round(18 * int(st.get("w") or 800) / 800))
+        try:
+            data = blob.build(slots, int(st.get("deckicon") or 72), settings.get("steps", 50), key)
+        except Exception as e:  # noqa: BLE001
+            self.log("keys: %s" % e)
+            self.upload.update(running=False, pct=0, text="", error="Tuşlar hazırlanamadı: %s" % e)
+            return False
+        self.log("keys: %d KB for the card (%s)" % (len(data) // 1024, "whole-key pictures" if key else "small pictures"))
         self.upload.update(running=True, pct=0, text="Hazırlanıyor…", error="")
 
         def work():
@@ -119,6 +159,7 @@ class Core:
                 self.device.upload_deck(data, lambda pct, text: self.upload.update(pct=pct, text=text))
                 self.upload.update(running=False, pct=100, text="Tuşlar karta gönderildi.")
             except Exception as e:  # noqa: BLE001
+                self.log("keys: %s" % e)
                 self.upload.update(running=False, error=str(e) or "Gönderilemedi")
 
         threading.Thread(target=work, name="upload", daemon=True).start()

@@ -35,20 +35,20 @@ def list_programs():
     return out
 
 
-def _png_data_url(img, size=128):
+def _png_data_url(img, size=320):
+    """A key picture as a PNG data URL: its own shape (the card fills or fits the key with
+    it), at most size px."""
     img = img.convert("RGBA")
-    if max(img.size) != size:
+    if max(img.size) > size:
         k = size / max(img.size)
         img = img.resize((max(1, round(img.width * k)), max(1, round(img.height * k))), Image.LANCZOS)
-    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    canvas.paste(img, ((size - img.width) // 2, (size - img.height) // 2), img)
     buf = io.BytesIO()
-    canvas.save(buf, "PNG")
+    img.save(buf, "PNG", optimize=True)
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def icon_data_url(path):
-    """The program's own icon (largest in the .exe), as a 128 px PNG data URL; '' if none."""
+    """The program's own icon (largest in the .exe) as a PNG data URL; '' if none."""
     from .actions import lnk_target
 
     target = lnk_target(path)
