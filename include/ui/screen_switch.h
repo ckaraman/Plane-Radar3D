@@ -42,6 +42,30 @@ constexpr int kRadarWaterX = S(4);
 inline bool radarWaterButtonHit(int x, int y) {
   return hitBox(x, y, kRadarWaterX, kWaterBtnY, kWaterBtnW, kWaterBtnH);
 }
+
+// Stream deck button, left of HAVA on the radar: opens the deck screen.
+constexpr int kDeckBtnW = S(56);
+constexpr int kDeckBtnH = kSwitchH;
+constexpr int kDeckBtnX = kSwitchX - S(6) - kDeckBtnW;
+constexpr int kDeckBtnY = kSwitchY;
+inline bool deckButtonHit(int x, int y) {
+  return hitBox(x, y, kDeckBtnX, kDeckBtnY, kDeckBtnW, kDeckBtnH);
+}
+
+/** The deck button: a rounded box with a 3 x 2 grid of small keys. */
+template <typename Gfx, typename Color>
+void drawDeckButton(Gfx& g, Color panel, Color edge, Color keys) {
+  g.fillRoundRect(kDeckBtnX, kDeckBtnY, kDeckBtnW, kDeckBtnH, S(8), panel);
+  g.drawRoundRect(kDeckBtnX, kDeckBtnY, kDeckBtnW, kDeckBtnH, S(8), edge);
+  constexpr int kw = S(9), kh = S(8), gap = S(3);
+  const int x0 = kDeckBtnX + (kDeckBtnW - (3 * kw + 2 * gap)) / 2;
+  const int y0 = kDeckBtnY + (kDeckBtnH - (2 * kh + gap)) / 2;
+  for (int r = 0; r < 2; ++r) {
+    for (int c = 0; c < 3; ++c) {
+      g.fillRoundRect(x0 + c * (kw + gap), y0 + r * (kh + gap), kw, kh, S(2), keys);
+    }
+  }
+}
 #endif
 
 /**

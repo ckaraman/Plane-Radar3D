@@ -17,6 +17,7 @@
 #include "services/adsb_client.h"
 #include "services/clock_service.h"
 #include "services/display_prefs.h"
+#include "services/hid_keys.h"
 #include "services/map_store.h"
 #include "services/radar_location.h"
 #include "services/route_service.h"
@@ -28,6 +29,7 @@
 #include "services/water_store.h"
 #include "services/wifi_setup.h"
 #include "ui/clock_display.h"
+#include "ui/deck_screen.h"
 #include "ui/radar3d.h"
 #include "ui/radar_range.h"
 #include "ui/screen_switch.h"
@@ -43,7 +45,7 @@ unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_redraw_ms = 0;
 
-enum class Screen { Radar, Clock, Weather, Water };
+enum class Screen { Radar, Clock, Weather, Water, Deck };
 volatile Screen g_screen = Screen::Radar;  // read by the network task too
 
 unsigned long g_last_aircraft_ms = 0;
@@ -82,6 +84,7 @@ size_t aircraftInRange() {
 }
 
 void repaintScreen();
+void wakeRadar();
 
 #if defined(BOARD_WS5)
 /**
@@ -141,6 +144,14 @@ void updateScreen() {
     g_last_aircraft_ms = now;
   }
 
+#if defined(BOARD_WS5)
+  // Stream deck: stays until RADAR, or closes by itself after a while without touches.
+  // The water reminder waits until it closes.
+  if (g_screen == Screen::Deck) {
+    if (!ui::deck::tick()) wakeRadar();
+    return;
+  }
+#endif
   // Water reminder / amount picker / goal setting on top of any screen.
   if (ui::water::overlayActive()) {
     if (!ui::water::overlayTick()) repaintScreen();
@@ -181,6 +192,11 @@ void repaintScreen() {
     case Screen::Clock: ui::clockDisplayEnter(); break;
     case Screen::Weather: ui::weatherDisplayEnter(); break;
     case Screen::Water: ui::water::enter(); break;
+    case Screen::Deck:
+#if defined(BOARD_WS5)
+      ui::deck::enter();
+#endif
+      break;
     case Screen::Radar: break;
   }
   g_last_redraw_ms = 0;
@@ -222,6 +238,13 @@ void openWater() {
   ui::water::enter();
 }
 
+#if defined(BOARD_WS5)
+void openDeck() {
+  g_screen = Screen::Deck;
+  ui::deck::enter();
+}
+#endif
+
 void onTouchTap(int x, int y) {
   if (ui::water::overlayActive()) {
     ui::water::overlayTap(x, y);
@@ -257,6 +280,12 @@ void onTouchTap(int x, int y) {
     }
     return;
   }
+#if defined(BOARD_WS5)
+  if (g_screen == Screen::Deck) {
+    if (ui::deck::tap(x, y) == ui::deck::Tap::Back) wakeRadar();
+    return;
+  }
+#endif
   if (g_screen != Screen::Radar) {
     wakeRadar();
     return;
@@ -266,6 +295,10 @@ void onTouchTap(int x, int y) {
     return;
   }
 #if defined(BOARD_WS5)
+  if (ui::deckButtonHit(x, y)) {
+    openDeck();
+    return;
+  }
   if (ui::radarWaterButtonHit(x, y)) {
 #else
   if (ui::waterButtonHit(x, y)) {
@@ -455,6 +488,7 @@ void adsbFetchTask(void*) {
 void setup() {
   Serial.setRxBufferSize(4096);  // setup page and USB feed send lines in bursts
   Serial.begin(115200);
+  services::hid::begin();  // 5": USB keyboard next to the serial port (stream deck)
   delay(300);
   Serial.println();
   Serial.printf("Plane Radar 3D v%s\n", config::kFirmwareVersion);

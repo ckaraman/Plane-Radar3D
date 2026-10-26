@@ -1,0 +1,31 @@
+# Compile check for the stream deck branch: builds ws5 and ws5b, publishes nothing.
+name: Deck build check
+
+on:
+  push:
+    branches: [ws5-deck]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [ws5, ws5b]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install PlatformIO
+        run: pip install "platformio==6.1.18" "click<8.2" uv
+      - name: Build
+        run: PLATFORMIO_CORE_DIR=~/.pio-${{ matrix.env }} pio run -e ${{ matrix.env }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}
+          path: .pio/build/${{ matrix.env }}/firmware*.bin

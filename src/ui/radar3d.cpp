@@ -533,6 +533,7 @@ bool overlapsUi(int x, int y, int w, int h) {
       {kInfoRX - S(2), kInfoY - S(2), (s_selected[0] && !infoInLabel()) ? kInfoRW + S(4) : 0, kInfoH + S(4)},
       {ui::kSwitchX - S(2), ui::kSwitchY - S(2), ui::kSwitchW + S(4), ui::kSwitchH + S(4)},  // HAVA
       {ui::kRadarWaterX - S(2), ui::kWaterBtnY - S(2), ui::kWaterBtnW + S(4), ui::kWaterBtnH + S(4)},  // SU
+      {ui::kDeckBtnX - S(2), ui::kDeckBtnY - S(2), ui::kDeckBtnW + S(4), ui::kDeckBtnH + S(4)},  // DECK
   };
   for (const Box& b : fixed) {
     if (intersects(me, b)) return true;
@@ -2372,6 +2373,7 @@ void drawControls() {
   drawSwitchButton();
   ui::drawWaterButton(s_spr, ui::kRadarWaterX, ui::kWaterBtnY, ui::kWaterBtnW, ui::kWaterBtnH, kPanel,
                       kRing, kCyan, kText, kBg);
+  ui::drawDeckButton(s_spr, kPanel, kRing, kCyan);
 }
 
 /** Two-line card: callsign + route codes, then altitude / speed / distance / climb. */
