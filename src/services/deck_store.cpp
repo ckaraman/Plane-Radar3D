@@ -63,7 +63,7 @@ void loadDefaults() {
       makeSlot("F18", Kind::Key, kF13 + 5),
       makeSlot("F19", Kind::Key, kF13 + 6),
       makeSlot("F20", Kind::Key, kF13 + 7),
-      makeSlot("Ctrl+Alt+Shift+P", Kind::Key, 'p', hid::kCtrl | hid::kAlt | hid::kShift),
+      makeSlot("Kısayol P", Kind::Key, 'p', hid::kCtrl | hid::kAlt | hid::kShift),
   };
   memcpy(s_slots, defaults, sizeof(s_slots));
   for (auto& p : s_icons) p = nullptr;
