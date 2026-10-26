@@ -3231,8 +3231,8 @@ void dragBegin() {
 
 void dragBy(int dx, int dy) {
   if (!s_dragging) dragBegin();
-  // The map follows the finger: dragging right swings it right.
-  s_yaw_cur = s_yaw_target = fmodf(s_yaw_cur - dx * kDragDegPerPx + 360.0f, 360.0f);
+  // The map follows the finger (direction checked on the device: + dx here).
+  s_yaw_cur = s_yaw_target = fmodf(s_yaw_cur + dx * kDragDegPerPx + 360.0f, 360.0f);
   // Dragging down looks more from above, up flatter.
   if (s_pitch_cur < 0.0f) s_pitch_cur = services::display_prefs::get().pitch_deg;
   s_pitch_cur = std::max<float>(kPitchMinDeg, std::min<float>(kPitchMaxDeg, s_pitch_cur + dy * kTiltDegPerPx));
@@ -3241,7 +3241,7 @@ void dragBy(int dx, int dy) {
 void dragEnd(float vx_px_s) {
   if (!s_dragging) return;
   s_dragging = false;
-  s_yaw_vel = std::max(-300.0f, std::min(300.0f, -vx_px_s * kDragDegPerPx));
+  s_yaw_vel = std::max(-300.0f, std::min(300.0f, vx_px_s * kDragDegPerPx));
   if (fabsf(s_yaw_vel) < 20.0f) s_yaw_vel = 0.0f;  // a slow release just stops
   auto p = services::display_prefs::get();
   p.yaw_deg = static_cast<uint16_t>(lroundf(s_yaw_cur)) % 360;
