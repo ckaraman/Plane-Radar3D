@@ -442,6 +442,8 @@ void handleMapClear() {
   sendOk(false);
 }
 
+long s_deck_next = 1;  // deck chunk expected next
+
 void handleDeckBegin(const char* json) {
   JsonDocument doc;
   if (deserializeJson(doc, json) != DeserializationError::Ok ||
@@ -453,6 +455,7 @@ void handleDeckBegin(const char* json) {
     sendError("deck_too_big");
     return;
   }
+  s_deck_next = 1;
   JsonDocument ack;
   ack["seq"] = 0;
   sendReply("DECKACK", ack);
@@ -466,6 +469,19 @@ void handleDeckChunk(char* args) {
   }
   *data++ = '\0';
   const long seq = atol(args);
+  JsonDocument ack;
+  // Chunks are numbered from 1; the helper sends a few ahead. A repeated one is answered
+  // again, a gap asks for the missing one (PR:DECKNAK {"need":n}).
+  if (seq > 0 && seq < s_deck_next) {
+    ack["seq"] = seq;
+    sendReply("DECKACK", ack);
+    return;
+  }
+  if (seq > s_deck_next) {
+    ack["need"] = s_deck_next;
+    sendReply("DECKNAK", ack);
+    return;
+  }
   uint8_t bytes[480];
   const int n = b64Decode(data, bytes, sizeof(bytes));
   if (n <= 0 || !services::deck::stageChunk(bytes, static_cast<size_t>(n))) {
@@ -473,7 +489,7 @@ void handleDeckChunk(char* args) {
     sendError("bad_deck_chunk");
     return;
   }
-  JsonDocument ack;
+  ++s_deck_next;
   ack["seq"] = seq;
   sendReply("DECKACK", ack);
 }
