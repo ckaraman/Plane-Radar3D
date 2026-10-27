@@ -429,7 +429,7 @@ def run():
                     return
                 except Exception:  # noqa: BLE001 - it was closed meanwhile
                     api._window = None
-            w = webview.create_window(APP_NAME, resource("web", "index.html"), js_api=api, width=1240, height=820,
+            w = webview.create_window(APP_NAME, os.path.realpath(resource("web", "index.html")), js_api=api, width=1240, height=820,
                                       min_size=(900, 640), background_color="#111634")
 
             def closed():

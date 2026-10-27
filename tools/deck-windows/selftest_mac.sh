@@ -10,5 +10,7 @@ pid=$!
 for i in $(seq 1 150); do kill -0 $pid 2>/dev/null || break; sleep 1; done
 if kill -0 $pid 2>/dev/null; then echo "::warning::mac window test still running after 150 s"; kill $pid; fi
 if [ -f smoke.txt ]; then echo "::notice::mac window test: $(tr '\n' '|' < smoke.txt)"; else echo "::warning::mac: no window test result"; fi
-echo "::notice::mac smoke log: $(tail -c 2500 smoke.log | tr '\n' '|')"
+grep -v "^ \|^Traceback\|^Exception in\|^webview.errors" smoke.log > smoke.short || true
+echo "::notice::mac smoke log: $(tail -c 3000 smoke.short | tr '\n' '|')"
+echo "::notice::mac smoke errors: $(grep -m3 -A0 "Error\|Exception:" smoke.log | tr '\n' '|' | cut -c1-1500)"
 exit 0
