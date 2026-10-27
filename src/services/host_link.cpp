@@ -15,7 +15,10 @@ namespace services::host {
 
 namespace {
 
-constexpr unsigned long kActiveMs = 6000;
+// The helper counts as there for 30 s after its last line: the knob and the volume bar
+// then keep to its value through a short gap (a long cover transfer, a busy moment)
+// instead of jumping to the card's own guess and back.
+constexpr unsigned long kActiveMs = 30000;
 constexpr size_t kMaxCover = 300 * 1024;
 
 unsigned long s_last_ms = 0;
@@ -108,6 +111,7 @@ uint32_t coverGeneration() { return s_cover_gen; }
 
 void handleVol(const char* json) {
   seen();
+  console::noteHost();
   JsonDocument doc;
   if (deserializeJson(doc, json) != DeserializationError::Ok) return;
   if (doc["v"].is<int>()) s_volume = constrain(doc["v"].as<int>(), 0, 100);

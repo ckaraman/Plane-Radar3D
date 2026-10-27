@@ -137,6 +137,7 @@ void sendHello() {
     area.add(services::deck::keyRadius());
   }
   doc["deckcustom"] = services::deck::custom();
+  doc["usbfix"] = console::usbRecoveries();       // USB link reconnects since start
   doc["queuev"] = 1;                           // queue panel (PR:QBEGIN ...)
   doc["qthumb"] = services::host::queueThumbPx();  // its small covers, px
   doc["hostv"] = 2;  // Windows helper protocol (services/host_link.h): 2 = windowed cover, "pm"

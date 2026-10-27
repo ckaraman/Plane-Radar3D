@@ -44,7 +44,13 @@ void switchTo(Mode m);
 
 /** A line arrived from the page: postpones the return to keyboard mode. */
 void noteActivity();
-/** Setup mode: back to keyboard mode after a while without lines (call from loop). */
+/** A line from the Windows / Mac helper (its volume heartbeat comes every 2 s). */
+void noteHost();
+/** Setup mode: back to keyboard mode after a while without lines. Keyboard mode: when
+ *  the helper's lines stop while it still holds the port, the USB link is reconnected
+ *  (a stalled TinyUSB port comes back that way). Call from loop. */
 void tick();
+/** Times the USB link was reconnected so (since start). */
+int usbRecoveries();
 
 }  // namespace console

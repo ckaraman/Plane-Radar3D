@@ -14,6 +14,8 @@
 #include "services/serial_ota.h"
 
 extern "C" bool tud_disconnect(void);  // TinyUSB (tusb.h)
+extern "C" bool tud_connect(void);
+extern "C" bool tud_cdc_n_connected(uint8_t itf);
 
 ConsoleIO Console;
 
@@ -123,8 +125,34 @@ void switchTo(Mode m) {
 
 void noteActivity() { s_last_activity_ms = millis(); }
 
+namespace {
+unsigned long s_last_host_ms = 0;
+bool s_host_seen = false;
+int s_recoveries = 0;
+}  // namespace
+
+void noteHost() {
+  s_last_host_ms = millis();
+  s_host_seen = true;
+}
+
+int usbRecoveries() { return s_recoveries; }
+
 void tick() {
-  if (s_mode != Mode::Setup || services::serial_ota::active()) return;
+  if (s_mode == Mode::Keyboard) {
+    // The helper sends its volume every 2 s. Silent for 20 s while a program still holds
+    // the port (DTR on): the link stalled. Unplugging and plugging in again by software
+    // brings it back; the helper reopens the port by itself.
+    if (s_host_seen && millis() - s_last_host_ms > 20000 && tud_cdc_n_connected(0)) {
+      ++s_recoveries;
+      s_host_seen = false;  // once, until the helper speaks again
+      tud_disconnect();
+      delay(400);
+      tud_connect();
+    }
+    return;
+  }
+  if (services::serial_ota::active()) return;
   if (millis() - s_last_activity_ms >= kSetupIdleMs) {
     storeSetup(false);
     restartDetached();
