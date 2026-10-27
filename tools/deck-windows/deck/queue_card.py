@@ -141,6 +141,5 @@ class QueueSender:
             k, url = self.todo.pop(0)
             px = int(hello.get("qthumb") or 40)
             jpeg = self._thumb(url, px)
-            if jpeg and not dev.send_thumb(jpeg, k, self.gen, abort=lambda: self.dirty):
-                if not self.dirty:
-                    self.todo.insert(0, (k, url))
+            if jpeg:
+                dev.send_thumb(jpeg, k, self.gen, abort=lambda: self.dirty)  # a failed one is left out
