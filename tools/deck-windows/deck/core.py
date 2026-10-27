@@ -30,6 +30,8 @@ class Core:
         self._cover_ver = 0
         self._cover_sent = None     # version the card has
         self._cover_lock = threading.Lock()
+        self._hq_key = None          # (track id, address) of the large cover asked for
+        self._hq_for_id = None       # track id that has its large cover
         self._last_now_sent = 0.0
         self._was_connected = False
         self.upload = {"running": False, "pct": 0, "text": "", "error": ""}
@@ -93,6 +95,7 @@ class Core:
 
     def _queue_changed(self, q):
         self.queue.changed()
+        self._check_hq_cover()
 
     # ------------------------------------------------------------------ to the card
     def _volume_changed(self, level, muted):
@@ -102,9 +105,49 @@ class Core:
     def _media_changed(self, state, cover):
         self.now = state
         self.queue.changed()  # the queue shows only while its song plays
-        if cover is not None and not state.get("none"):
-            threading.Thread(target=self._make_cover, args=(cover, dict(state)), name="cover", daemon=True).start()
+        if cover is not None and not state.get("none") and self._hq_for_id != state.get("id"):
+            if self._hq_likely(state):
+                # The browser extension brings the large one in a moment: the small one only
+                # if it does not.
+                def later(raw=cover, st=dict(state)):
+                    time.sleep(3)
+                    if self._hq_for_id != st.get("id") and self.now.get("id") == st.get("id"):
+                        self._make_cover(raw, st)
+                threading.Thread(target=later, name="cover-wait", daemon=True).start()
+            else:
+                threading.Thread(target=self._make_cover, args=(cover, dict(state)), name="cover", daemon=True).start()
         self._send_now()
+        self._check_hq_cover()
+
+    def _hq_likely(self, state):
+        art = self.link.art
+        return bool(self.link.status()["connected"] and art and queue_card.same_song(art["now"], state.get("t")))
+
+    def _check_hq_cover(self):
+        """YouTube Music in the browser (with the extension): its large cover instead of
+        the small copy the system's media info carries."""
+        art, now = self.link.art, self.now
+        if not art or now.get("none") or not queue_card.same_song(art["now"], now.get("t")):
+            return
+        key = (now.get("id"), art["art"])
+        if key == self._hq_key:
+            return
+        self._hq_key = key
+        st = dict(now)
+
+        def work():
+            try:
+                raw = queue_card.fetch_picture(art["art"])
+            except Exception as e:  # noqa: BLE001 - offline
+                self.log("large cover: %s" % e)
+                raw = None
+            if raw and self.now.get("id") == st.get("id"):
+                self._hq_for_id = st.get("id")
+                self._make_cover(raw, st)
+                self.log("large cover for %s" % st.get("t"))
+            elif not raw:
+                self._hq_key = None
+        threading.Thread(target=work, name="cover-large", daemon=True).start()
 
     def _make_cover(self, raw, state):
         """Screen-fitting JPEG of the picture the media session gives."""

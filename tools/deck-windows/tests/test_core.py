@@ -288,6 +288,13 @@ def test_browser_link():
         pass
     ws.close()
     assert wait(lambda: got[-1] is None)
+    assert queue_card.same_song("Gece Yolu", "gece yolu") and not queue_card.same_song("A", "")
+    assert queue_card.fetch_picture("https://evil.example/x.jpg") is None  # only YouTube's picture servers
+    ws2 = connect(url, origin=browser_link.ORIGIN, open_timeout=2)
+    ws2.send(json.dumps({"t": "queue", "items": [], "cur": -1, "now": "Tek Şarkı",
+                         "art": "https://lh3.googleusercontent.com/abc=w1200-h1200-l90-rj"}))
+    assert wait(lambda: link.art and link.art["now"] == "Tek Şarkı")  # a cover without a queue list
+    ws2.close()
     assert browser_link.is_music_url("music.youtube.com/watch?v=1") and not browser_link.is_music_url("https://github.com")
 
 

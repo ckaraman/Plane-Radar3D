@@ -9,7 +9,7 @@ import unicodedata
 import urllib.request
 
 ROWS = 30
-PIC_HOSTS = ("i.ytimg.com", "lh3.googleusercontent.com", "yt3.ggpht.com", "yt3.googleusercontent.com")
+PIC_HOSTS = ("ytimg.com", "googleusercontent.com", "ggpht.com")
 
 
 def _norm(t):
@@ -46,6 +46,33 @@ def card_rows(queue, now):
         rows.append({"x": x, "t": cut_utf8(it["t"], 62), "a": cut_utf8(it["a"], 46), "d": cut_utf8(it["d"], 8),
                      "img": it.get("img", "")})
     return rows
+
+
+def fetch_picture(url, limit=4 * 1024 * 1024):
+    """A picture from YouTube's picture servers (only those), or None. A video without a
+    "maxres" picture falls back to the smaller ones."""
+    import urllib.error
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    if not any(host == h or host.endswith("." + h) for h in PIC_HOSTS):
+        return None
+    tries = [url]
+    if "/maxresdefault.jpg" in url:
+        tries += [url.replace("maxresdefault", n) for n in ("sddefault", "hqdefault")]
+    for u in tries:
+        try:
+            with urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "PlaneRadarDeck"}), timeout=8) as r:
+                return r.read(limit)
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+    return None
+
+
+def same_song(a, b):
+    a, b = _norm(a), _norm(b)
+    return bool(a and b and (a == b or a in b or b in a))
 
 
 def thumb_jpeg(url, px):

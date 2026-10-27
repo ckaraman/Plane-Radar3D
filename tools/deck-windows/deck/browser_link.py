@@ -98,6 +98,7 @@ class BrowserLink:
         self.conns = {}          # connection -> {"brand", "v"}
         self.lock = threading.Lock()
         self.queue = None        # newest queue from YouTube Music
+        self.art = None          # {"now": title, "art": large cover address}
         self.queue_conn = None
         self._ids = itertools.count(1)
         self._waiting = {}       # open id -> (event, holder)
@@ -161,7 +162,7 @@ class BrowserLink:
                 self.conns.pop(conn, None)
                 gone = conn is self.queue_conn
             if gone:
-                self.queue, self.queue_conn = None, None
+                self.queue, self.queue_conn, self.art = None, None, None
                 self.on_queue(None)
 
     def _queue(self, conn, msg):
@@ -171,10 +172,14 @@ class BrowserLink:
                 items.append({"t": str(it.get("t"))[:120], "a": str(it.get("a") or "")[:120],
                               "d": str(it.get("d") or "")[:10], "img": str(it.get("img") or "")[:600]})
         cur = msg.get("cur")
-        q = {"items": items, "cur": cur if isinstance(cur, int) else -1, "now": str(msg.get("now") or "")[:120]}
+        now = str(msg.get("now") or "")[:120]
+        art = str(msg.get("art") or "")[:800]
+        # The large cover of what plays (kept even when there is no queue list).
+        self.art = {"now": now, "art": art} if (now and art.startswith("https://")) else None
+        q = {"items": items, "cur": cur if isinstance(cur, int) else -1, "now": now}
         if not items:
             q = None
-        self.queue, self.queue_conn = q, (conn if q else None)
+        self.queue, self.queue_conn = q, (conn if (q or self.art) else None)
         self.on_queue(q)
 
     def _ping(self):

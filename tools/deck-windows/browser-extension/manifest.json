@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Plane Radar Deck",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "YouTube Music sırasını Plane Radar kartına gösterir; kartın tuşları açık sekmeye geçer.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArbB+eyZ9nJVFuZwWZFk/WfsdunN/L+41jM3okVYkQbSxulroUtRuL0ZL3Sjgm2KU/5ne2/8dBn+HUabWIuGcZZbbmYOTcyKtQmfG0p+i7xAurslgQPtYnIE/FX99IH5KzdBgjc+2j4x39j2G+zL2WCKBbLRCSiXPmeEQ8K4Sg1J8iCdCAceJcnRdCzrSE1wkja4CPJH+t4tiS+lggHVOl9IjEZmdezx9W5i+9zQVZJnRWGl1SHS6InrUweO5iqm6e88psBK3yv/pWT8rKIPeJvu3PNe9YzNY6mZtvX1Nv8ggWLJlr+XvVDJnkKtHDgnt/fEnlHcTpECjIZYqrdpYXwIDAQAB",
   "minimum_chrome_version": "116",

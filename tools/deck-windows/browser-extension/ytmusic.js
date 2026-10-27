@@ -25,6 +25,32 @@
     return out;
   }
 
+  // The cover in a large size: YouTube's picture servers make any size from the address.
+  function hiRes(u) {
+    if (!u || !u.startsWith('http')) return '';
+    const v = u.match(/^https:\/\/i\d?\.ytimg\.com\/vi(?:_webp)?\/([^/]+)\//);
+    if (v) return 'https://i.ytimg.com/vi/' + v[1] + '/maxresdefault.jpg';
+    if (/googleusercontent\.com|ggpht\.com/.test(u)) {
+      return u.replace(/=w\d+-h\d+[^?#]*$/, '=w1200-h1200-l90-rj').replace(/=s\d+[^?#]*$/, '=s1200');
+    }
+    return u;
+  }
+
+  function artwork() {
+    try {
+      const a = navigator.mediaSession && navigator.mediaSession.metadata && navigator.mediaSession.metadata.artwork;
+      if (a && a.length) {
+        let best = a[0];
+        const size = (x) => parseInt(String(x.sizes || '').split('x')[0], 10) || 0;
+        for (const x of a) if (size(x) > size(best)) best = x;
+        if (best.src) return hiRes(best.src);
+      }
+    } catch (_) { /* not readable here: the player bar picture */ }
+    const img = document.querySelector('ytmusic-player-bar img.image') ||
+                document.querySelector('ytmusic-player-bar .thumbnail img');
+    return img ? hiRes(img.src) : '';
+  }
+
   function read() {
     const els = queueItems();
     let cur = -1;
@@ -42,7 +68,7 @@
       };
     });
     const bar = document.querySelector('ytmusic-player-bar .title');
-    return { t: 'queue', items, cur, now: bar ? bar.textContent.trim() : '' };
+    return { t: 'queue', items, cur, now: bar ? bar.textContent.trim() : '', art: artwork() };
   }
 
   function push(force) {

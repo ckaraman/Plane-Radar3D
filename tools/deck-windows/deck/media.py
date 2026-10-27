@@ -66,7 +66,7 @@ def cover_size(raw):
         return (0, 0)
 
 
-def cover_jpeg(raw, w, h, max_bytes=72 * 1024, min_side=240):
+def cover_jpeg(raw, w, h, max_bytes=90 * 1024, min_side=240):
     """Album art for a w x h screen at its own size (never blown up: a small cover stays
     small and sharp; the card shows it in the middle, fading into the dark page), only
     made smaller to fit, as a baseline JPEG. -> (jpeg, width, height)"""
