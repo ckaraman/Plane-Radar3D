@@ -7,6 +7,9 @@ void wifiResetCredentialsAndReboot();
 bool wifiSetupConnect();
 /** Reconnect using saved creds; never opens any setup portal. */
 bool wifiReconnect();
+/** Starts a new try with the saved network and returns at once (no screen): the 5" board
+ *  keeps its control screen running while Wi-Fi is away. False if no network is saved. */
+bool wifiReconnectInBackground();
 /** Polls the USB setup page; call every loop() iteration. */
 void wifiLoop();
 bool wifiBootButtonPressed();

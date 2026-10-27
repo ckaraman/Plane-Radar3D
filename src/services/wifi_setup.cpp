@@ -312,6 +312,15 @@ void wifiResetCredentialsAndReboot() {
   esp_restart();
 }
 
+bool wifiReconnectInBackground() {
+  if (wifiLinkUp()) return true;
+  if (!storedWifiCredentials()) return false;
+  Console.println("WiFi away: trying again in the background");
+  WiFi.disconnect(false);
+  startStaConnect(String(), String());  // the saved network
+  return true;
+}
+
 bool wifiReconnect() {
   initBootButton();
   Console.println("WiFi reconnecting...");

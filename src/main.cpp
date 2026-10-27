@@ -69,11 +69,17 @@ int g_touch_first_y = 0;
 bool online() { return WiFi.status() == WL_CONNECTED || services::usb_feed::active(); }
 
 void showRadarIfConnected() {
+#if defined(BOARD_WS5)
+  // 5": the screens stay usable without Wi-Fi (the control screen only needs the USB
+  // cable); the radar shows that the network is away and Wi-Fi comes back on its own.
+  if (online()) services::clock::startSync();
+#else
   if (!online()) {
     g_radar_visible = false;
     return;
   }
   services::clock::startSync();  // no-op after the first call
+#endif
   g_screen = Screen::Radar;
   g_last_aircraft_ms = millis();
   ui::radar3d::drawFrame();
@@ -551,6 +557,41 @@ void loop() {
   wifiLoop();
   console::tick();
   services::sht30::tick();
+
+#if defined(BOARD_WS5)
+  {
+    // Wi-Fi away: retried in the background, the screens keep working (the stream deck
+    // needs only the USB cable).
+    static unsigned long last_try_ms = 0;
+    static bool was_online = true;
+    const bool on = online();
+    if (!on && millis() - last_try_ms >= config::kWifiReconnectIntervalMs) {
+      last_try_ms = millis();
+      if (was_online) Console.println("WiFi lost - the screens keep running");
+      wifiReconnectInBackground();
+    }
+    if (on && !was_online) {
+      Console.println("WiFi back");
+      services::clock::startSync();
+    }
+    was_online = on;
+    if (!g_radar_visible) showRadarIfConnected();
+    pollTouch();
+    unsigned long interval = g_screen == Screen::Radar ? config::kRadarFrameIntervalMs
+                             : g_screen == Screen::Deck ? 33UL  // knob and music page move smoothly
+                                                        : config::kRadarRedrawIntervalMs;
+    // An album cover on its way from the Windows helper: one small chunk per answer, so
+    // fewer frames for those few seconds let it arrive many times faster.
+    if (services::host::coverReceiving() && interval < 250UL) interval = 250UL;
+    if (millis() - g_last_redraw_ms >= interval) {
+      g_last_redraw_ms = millis();
+      updateScreen();
+      pollTouch();  // a short tap may start while the frame is being drawn
+    }
+    delay(5);
+    return;
+  }
+#endif
 
   if (!online()) {
     if (g_radar_visible) {

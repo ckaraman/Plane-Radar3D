@@ -8,6 +8,9 @@
 #include <Arduino.h>
 #include <lgfx/v1/lgfx_fonts.hpp>
 #if !defined(RADAR3D_HOST_TEST)
+#include <WiFi.h>
+#endif
+#if !defined(RADAR3D_HOST_TEST)
 #include <esp_heap_caps.h>
 #if !defined(RADAR3D_HOST_TEST)
 #include <freertos/FreeRTOS.h>
@@ -2303,8 +2306,16 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   s_spr.setTextColor(kText);
   s_spr.drawString("RADAR 3B", S(19), ty);
   const int src_x = S(19) + s_spr.textWidth("RADAR 3B") + S(10);
-  s_spr.setTextColor(kTextDim);
-  s_spr.drawString(services::usb_feed::active() ? "USB" : services::adsb::sourceName(), src_x, ty);
+#if !defined(RADAR3D_HOST_TEST)
+  const bool wifi_away = !services::usb_feed::active() && WiFi.status() != WL_CONNECTED;
+#else
+  const bool wifi_away = false;
+#endif
+  s_spr.setTextColor(wifi_away ? kOrange : kTextDim);
+  s_spr.drawString(services::usb_feed::active() ? "USB"
+                   : wifi_away                  ? "Wi-Fi yok, yeniden bağlanıyor"
+                                                : services::adsb::sourceName(),
+                   src_x, ty);
 
   char buf[40];
   char range[12];
