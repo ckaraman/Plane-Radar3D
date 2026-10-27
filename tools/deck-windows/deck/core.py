@@ -36,6 +36,7 @@ class Core:
         self._was_connected = False
         self.upload = {"running": False, "pct": 0, "text": "", "error": ""}
         threading.Thread(target=self._pump, name="pump", daemon=True).start()
+        threading.Thread(target=self._heartbeat, name="heartbeat", daemon=True).start()
 
     # ------------------------------------------------------------------ from the card
     def _card_event(self, tag, data):
@@ -177,9 +178,27 @@ class Core:
         self.device.send_json("NOW", self._now_msg())
         self._last_now_sent = time.time()
 
-    def _pump(self):
-        """Heartbeat (volume every 2 s, now playing every 5 s), the cover once per track."""
+    def _heartbeat(self):
+        """Volume every 2 s, now playing every 5 s: on their own, so a cover or queue on its
+        way never holds them up (the card shows its own guess when they stop coming)."""
         last_vol = 0.0
+        while True:
+            time.sleep(0.25)
+            dev = self.device
+            if not dev.connected or dev.busy:
+                last_vol, self._last_now_sent = 0.0, 0.0
+                continue
+            if time.time() - last_vol >= 2.0:
+                last_vol = time.time()
+                if self.config.settings.get("send_volume", True):
+                    dev.send_json("VOL", {"v": self.volume.level, "m": self.volume.muted})
+                else:
+                    dev.send_json("VOL", {"v": 50, "m": False})
+            if time.time() - self._last_now_sent >= 5.0:
+                self._send_now()
+
+    def _pump(self):
+        """The cover once per track, the queue: transfers that take a while."""
         while True:
             time.sleep(0.25)
             dev = self.device
@@ -195,16 +214,6 @@ class Core:
                     continue
                 self._cover_sent = None
                 self.queue.reset()
-                last_vol = 0.0
-                self._last_now_sent = 0.0
-            if time.time() - last_vol >= 2.0:
-                last_vol = time.time()
-                if self.config.settings.get("send_volume", True):
-                    dev.send_json("VOL", {"v": self.volume.level, "m": self.volume.muted})
-                else:
-                    dev.send_json("VOL", {"v": 50, "m": False})
-            if time.time() - self._last_now_sent >= 5.0:
-                self._send_now()
             c = self._cover
             if c and c[4] != self._cover_sent and c[1] == self.now.get("id") \
                     and self.config.settings.get("music_screen", True) and not self.now.get("none"):

@@ -103,70 +103,113 @@ def thumb_jpeg(url, px):
     return out.getvalue()
 
 
+THUMBS = 10        # rows that get a small cover (the ones in view first)
+MIN_GAP = 3.0      # s between two queue sends: a busy page does not flood the cable
+
+
 class QueueSender:
+    """Sends the queue a little at a time from the card loop; pictures are fetched from
+    the internet in a thread of their own, so the card loop never waits on the network."""
+
     def __init__(self, core, log=print):
+        import threading
+        import time
+
+        self._time = time
         self.core = core
         self.log = log
         self.dirty = True
-        self.sent_key = None
+        self.sent_titles = None   # rows as the card has them (without pictures)
+        self.sent_pics = {}       # row -> picture address the card has
         self.card_has = False
         self.gen = 0
-        self.todo = []       # (row, url) small covers still to send
-        self.cache = collections.OrderedDict()
+        self.last_send = 0.0
+        self.cache = collections.OrderedDict()   # (url, px) -> jpeg | None
+        self.lock = threading.Lock()
+        self.wanted = []          # (url, px) to fetch
+        self.wake = threading.Event()
+        threading.Thread(target=self._fetcher, name="queue-pictures", daemon=True).start()
 
     def changed(self):
         self.dirty = True
 
     def reset(self):
-        self.sent_key, self.card_has, self.todo, self.dirty = None, False, [], True
+        self.sent_titles, self.sent_pics, self.card_has, self.dirty = None, {}, False, True
 
     def rows(self):
         if not self.core.config.settings.get("queue", True):
             return None
         return card_rows(self.core.link.queue, self.core.now)
 
-    def _thumb(self, url, px):
-        key = (url, px)
-        if key in self.cache:
-            self.cache.move_to_end(key)
-            return self.cache[key]
-        try:
-            data = thumb_jpeg(url, px)
-        except Exception as e:  # noqa: BLE001 - offline, a picture that is gone
-            self.log("queue picture: %s" % e)
-            data = None
-        self.cache[key] = data
-        while len(self.cache) > 300:
-            self.cache.popitem(last=False)
-        return data
+    # ------------------------------------------------------------ pictures (own thread)
+    def _fetcher(self):
+        while True:
+            self.wake.wait(5)
+            self.wake.clear()
+            while True:
+                with self.lock:
+                    job = next((w for w in self.wanted if w not in self.cache), None)
+                if job is None:
+                    break
+                try:
+                    data = thumb_jpeg(job[0], job[1])
+                except Exception as e:  # noqa: BLE001 - offline, a picture that is gone
+                    self.log("queue picture: %s" % e)
+                    data = None
+                with self.lock:
+                    self.cache[job] = data
+                    while len(self.cache) > 300:
+                        self.cache.popitem(last=False)
 
+    def _ready(self, url, px):
+        with self.lock:
+            if (url, px) in self.cache:
+                return True, self.cache[(url, px)]
+            if (url, px) not in self.wanted:
+                self.wanted.append((url, px))
+                self.wanted = self.wanted[-40:]
+        self.wake.set()
+        return False, None
+
+    # ------------------------------------------------------------ card loop
     def pump(self, dev):
         hello = dev.hello or {}
         if not hello.get("queuev"):
             return
-        if self.dirty:
+        rows = None
+        if self.dirty and self._time.time() - self.last_send >= MIN_GAP:
             self.dirty = False
             rows = self.rows()
-            key = json.dumps(rows, sort_keys=True)
-            if key == self.sent_key:
-                return
-            if rows is None:
-                if self.card_has and not dev.clear_queue():
+            titles = None if rows is None else [[r["x"], r["t"], r["a"], r["d"]] for r in rows]
+            if titles != self.sent_titles:
+                self.last_send = self._time.time()
+                if rows is None:
+                    if self.card_has and not dev.clear_queue():
+                        self.dirty = True
+                        return
+                    self.card_has, self.sent_titles, self.sent_pics = False, None, {}
+                    return
+                self.gen = (self.gen + 1) % 60000
+                card = [{"x": r["x"], "t": r["t"], "a": r["a"], "d": r["d"]} for r in rows]
+                if dev.send_queue(card, self.gen, "YouTube Music"):
+                    self.sent_titles, self.card_has, self.sent_pics = titles, True, {}
+                else:
                     self.dirty = True
                     return
-                self.card_has, self.todo, self.sent_key = False, [], key
-                return
-            self.gen = (self.gen + 1) % 60000
-            card = [{"x": r["x"], "t": r["t"], "a": r["a"], "d": r["d"]} for r in rows]
-            if dev.send_queue(card, self.gen, "YouTube Music"):
-                self.sent_key, self.card_has = key, True
-                self.todo = [(k, r["img"]) for k, r in enumerate(rows) if r["img"]]
-            else:
-                self.dirty = True
+            self._rows = rows
+        if not self.card_has:
             return
-        if self.todo:
-            k, url = self.todo.pop(0)
-            px = int(hello.get("qthumb") or 40)
-            jpeg = self._thumb(url, px)
+        # One picture per round, for a row whose picture the card does not have yet.
+        rows = getattr(self, "_rows", None) or []
+        px = int(hello.get("qthumb") or 40)
+        for k, r in enumerate(rows[:THUMBS]):
+            url = r.get("img")
+            if not url or self.sent_pics.get(k) == url:
+                continue
+            ok, jpeg = self._ready(url, px)
+            if not ok:
+                continue  # still on its way from the internet
+            self.sent_pics[k] = url  # a failed one is not tried again
             if jpeg:
-                dev.send_thumb(jpeg, k, self.gen, abort=lambda: self.dirty)  # a failed one is left out
+                dev.send_thumb(jpeg, k, self.gen, abort=lambda: self.dirty)
+            return

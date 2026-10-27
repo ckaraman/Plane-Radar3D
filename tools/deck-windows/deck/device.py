@@ -120,7 +120,9 @@ class Device:
             r = self.request("PR:HELLO", ["HELLO"], 1.5)
             if r:
                 self.hello = r[1]
-                self.log("card on %s, %s, USB %s" % (port, self.hello.get("fw"), self.hello.get("usb")))
+                self.log("card on %s, %s, USB %s%s" % (port, self.hello.get("fw"), self.hello.get("usb"),
+                                                      ", USB link reconnected %s times" % self.hello["usbfix"]
+                                                      if self.hello.get("usbfix") else ""))
                 return True
             if self.ser is None:
                 return False
