@@ -24,7 +24,8 @@ python3 -c "import app; img = app.tray_image().resize((512, 512)); img.save('ico
 ICON=(); [ -f icon.icns ] && ICON=(--icon icon.icns)
 pyinstaller --noconfirm --windowed --name "Plane Radar Deck" "${ICON[@]}" \
   --osx-bundle-identifier com.planeradar.deck \
-  --add-data "web:web" --collect-all webview \
+  --add-data "web:web" --add-data "browser-extension:browser-extension" --collect-all webview \
+  --collect-submodules websockets \
   --hidden-import AppKit --hidden-import Foundation --hidden-import Quartz \
   --hidden-import ApplicationServices --hidden-import WebKit --hidden-import PyObjCTools.AppHelper \
   app.py

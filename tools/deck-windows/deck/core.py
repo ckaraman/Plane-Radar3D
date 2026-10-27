@@ -1,9 +1,10 @@
 """Ties it together: card <-> volume, what is playing, key actions."""
 
+import os
 import threading
 import time
 
-from . import blob
+from . import blob, browser_link, queue_card
 from .config import Config
 from .device import Device
 from .media import cover_jpeg
@@ -17,6 +18,13 @@ class Core:
         self.device = Device(self._card_event, log=log)
         self.volume = volume.VolumeWatcher(self._volume_changed, log=log)
         self.media = media.MediaWatcher(self._media_changed, log=log)
+        try:
+            self.ext_folder, self.ext_updated = browser_link.install_files()
+        except OSError as e:
+            self.ext_folder, self.ext_updated = browser_link.extension_dir(), False
+            log("extension files: %s" % e)
+        self.link = browser_link.BrowserLink(self._queue_changed, log=log)
+        self.queue = queue_card.QueueSender(self, log=log)
         self.now = {"none": True}
         self._cover = None          # (jpeg, track id, w, h, version) for the card
         self._cover_ver = 0
@@ -39,12 +47,52 @@ class Core:
             self.volume.set(int(data.get("v", self.volume.level)))
         elif tag == "MUTE":
             self.volume.toggle_mute()
+        elif tag == "QPLAY":  # a song from the queue panel on the card
+            self.link.play(int(data.get("x", -1)), str(data.get("t") or ""))
 
     def _run_action(self, action):
         try:
+            if action.get("type") == "site" and self._open_in_tab(action):
+                return
             actions.run(action)
         except Exception as e:  # noqa: BLE001
             self.log("action: %s" % e)
+
+    def _open_in_tab(self, action):
+        """A site already open in the browser (with the extension): its tab to the front,
+        no new one. False: open it the usual way."""
+        url = (action.get("url") or "").strip()
+        if not url:
+            return False
+        reuse = action.get("reuse")
+        if reuse is None:
+            reuse = browser_link.is_music_url(url)
+        if not reuse:
+            return False
+        if "://" not in url:
+            url = "https://" + url
+        browser = action.get("browser", "")
+        default_exe = None if browser else actions.default_browser_exe()
+        allow = getattr(actions, "allow_foreground", None)
+        if allow:
+            allow()  # Windows: let the browser come to the front
+        if not self.link.open_url(url, browser, default_exe):
+            return False
+        front = getattr(actions, "_front_window_of", None)
+        exe = None
+        if browser:
+            for b in actions.browsers():
+                if b["id"] == browser:
+                    exe = os.path.basename(b["path"])
+        else:
+            exe = default_exe
+        if front and exe and exe.lower().endswith(".exe"):
+            time.sleep(0.15)
+            front(exe)
+        return True
+
+    def _queue_changed(self, q):
+        self.queue.changed()
 
     # ------------------------------------------------------------------ to the card
     def _volume_changed(self, level, muted):
@@ -53,6 +101,7 @@ class Core:
 
     def _media_changed(self, state, cover):
         self.now = state
+        self.queue.changed()  # the queue shows only while its song plays
         if cover is not None and not state.get("none"):
             threading.Thread(target=self._make_cover, args=(cover, dict(state)), name="cover", daemon=True).start()
         self._send_now()
@@ -102,6 +151,7 @@ class Core:
                     threading.Thread(target=self.send_keys_to_card, daemon=True).start()
                     continue
                 self._cover_sent = None
+                self.queue.reset()
                 last_vol = 0.0
                 self._last_now_sent = 0.0
             if time.time() - last_vol >= 2.0:
@@ -119,6 +169,7 @@ class Core:
                     self._cover_sent = c[4]
                 elif self._cover is c:
                     time.sleep(2)
+            self.queue.pump(dev)  # a little each round: the cover and heartbeats go first
 
     # ------------------------------------------------------------------ editor
     def preview_layout(self, slots):

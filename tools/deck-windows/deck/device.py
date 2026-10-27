@@ -284,6 +284,41 @@ class Device:
                 self.log("cover: %s" % e)
             return False
 
+    def send_queue(self, rows, gen, source):
+        """The queue for the card's panel: QBEGIN, one acknowledged QITEM per row, QEND."""
+        if not self.connected or self.busy:
+            return False
+        try:
+            with self.stream_lock:
+                for line in (["PR:QBEGIN " + json.dumps({"gen": gen, "n": len(rows), "src": source}, ensure_ascii=False)] +
+                             ["PR:QITEM " + json.dumps(dict(r, k=k), ensure_ascii=False, separators=(",", ":"))
+                              for k, r in enumerate(rows)] + ["PR:QEND"]):
+                    r = self.request(line, ["QACK", "ERR"], 3)
+                    if not r or r[0] != "QACK":
+                        raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
+                    if self.busy:
+                        raise RuntimeError("aborted")
+            return True
+        except RuntimeError as e:
+            if str(e) != "aborted":
+                self.log("queue: %s" % e)
+            return False
+
+    def clear_queue(self):
+        return bool(self.connected and self.request("PR:QCLEAR", ["QACK", "ERR"], 3))
+
+    def send_thumb(self, jpeg, k, gen, abort=lambda: False):
+        """A small cover for row k of queue gen (like the album cover, one chunk at a time)."""
+        if not self.connected or self.busy:
+            return False
+        try:
+            self._transfer("QART", jpeg, 180, 1, {"k": k, "gen": gen}, abort=lambda: abort() or self.busy)
+            return True
+        except RuntimeError as e:
+            if str(e) != "aborted":
+                self.log("queue picture: %s" % e)
+            return False
+
     def upload_deck(self, blob, progress=lambda pct, text: None):
         """The key set: to setup mode, upload, back to keyboard mode."""
         if self.busy:

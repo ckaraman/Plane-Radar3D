@@ -13,7 +13,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.3.1"
+VERSION = "1.4.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 IS_MAC = sys.platform == "darwin"
 
@@ -98,13 +98,80 @@ class Api:
             "version": VERSION, "slots": slots, "settings": settings,
             "device": self._core.device.status(), "volume": {"v": v.level, "m": v.muted},
             "now": self._core.now, "browsers": [{"id": b["id"], "name": b["name"]} for b in actions.browsers()],
-            "upload": dict(self._core.upload), "platform": "mac" if IS_MAC else "win",
+            "upload": dict(self._core.upload), "platform": "mac" if IS_MAC else "win", "link": self._link(),
+            "music_hosts": list(__import__("deck.browser_link", fromlist=["MUSIC_HOSTS"]).MUSIC_HOSTS),
         }
 
     def live(self):
         v = self._core.volume
         return {"device": self._core.device.status(), "volume": {"v": v.level, "m": v.muted},
-                "now": self._core.now, "upload": dict(self._core.upload)}
+                "now": self._core.now, "upload": dict(self._core.upload), "link": self._link()}
+
+    def _link(self):
+        st = self._core.link.status()
+        st["updated"] = bool(self._core.ext_updated and st["connected"] and st["bundled"] not in st["versions"])
+        return st
+
+    # ------------------------------------------------------------ browser extension
+    def ext_browsers(self):
+        """Browsers that take the extension (Chrome and its relatives), with their path."""
+        from deck.plat import actions
+
+        return [{"id": b["id"], "name": b["name"]} for b in actions.browsers()
+                if b["id"] in ("chrome", "edge", "brave", "opera", "vivaldi", "arc")]
+
+    def ext_open(self, browser_id):
+        """Opens the browser's extensions page and copies the folder to paste."""
+        import subprocess
+
+        from deck.plat import actions
+
+        self.copy_text(self._core.ext_folder)
+        page = "edge://extensions/" if browser_id == "edge" else "chrome://extensions/"
+        for b in actions.browsers():
+            if b["id"] != browser_id:
+                continue
+            exe = b["path"]
+            if IS_MAC:
+                exe = actions.app_binary(b["path"])
+                if not exe:
+                    return False
+            try:
+                subprocess.Popen([exe, page])
+                return True
+            except OSError as e:
+                log("extensions page: %s" % e)
+        return False
+
+    def ext_folder_show(self):
+        import subprocess
+
+        folder = self._core.ext_folder
+        if IS_MAC:
+            subprocess.Popen(["/usr/bin/open", folder])
+        else:
+            os.startfile(folder)
+        return True
+
+    def copy_text(self, text):
+        try:
+            if IS_MAC:
+                import subprocess
+
+                subprocess.run(["/usr/bin/pbcopy"], input=str(text).encode("utf-8"), check=True, timeout=5)
+            else:
+                import win32clipboard
+
+                win32clipboard.OpenClipboard()
+                try:
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardText(str(text), win32clipboard.CF_UNICODETEXT)
+                finally:
+                    win32clipboard.CloseClipboard()
+            return True
+        except Exception as e:  # noqa: BLE001
+            log("copy: %s" % e)
+            return False
 
     def save_slots(self, slots):
         self._core.config.set_slots(slots)
@@ -334,6 +401,16 @@ def _deep_selftest():
     from deck import media as media_win
     from deck.plat import actions, media, programs, volume
 
+    from deck import browser_link
+
+    step("extension", lambda: "%s in %s" % (browser_link.bundled_version(), browser_link.source_dir()))
+
+    def ws_lib():
+        from websockets.sync.server import serve  # noqa: F401
+
+        return "ok"
+
+    step("websockets", ws_lib)
     step("browsers", lambda: [b["name"] for b in actions.browsers()])
     step("programs", lambda: len(programs.list_programs()))
     if IS_MAC:

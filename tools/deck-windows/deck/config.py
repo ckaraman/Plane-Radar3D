@@ -57,6 +57,7 @@ DEFAULT_SETTINGS = {
     "send_volume": True,        # real volume on the card
     "steps": 50,                # volume keys per full knob turn without the helper (Windows: 2 %)
     "close_quits": False,       # closing the window ends the program (else it stays in the tray)
+    "queue": True,              # the YouTube Music queue on the card (browser extension)
     "transport_moved": False,   # done once: previous / play / next keys taken off (they sit under the knob)
 }
 

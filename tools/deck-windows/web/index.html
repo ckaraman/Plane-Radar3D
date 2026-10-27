@@ -93,6 +93,8 @@
   .pic img { width: 72%; height: 72%; object-fit: contain; }
   .pic.drop { border-color: #c4b3ff; background: var(--sel-bg); }
   .line { display: flex; gap: 8px; } .line .in { flex: 1; min-width: 0; }
+  .steps { margin: 16px 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; font-size: 14px; }
+  .steps code { background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 6px; }
   .opt { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; border-bottom: 1px solid rgba(255,255,255,0.07); }
   .opt:last-child { border-bottom: 0; }
   .opt input[type="checkbox"] { width: 22px; height: 22px; accent-color: #b9a6ff; }
@@ -192,6 +194,7 @@
       </div>
       <div class="card" style="flex: 1 1 520px; max-width: 760px; padding-top: 6px; padding-bottom: 6px">
         <div class="opt"><label for="s-music">Müzik çalınca kartta Müzik ekranını aç</label><input type="checkbox" id="s-music"></div>
+        <div class="opt"><label for="s-queue">Sıradaki şarkıları kartta göster (YouTube Music)<br><span class="small" id="q-state">Tarayıcı eklentisi gerekir: Ayarlar › YouTube Music sırası.</span></label><input type="checkbox" id="s-queue"></div>
         <div class="opt"><label for="s-back">Müzik durunca tuşlar ekranına dön</label>
           <select class="in" id="s-back" style="width: auto; min-height: 40px">
             <option value="0">Hemen</option><option value="60">1 dakika sonra</option><option value="300">5 dakika sonra</option><option value="-1">Dönme</option>
@@ -208,6 +211,13 @@
           <div class="opt"><label for="s-vol">Gerçek ses seviyesini kartta göster</label><input type="checkbox" id="s-vol"></div>
           <div class="opt"><label for="s-close">Pencereyi kapatınca programdan tamamen çık<br><span class="small" id="t-close">Kapalıyken program görev çubuğunda çalışmaya devam eder; tuşlar ve müzik ekranı çalışır.</span></label><input type="checkbox" id="s-close"></div>
           <div class="btns" style="margin: 8px 0 16px"><button type="button" class="btn" id="b-exit">Programı kapat</button></div>
+        </div>
+        <div class="card">
+          <h2>YouTube Music sırası ve açık sekmeler</h2>
+          <p class="hint" style="margin-bottom: 10px">Tarayıcıya bir kez eklenen küçük bir eklentiyle kart, YouTube Music'te sıradaki şarkıları gösterir ve dokunduğun şarkıya geçer. Müzik sitesi açan tuşlar da yeni sekme açmak yerine açık sekmeye geçer. Chrome, Edge ve Brave ile çalışır.</p>
+          <div style="display: flex; align-items: center; gap: 10px; min-height: 40px"><span class="dot" id="x-dot"></span><span id="x-state">Eklenti bağlı değil</span></div>
+          <div class="msg info" id="x-updated" hidden>Eklenti güncellendi: yeni hâli için tarayıcıyı kapatıp yeniden aç.</div>
+          <div class="btns"><button type="button" class="btn primary" id="b-ext">Eklentiyi kur…</button></div>
         </div>
         <div class="card">
           <h2>Kart</h2>
@@ -238,6 +248,31 @@
     <div class="btns" style="justify-content: space-between">
       <button type="button" class="btn" id="dlg-exe">Listede yok, dosya seç…</button>
       <div style="display: flex; gap: 10px"><button value="cancel" class="btn">Vazgeç</button><button type="button" class="btn primary" id="dlg-ok">Seç</button></div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-ext" aria-labelledby="dx-h">
+  <form method="dialog" style="padding: 22px 24px">
+    <h2 id="dx-h">Tarayıcı eklentisini kur</h2>
+    <div class="small">Bir kez yapılır, bir dakika sürer. Tarayıcı güncellense de eklenti kalır.</div>
+    <ol class="steps">
+      <li><strong>Tarayıcını seç ve eklentiler sayfasını aç.</strong>
+        <div class="line" id="dx-browsers" style="margin-top: 8px; flex-wrap: wrap"></div>
+        <div class="small" style="margin-top: 6px">Açılmazsa adres çubuğuna <code>chrome://extensions</code> yaz (Edge'de <code>edge://extensions</code>).</div></li>
+      <li><strong>“Geliştirici modu” düğmesini aç.</strong>
+        <div class="small">Chrome ve Brave'de sağ üstte, Edge'de solda.</div></li>
+      <li><strong>“Paketlenmemiş öğe yükle”ye bas, eklenti klasörünü seç.</strong>
+        <div class="small" id="dx-pick"></div>
+        <div class="line" style="margin-top: 8px"><input class="in" id="dx-folder" readonly aria-label="Eklenti klasörü"><button type="button" class="btn" id="dx-copy">Kopyala</button></div>
+        <div class="small" id="dx-copied" style="margin-top: 4px"></div></li>
+      <li><strong>YouTube Music sekmesini yenile.</strong>
+        <div class="small">Bağlanınca aşağıda yeşil işaret çıkar.</div></li>
+    </ol>
+    <div style="display: flex; align-items: center; gap: 10px; min-height: 40px"><span class="dot" id="dx-dot"></span><span id="dx-state">Eklenti bekleniyor…</span></div>
+    <div class="btns" style="justify-content: space-between">
+      <button type="button" class="btn" id="dx-show">Klasörü göster</button>
+      <button value="cancel" class="btn primary">Tamam</button>
     </div>
   </form>
 </dialog>
@@ -348,6 +383,47 @@
     renderPreview();
   }
 
+  function isMusicUrl(u) {
+    let h = '';
+    try { h = new URL(/^[a-z]+:\/\//i.test(u || '') ? u : 'https://' + u).hostname.toLowerCase().replace(/^www\./, ''); } catch (_) { return false; }
+    return (S.musicHosts || []).some((m) => h === m || h.endsWith('.' + m));
+  }
+
+  // ------------------------------------------------------------ browser extension
+  function applyLink(L) {
+    S.link = L || {};
+    const ok = !!S.link.connected;
+    const txt = ok ? 'Eklenti bağlı: ' + S.link.browsers.join(', ') + (S.link.queue ? ' · sırada ' + S.link.queue + ' şarkı' : '')
+                   : (S.link.error ? 'Eklenti bağlantısı açılamadı: ' + S.link.error : 'Eklenti bağlı değil');
+    for (const [d, t] of [['#x-dot', '#x-state'], ['#dx-dot', '#dx-state']]) {
+      $(d).className = 'dot' + (ok ? ' ok' : '');
+      $(t).textContent = t === '#dx-state' && !ok ? 'Eklenti bekleniyor… (kurduktan sonra YouTube Music sekmesini yenile)' : txt;
+    }
+    $('#x-updated').hidden = !S.link.updated;
+    $('#q-state').textContent = ok ? (S.link.queue ? 'YouTube Music sırası geliyor (' + S.link.queue + ' şarkı).' : 'Eklenti bağlı; YouTube Music açılınca sıra gelir.')
+                                   : 'Tarayıcı eklentisi gerekir: Ayarlar › YouTube Music sırası.';
+  }
+  $('#b-ext').addEventListener('click', async () => {
+    const dlg = $('#dlg-ext');
+    $('#dx-folder').value = (S.link && S.link.folder) || '';
+    $('#dx-pick').textContent = S.mac
+      ? 'Açılan pencerede Cmd+Shift+G’ye bas, Cmd+V ile klasör yolunu yapıştır, Enter’a ve “Seç”e bas.'
+      : 'Açılan pencerede üstteki adres çubuğuna tıkla, Ctrl+V ile klasör yolunu yapıştır, Enter’a ve “Klasör seç”e bas.';
+    $('#dx-copied').textContent = '';
+    const box = $('#dx-browsers'); box.textContent = '';
+    const list = await api().ext_browsers();
+    if (!list.length) box.append(el('div', { class: 'small', text: 'Chrome, Edge ya da Brave bulunamadı.' }));
+    for (const b of list) {
+      box.append(el('button', { type: 'button', class: 'btn', text: b.name, onclick: async () => {
+        const ok = await api().ext_open(b.id);
+        $('#dx-copied').textContent = ok ? 'Eklentiler sayfası açıldı, klasör yolu da kopyalandı.' : 'Açılamadı: tarayıcıyı açıp adres çubuğuna yaz. Klasör yolu kopyalandı.';
+      } }));
+    }
+    dlg.showModal();
+  });
+  $('#dx-copy').addEventListener('click', async () => { const ok = await api().copy_text($('#dx-folder').value); $('#dx-copied').textContent = ok ? 'Kopyalandı.' : 'Kopyalanamadı.'; });
+  $('#dx-show').addEventListener('click', () => api().ext_folder_show());
+
   // ------------------------------------------------------------ preview of the card
   let pvTimer = null;
   function renderPreview() {
@@ -426,6 +502,11 @@
       for (const b of S.browsers) sel.append(el('option', { value: b.id, text: b.name }));
       sel.value = a.browser || '';
       p.append(...field('Hangi tarayıcıda?', sel), el('div', { class: 'small', style: 'margin-top:8px', text: 'Liste bu bilgisayarda kurulu tarayıcılardan oluşur.' }));
+      // Already open: that tab to the front (needs the browser extension).
+      const rb = el('input', { type: 'checkbox', id: 'k-reuse', onchange: (e) => { a.reuse = e.target.checked; saveSoon(); } });
+      rb.checked = a.reuse !== undefined ? !!a.reuse : isMusicUrl(a.url);
+      p.append(el('label', { style: 'display:flex;align-items:center;gap:10px;margin-top:12px' }, [rb, 'Açıksa aynı sekmeye geç, yeni sekme açma']),
+        el('div', { class: 'small', style: 'margin-top:4px', text: (S.link && S.link.connected) ? 'Tarayıcı eklentisi bağlı.' : 'Tarayıcı eklentisi gerekir (Ayarlar › YouTube Music sırası). Yoksa her basışta yeni sekme açılır.' }));
     } else if (a.type === 'app') {
       const show = el('input', { class: 'in', id: 'k-app', type: 'text', value: a.name || a.path || '', readonly: 'readonly' });
       p.append(el('label', { class: 'f', for: 'k-app', text: 'Program' }),
@@ -539,9 +620,10 @@
     S.settings.music_screen = $('#s-music').checked;
     S.settings.back_seconds = parseInt($('#s-back').value, 10);
     S.settings.close_quits = $('#s-close').checked;
+    S.settings.queue = $('#s-queue').checked;
     api().save_settings(S.settings);
   }
-  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close']) $(id).addEventListener('change', saveSettings);
+  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close', '#s-queue']) $(id).addEventListener('change', saveSettings);
   $('#b-exit').addEventListener('click', () => { if (confirm('Program tamamen kapansın mı? Kartın tuşlarından site ve program açma, gerçek ses ve müzik ekranı program yeniden açılana kadar çalışmaz.')) api().exit(); });
   $('#b-release').addEventListener('click', async () => { const st = await api().release(!S.device.released); applyDevice(st); });
 
@@ -557,6 +639,7 @@
   }
   function applyLive(st) {
     applyDevice(st.device);
+    if (st.link) applyLink(st.link);
     const v = st.volume || {};
     $('#p-vol').textContent = v.m ? 'Ses kapalı' : 'Ses %' + (v.v ?? '–');
     const pct = v.m ? 0 : (v.v || 0);
@@ -582,6 +665,9 @@
     $('#s-music').checked = !!S.settings.music_screen;
     $('#s-back').value = String(S.settings.back_seconds);
     $('#s-close').checked = !!S.settings.close_quits;
+    $('#s-queue').checked = S.settings.queue !== false;
+    S.musicHosts = st.music_hosts || [];
+    applyLink(st.link);
     $('#c-app').textContent = 'Plane Radar Deck ' + st.version;
     S.mac = st.platform === 'mac';
     if (S.mac) {

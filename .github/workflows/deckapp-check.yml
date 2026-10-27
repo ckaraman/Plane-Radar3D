@@ -29,7 +29,8 @@ jobs:
         working-directory: tools/deck-windows
         run: >
           pyinstaller --noconfirm --onefile --windowed --name PlaneRadarDeck --icon icon.ico
-          --add-data "web;web" --collect-all webview --collect-submodules winrt
+          --add-data "web;web" --add-data "browser-extension;browser-extension" --collect-all webview
+          --collect-submodules winrt --collect-submodules websockets
           --hidden-import pystray._win32 --hidden-import win32com.client app.py
       - name: Self test (the packed program starts and loads its parts)
         working-directory: tools/deck-windows

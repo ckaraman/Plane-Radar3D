@@ -12,3 +12,4 @@ winrt-Windows.Foundation>=2.0
 winrt-Windows.Foundation.Collections>=2.0
 winrt-Windows.Media.Control>=2.0
 winrt-Windows.Storage.Streams>=2.0
+websockets>=13

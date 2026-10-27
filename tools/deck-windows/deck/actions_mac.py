@@ -33,7 +33,28 @@ def browsers():
 
 
 def default_browser_exe():
-    return None
+    """The app Mac opens https links with ("Google Chrome.app", "Safari.app"), or None."""
+    try:
+        from AppKit import NSWorkspace
+        from Foundation import NSURL
+
+        url = NSWorkspace.sharedWorkspace().URLForApplicationToOpenURL_(NSURL.URLWithString_("https://example.com"))
+        return os.path.basename(str(url.path())) if url is not None else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def app_binary(app_path):
+    """The program inside an .app (to hand it an address such as chrome://extensions)."""
+    import plistlib
+
+    try:
+        with open(os.path.join(app_path, "Contents", "Info.plist"), "rb") as f:
+            exe = plistlib.load(f).get("CFBundleExecutable")
+        p = os.path.join(app_path, "Contents", "MacOS", exe)
+        return p if os.path.exists(p) else None
+    except (OSError, ValueError, TypeError):
+        return None
 
 
 def open_site(url, browser=""):
