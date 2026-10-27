@@ -1938,9 +1938,11 @@
   DECK_ACTIONS.push(['combo', 'Özel kısayol (Ctrl / Alt / Shift / Win + tuş)']);
   const MEDIA_GLYPH = { m0: '🔊+', m1: '🔉−', m2: '🔇', m3: '⏯', m4: '⏭', m5: '⏮' };
   const deckDefaults = () => {
-    const d = [{ label: 'Önceki', action: 'm5' }, { label: 'Oynat / Dur', action: 'm3' }, { label: 'Sonraki', action: 'm4' }];
+    // Previous / play / next are always under the knob (firmware 0.34+): not among the keys.
+    const d = [];
     for (let i = 0; i < 8; i++) d.push({ label: 'F' + (13 + i), action: 'k' + (0xF0 + i) });
     d.push({ label: 'Kısayol P', action: 'combo', mods: 7, key: 'p' });
+    while (d.length < DECK_SLOTS) d.push({ label: '', action: 'none' });
     return d.map((x) => Object.assign({ mods: 0, key: '', img: '' }, x));
   };
   const deck = { slots: deckDefaults(), sel: 0 };

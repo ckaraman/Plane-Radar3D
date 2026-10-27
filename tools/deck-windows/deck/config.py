@@ -29,9 +29,6 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 def _default_slots():
     if IS_MAC:
         s = [
-            {"label": "Önceki", "img": "", "action": {"type": "media", "code": 5}},
-            {"label": "Oynat / Dur", "img": "", "action": {"type": "media", "code": 3}},
-            {"label": "Sonraki", "img": "", "action": {"type": "media", "code": 4}},
             {"label": "YouTube", "img": "", "action": {"type": "site", "url": "https://www.youtube.com", "browser": ""}},
             {"label": "Hesap Makinesi", "img": "", "action": {"type": "app", "path": "/System/Applications/Calculator.app", "name": "Hesap Makinesi", "front": True}},
             {"label": "İndirilenler", "img": "", "action": {"type": "folder", "path": os.path.join(os.path.expanduser("~"), "Downloads")}},
@@ -42,9 +39,6 @@ def _default_slots():
             s.append({"label": "", "img": "", "action": {"type": "none"}})
         return s
     s = [
-        {"label": "Önceki", "img": "", "action": {"type": "media", "code": 5}},
-        {"label": "Oynat / Dur", "img": "", "action": {"type": "media", "code": 3}},
-        {"label": "Sonraki", "img": "", "action": {"type": "media", "code": 4}},
         {"label": "YouTube", "img": "", "action": {"type": "site", "url": "https://www.youtube.com", "browser": ""}},
         {"label": "Hesap makinesi", "img": "", "action": {"type": "app", "path": "calc.exe", "name": "Hesap Makinesi", "front": True}},
         {"label": "İndirilenler", "img": "", "action": {"type": "folder", "path": os.path.join(os.path.expanduser("~"), "Downloads")}},
@@ -63,6 +57,7 @@ DEFAULT_SETTINGS = {
     "send_volume": True,        # real volume on the card
     "steps": 50,                # volume keys per full knob turn without the helper (Windows: 2 %)
     "close_quits": False,       # closing the window ends the program (else it stays in the tray)
+    "transport_moved": False,   # done once: previous / play / next keys taken off (they sit under the knob)
 }
 
 
@@ -72,6 +67,7 @@ class Config:
         self.lock = threading.RLock()
         self.slots = _default_slots()
         self.settings = dict(DEFAULT_SETTINGS)
+        self.resend = False  # keys changed here on start: send them to the card once
         self.load()
 
     def load(self):
@@ -79,6 +75,7 @@ class Config:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError):
+            self.settings["transport_moved"] = True  # a new set: nothing to move
             return
         slots = data.get("slots")
         if isinstance(slots, list) and len(slots) == SLOTS:
@@ -88,6 +85,23 @@ class Config:
             for k, v in DEFAULT_SETTINGS.items():
                 if isinstance(st.get(k), type(v)):
                     self.settings[k] = st[k]
+        self._move_transport()
+
+    def _move_transport(self):
+        """Firmware 0.34 shows previous / play / next under the knob on every page: the
+        same keys in the grid only take room (the card shows the rest larger)."""
+        if self.settings.get("transport_moved"):
+            return
+        for i, s in enumerate(self.slots):
+            a = s.get("action") or {}
+            if a.get("type") == "media" and int(a.get("code", -1)) in (3, 4, 5):
+                self.slots[i] = {"label": "", "img": "", "action": {"type": "none"}}
+                self.resend = True  # the card gets the set without them
+        self.settings["transport_moved"] = True
+        try:
+            self.save()
+        except OSError:
+            pass
 
     @staticmethod
     def _clean_slot(s):

@@ -96,6 +96,11 @@ class Core:
                 continue
             if not self._was_connected:  # (re)connected: tell it everything
                 self._was_connected = True
+                if self.config.resend and not self.upload["running"]:
+                    self.config.resend = False
+                    self.log("keys: previous / play / next moved under the knob, sending the keys")
+                    threading.Thread(target=self.send_keys_to_card, daemon=True).start()
+                    continue
                 self._cover_sent = None
                 last_vol = 0.0
                 self._last_now_sent = 0.0

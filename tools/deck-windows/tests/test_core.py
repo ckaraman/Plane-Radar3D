@@ -180,6 +180,28 @@ def test_blob_v2():
     assert blob.is_icon(Image.open(io.BytesIO(base64.b64decode(icon.split(",")[1]))).convert("RGBA"))
 
 
+def test_config_moves_transport():
+    import tempfile
+
+    from deck import config
+
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "config.json")
+    slots = [{"label": "Önceki", "img": "", "action": {"type": "media", "code": 5}},
+             {"label": "Ses +", "img": "", "action": {"type": "media", "code": 0}},
+             {"label": "YouTube", "img": "", "action": {"type": "site", "url": "x"}}] + \
+            [{"label": "", "img": "", "action": {"type": "none"}}] * 9
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"slots": slots, "settings": {}}, f)
+    c = config.Config(path)
+    assert c.slots[0]["action"]["type"] == "none" and c.slots[1]["action"]["code"] == 0  # volume key stays
+    assert c.slots[2]["label"] == "YouTube" and c.settings["transport_moved"]
+    c.set_slots([{"label": "Oynat", "img": "", "action": {"type": "media", "code": 3}}] + slots[1:])
+    assert config.Config(path).slots[0]["label"] == "Oynat"  # once only: a key added later stays
+    fresh = config.Config(os.path.join(d, "none.json"))
+    assert not any((s["action"].get("type") == "media") for s in fresh.slots)
+
+
 def test_layout():
     area = blob.default_area(800)
     assert area == (470, 380, 10, 18)
@@ -292,6 +314,7 @@ if __name__ == "__main__":
     test_blob()
     test_blob_v2()
     test_layout()
+    test_config_moves_transport()
     test_cover_and_position()
     test_all()
     print("tests ok")
