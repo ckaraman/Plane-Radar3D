@@ -31,7 +31,7 @@ def log(msg):
     LOG_LINES.append(line)
     del LOG_LINES[:-300]
     try:
-        print(line)
+        print(line, flush=True)
     except Exception:  # noqa: BLE001 - no console in the windowed build
         pass
 
@@ -440,6 +440,7 @@ def run():
 
             w.events.closed += closed
             api._window = w
+            log("editor window created")
         if IS_MAC:
             from deck import tray_mac
 
@@ -481,6 +482,7 @@ def run():
             tray_template_png(), status_text, lambda: core.device.released,
             on_edit=lambda: threading.Thread(target=open_editor, daemon=True).start(),
             on_release=toggle_release, on_quit=quit_app)
+        log("tray: ready")
     else:
         import pystray
 
@@ -506,7 +508,10 @@ def run():
 
     threading.Thread(target=listen, daemon=True).start()
 
+    log("gui: starting")
+
     def first():
+        log("gui: started")
         if "--smoke" in sys.argv:
             smoke()
         elif "--tray" not in sys.argv:
@@ -515,8 +520,11 @@ def run():
     def smoke():
         """CI: open the editor, close it, open it again, check the page each time, quit."""
         res = []
+        log("smoke: start")
         for round_ in (1, 2):
+            log("smoke: open %d" % round_)
             open_editor()
+            log("smoke: opened %d, window %s" % (round_, api._window))
             ok = False
             for _ in range(60):
                 time.sleep(0.5)
@@ -528,6 +536,7 @@ def run():
                 except Exception:  # noqa: BLE001 - page still loading
                     pass
             res.append("round %d editor %s" % (round_, "ok" if ok else "FAILED"))
+            log(res[-1])
             w = api._window
             if w is not None:
                 w.destroy()
