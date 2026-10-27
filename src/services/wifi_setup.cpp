@@ -312,9 +312,18 @@ void wifiResetCredentialsAndReboot() {
   esp_restart();
 }
 
+namespace {
+unsigned long s_bg_pause_until_ms = 0;
+}
+
+void wifiPauseBackground(unsigned long ms) { s_bg_pause_until_ms = millis() + ms; }
+
 bool wifiReconnectInBackground() {
   if (wifiLinkUp()) return true;
   if (!storedWifiCredentials()) return false;
+  if (s_bg_pause_until_ms != 0 && static_cast<long>(millis() - s_bg_pause_until_ms) < 0) {
+    return true;  // the setup page is choosing a network
+  }
   Console.println("WiFi away: trying again in the background");
   WiFi.disconnect(false);
   startStaConnect(String(), String());  // the saved network

@@ -152,7 +152,30 @@ void ensureStaEnabled() {
 
 void sendScan() {
   ensureStaEnabled();
-  const int found = WiFi.scanNetworks(false, false);
+  // Saved network out of reach: the chip keeps trying to join it, and a scan during a
+  // join attempt fails at once (WIFI_SCAN_FAILED), so the page saw "no networks". Stop
+  // the attempt and the background retry while the page picks a network.
+  wifiPauseBackground(120000UL);
+  const bool linked = WiFi.status() == WL_CONNECTED;
+  if (!linked) {
+    WiFi.setAutoReconnect(false);
+    WiFi.disconnect(false, false);
+    delay(150);
+  }
+  int found = WiFi.scanNetworks(false, false);
+  for (int retry = 0; found < 0 && retry < 2; ++retry) {
+    Console.printf("WiFi scan failed (%d), again\n", found);
+    WiFi.scanDelete();
+    if (!linked) WiFi.disconnect(false, false);
+    delay(400);
+    found = WiFi.scanNetworks(false, false);
+  }
+  if (!linked) WiFi.setAutoReconnect(true);  // the retry starts again after the pause
+  if (found < 0) {
+    WiFi.scanDelete();
+    sendError("scan_failed");
+    return;
+  }
   JsonDocument doc;
   JsonArray nets = doc["nets"].to<JsonArray>();
 

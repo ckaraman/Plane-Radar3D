@@ -10,6 +10,9 @@ bool wifiReconnect();
 /** Starts a new try with the saved network and returns at once (no screen): the 5" board
  *  keeps its control screen running while Wi-Fi is away. False if no network is saved. */
 bool wifiReconnectInBackground();
+/** The setup page is scanning / choosing a network: no background retry for this long
+ *  (a retry in progress makes the scan fail, and it would cut a new network's join). */
+void wifiPauseBackground(unsigned long ms);
 /** Polls the USB setup page; call every loop() iteration. */
 void wifiLoop();
 bool wifiBootButtonPressed();
