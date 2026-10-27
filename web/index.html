@@ -167,11 +167,11 @@
 
       <label for="ssid">WiFi ağı <span class="sub">(yalnızca 2,4 GHz ağlar)</span></label>
       <div class="row">
-        <input type="text" id="ssid" list="nets" autocomplete="off" spellcheck="false" style="flex:1 1 220px" placeholder="Ağ adı">
+        <input type="text" id="ssid" autocomplete="off" spellcheck="false" style="flex:1 1 220px" placeholder="Ağ adı">
         <button type="button" class="btn" id="btn-scan">Ağları tara</button>
       </div>
-      <datalist id="nets"></datalist>
       <div class="msg info" id="msg-scan" hidden role="status" aria-live="polite"></div>
+      <ul class="results" id="nets-list"></ul>
 
       <label for="pass">WiFi şifresi</label>
       <div class="pw">
@@ -262,7 +262,9 @@
         </div>
       </div>
       <div class="m5">
-        <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Kart listede görünmezse arka yüzdeki BOOT tuşunu basılı tutup RESET'e basın, BOOT'u bırakın. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
+        <p class="small"><strong>Bu bölümdeki düğmeler için BOOT gerekmez:</strong> önce 1. adımdan cihaza bağlanın, sonra düğmeye basın. Sayfa kartı kurulum moduna alıp bağlantıyı bırakır; ardından aynı düğmeye <strong>bir kez daha</strong> basıp listedeki kartı seçersiniz. (Kart çalışmıyorsa ve bağlanamıyorsanız: arka yüzdeki BOOT tuşunu basılı tutup RESET'e basın, BOOT'u bırakın.)</p>
+        <div class="msg info" id="msg-flash5" hidden role="status" aria-live="polite"></div>
+        <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
         <div class="row">
           <esp-web-install-button id="install-update-ws5" manifest="manifest-update-ws5.json">
             <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
@@ -270,7 +272,7 @@
             <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
           </esp-web-install-button>
         </div>
-        <p class="small">Cihaz hiç yanıt vermiyorsa ya da boşsa tam kurulum yapın. <strong>Bu işlem tüm ayarları siler</strong>; sonra 2. adımdan yeniden girmeniz gerekir. Önce 1. adımdaki bağlantıyı kesin.</p>
+        <p class="small">Cihaz hiç yanıt vermiyorsa ya da boşsa tam kurulum yapın. <strong>Bu işlem tüm ayarları siler</strong>; sonra 2. adımdan yeniden girmeniz gerekir. 1. adımdaki bağlantıyı elle kesmeyin, sayfa kendisi bırakır.</p>
         <div class="row">
           <esp-web-install-button id="install-full-ws5" manifest="manifest-full-ws5.json">
             <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
@@ -871,26 +873,38 @@
       : 'https://www.openstreetmap.org/';
   }
 
+  // Every network found is a button in a list below the field (a <datalist> showed only the
+  // names matching what the field already held, i.e. just the saved network).
   async function scanNetworks() {
-    const msg = $('#msg-scan'), btn = $('#btn-scan');
+    const msg = $('#msg-scan'), btn = $('#btn-scan'), list = $('#nets-list');
     btn.disabled = true;
+    list.textContent = '';
     setMsg(msg, 'info', 'Çevredeki ağlar taranıyor… (yaklaşık 5 saniye)');
     try {
-      const r = await request('PR:SCAN', ['SCAN'], 15000);
-      const list = $('#nets');
-      list.textContent = '';
-      for (const n of (r.data.nets || [])) {
-        const o = document.createElement('option');
-        o.value = n.s;
-        o.label = n.s + (n.o ? ' (şifresiz)' : '');
-        list.appendChild(o);
+      const r = await request('PR:SCAN', ['SCAN', 'ERR'], 20000);
+      if (r.tag === 'ERR') throw new Error(r.data.msg || 'scan');
+      const nets = r.data.nets || [];
+      for (const n of nets) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        const bars = n.r >= -60 ? 'güçlü' : n.r >= -72 ? 'orta' : 'zayıf';
+        b.textContent = n.s + '  ·  sinyal ' + bars + (n.o ? '  ·  şifresiz' : '');
+        b.addEventListener('click', () => {
+          $('#ssid').value = n.s;
+          $('#pass').value = '';
+          list.textContent = '';
+          setMsg(msg, 'ok', 'Seçildi: ' + n.s + (n.o ? ' (şifresiz ağ).' : '. Şimdi şifresini yazın.'));
+          if (!n.o) $('#pass').focus();
+        });
+        li.appendChild(b);
+        list.appendChild(li);
       }
-      const count = (r.data.nets || []).length;
-      setMsg(msg, count ? 'ok' : 'warn', count
-        ? count + ' ağ bulundu. Ağ adı kutusuna tıklayıp listeden seçebilirsiniz.'
-        : 'Hiç ağ bulunamadı. Cihaz yalnızca 2,4 GHz ağları görür; modemde 2,4 GHz’in açık olduğundan emin olun.');
+      setMsg(msg, nets.length ? 'ok' : 'warn', nets.length
+        ? nets.length + ' ağ bulundu. Bağlanmak istediğinizi aşağıdan seçin.'
+        : 'Hiç ağ bulunamadı. Cihaz yalnızca 2,4 GHz ağları görür; modemde 2,4 GHz’in açık olduğundan emin olun. Ağ adını elle de yazabilirsiniz.');
     } catch (e) {
-      setMsg(msg, 'err', 'Tarama başarısız oldu. Ağ adını elle yazabilirsiniz.');
+      setMsg(msg, 'err', 'Tarama başarısız oldu. Birkaç saniye sonra tekrar deneyin ya da ağ adını elle yazın.');
     }
     btn.disabled = false;
   }
@@ -1867,6 +1881,34 @@
     else setMsg(el, 'warn', 'Cihazdaki sürüm ' + cur + ', en yeni sürüm ' + state.latest + '. Aşağıdan güncelleyebilirsiniz.');
   }
 
+  // ------------------------------------------------- 5" installer (esp-web-tools)
+  // In keyboard mode the 5" board's USB port is TinyUSB, where the installer cannot put the
+  // chip into download mode ("reset the device / hold BOOT"). "Disconnect" in step 1 also
+  // sends it back to keyboard mode. So the first press switches the connected board to the
+  // USB-Serial/JTAG setup mode and releases the port; the second press opens the installer.
+  async function prepFlash5(ev) {
+    if (!(state.port && state.connected)) return; // not connected (blank board, or prepared): installer opens
+    ev.preventDefault();
+    ev.stopPropagation();
+    const msg = $('#msg-flash5');
+    try {
+      if (modelMismatch()) throw new Error('model');
+      if (state.device && state.device.usb === 'kb') await ensureSetupUsb(msg);
+      state.expectingDrop = true;
+      await closePort(); // not disconnect(): that would return the board to keyboard mode
+      state.expectingDrop = false;
+      renderConnection();
+      setMsg($('#msg-connect'), 'info', 'Kart kurulum modunda bekliyor; bağlantıyı yükleyici için bıraktım.');
+      setMsg(msg, 'ok', 'Kart hazır. Şimdi aynı düğmeye bir kez daha basın ve açılan listede kartı seçin (3 dakika içinde; sonra kart kendiliğinden normal moda döner).');
+    } catch (e) {
+      state.expectingDrop = false;
+      const m = String(e && e.message ? e.message : e);
+      setMsg(msg, 'err', m === 'model'
+        ? 'Bağlı cihaz seçili modelle uyuşmuyor.'
+        : ERRORS[m] || ('Kart kurulum moduna alınamadı (' + m + '). Bağlantıyı yenileyip tekrar deneyin.'));
+    }
+  }
+
   // ------------------------------------------------------------------ model
   const INSTALLERS = ['install-update', 'install-full', 'install-update-ws5', 'install-full-ws5', 'install-full-ws5b'];
   const MODEL_NAMES = { '4': '4" Radar (ESP32-WROOM + 4.0" ekran)', '5': '5" Radar (Waveshare ESP32-S3-Touch-LCD-5)' };
@@ -2255,6 +2297,11 @@
       b.addEventListener('click', () => setModel(b.dataset.pick, true));
     }
     $('#btn-model-change').addEventListener('click', changeModel);
+    // Capture on the row: runs before the installer's own click handler.
+    for (const id of ['install-update-ws5', 'install-full-ws5', 'install-full-ws5b']) {
+      const el = document.getElementById(id);
+      if (el && el.parentElement) el.parentElement.addEventListener('click', prepFlash5, true);
+    }
     {
       // ?model=4 / ?model=5 in the address, else the last choice on this computer.
       let m = new URLSearchParams(location.search).get('model');
