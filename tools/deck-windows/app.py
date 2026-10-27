@@ -282,6 +282,30 @@ def tray_template_png():
     return buf.getvalue()
 
 
+_PAGE = {}
+
+
+def page_url():
+    """The window's page. On a Mac WebKit loads no local file through pywebview's request,
+    so the page comes from a small server on this computer only (127.0.0.1)."""
+    if not IS_MAC:
+        return resource("web", "index.html")
+    if "url" not in _PAGE:
+        import functools
+        import http.server
+
+        root = os.path.realpath(resource("web"))
+
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=root))
+        threading.Thread(target=srv.serve_forever, name="page", daemon=True).start()
+        _PAGE["url"] = "http://127.0.0.1:%d/index.html" % srv.server_address[1]
+    return _PAGE["url"]
+
+
 def _mac_unquarantine():
     """A downloaded app is marked "from the internet"; Apple's perl then refuses to load
     the now-playing helper inside it. The user opened the app, so the mark can go."""
@@ -429,7 +453,7 @@ def run():
                     return
                 except Exception:  # noqa: BLE001 - it was closed meanwhile
                     api._window = None
-            w = webview.create_window(APP_NAME, os.path.realpath(resource("web", "index.html")), js_api=api, width=1240, height=820,
+            w = webview.create_window(APP_NAME, page_url(), js_api=api, width=1240, height=820,
                                       min_size=(900, 640), background_color="#111634")
 
             def closed():
