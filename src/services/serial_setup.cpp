@@ -137,6 +137,8 @@ void sendHello() {
     area.add(services::deck::keyRadius());
   }
   doc["deckcustom"] = services::deck::custom();
+  doc["queuev"] = 1;                           // queue panel (PR:QBEGIN ...)
+  doc["qthumb"] = services::host::queueThumbPx();  // its small covers, px
   doc["hostv"] = 2;  // Windows helper protocol (services/host_link.h): 2 = windowed cover, "pm"
   doc["w"] = config::kDisplayWidth;
   doc["h"] = config::kDisplayHeight;
@@ -577,6 +579,20 @@ void handleLine(char* line) {
     services::host::handleCoverChunk(args);
   } else if (strcmp(command, "COVEREND") == 0) {
     services::host::handleCoverEnd();
+  } else if (strcmp(command, "QBEGIN") == 0) {  // YouTube Music queue (one acked line each)
+    services::host::handleQueueBegin(args);
+  } else if (strcmp(command, "QITEM") == 0) {
+    services::host::handleQueueItem(args);
+  } else if (strcmp(command, "QEND") == 0) {
+    services::host::handleQueueEnd();
+  } else if (strcmp(command, "QCLEAR") == 0) {
+    services::host::handleQueueClear();
+  } else if (strcmp(command, "QARTBEGIN") == 0) {
+    services::host::handleQueueArtBegin(args);
+  } else if (strcmp(command, "QART") == 0) {
+    services::host::handleQueueArtChunk(args);
+  } else if (strcmp(command, "QARTEND") == 0) {
+    services::host::handleQueueArtEnd();
   } else if (strcmp(command, "DECKBEGIN") == 0) {
     if (uploadAllowed()) handleDeckBegin(args);
   } else if (strcmp(command, "DECK") == 0) {

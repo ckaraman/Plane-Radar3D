@@ -72,6 +72,19 @@ constexpr int kVolX = D(66), kVolW = D(200), kVolH = D(10), kVolKnobR = D(13);
 constexpr int kVolTouchH = D(40);  // either side of kCtrlY
 constexpr Rgb kCoverBg{6, 7, 14};  // what the cover fades into
 
+// Queue ("Sıradakiler"): the next song bottom right of the music page; tapped, a panel
+// on the right lists the queue and the playing song moves to a smaller left column.
+constexpr int kNextX = D(572), kNextY = D(410), kNextW = D(200), kNextH = D(52);
+constexpr int kQPanelX = D(448), kQPanelY = D(64), kQPanelW = D(332), kQPanelH = D(400);
+constexpr int kQHeadH = D(50), kQRowH = D(58);
+constexpr int kQRows = (kQPanelH - kQHeadH) / kQRowH;  // rows in view
+constexpr int kQCloseCx = kQPanelX + kQPanelW - D(30), kQCloseCy = kQPanelY + kQHeadH / 2;
+constexpr int kQCoverX = D(28), kQCoverY = D(74), kQCoverS = D(156);
+constexpr int kQLeftW = D(392);
+constexpr int kQBarY = D(334);
+constexpr int kQCtrlY = D(404), kQPrevCx = D(152), kQPlayCx = D(224), kQNextCx = D(296);
+constexpr int kQSmallR = D(24), kQPlayR = D(31);
+
 // Colours (approved palette).
 constexpr Rgb kWhite{255, 255, 255};
 constexpr Rgb kText{243, 244, 251};
@@ -91,6 +104,7 @@ Page s_page = Page::Keys;
 LGFX_Sprite s_canvas(&tft);      // only for an upside-down screen
 LGFX_Sprite s_keys_base(&tft);   // keys page without the moving parts
 LGFX_Sprite s_music_base(&tft);  // cover (or background) with its shades
+LGFX_Sprite s_queue_base(&tft);  // queue panel open: small cover left, panel glass right
 bool s_ready = false;
 bool s_keys_dirty = true, s_music_dirty = true;
 uint32_t s_keys_gen = 0, s_cover_gen = 0, s_now_gen = 0;
@@ -117,7 +131,7 @@ bool s_shown_muted = false;
 int s_pressed = -1;
 unsigned long s_pressed_ms = 0;
 bool s_flash = false;
-enum class Target { None, Key, Knob, Back, Prev, Play, Next, VolBar, Swipe, Tab };
+enum class Target { None, Key, Knob, Back, Prev, Play, Next, VolBar, Swipe, Tab, QOpen, QClose, QList };
 Target s_target = Target::None;
 bool s_down = false;
 int s_key = -1;
@@ -138,6 +152,16 @@ bool s_was_playing = false;
 uint32_t s_last_id = 0;
 unsigned long s_stopped_ms = 0;
 uint32_t s_shown_pos = 0xFFFFFFFF;
+
+// Queue panel.
+bool s_queue_open = false;
+int s_qscroll = 0, s_qscroll_down = 0;  // first row in view
+bool s_qbase_dirty = true;
+uint32_t s_qbase_cover_gen = 0, s_qbase_id = 0, s_shown_qver = 0;
+int s_qflash = -1;
+unsigned long s_qflash_ms = 0;
+uint16_t* s_thumb[host::kQueueMax] = {};
+const uint8_t* s_thumb_src[host::kQueueMax] = {};
 
 bool s_dirty = true;  // canvas needs to be put together and shown
 unsigned long s_last_present_ms = 0;
@@ -630,6 +654,8 @@ void fmtTime(char* out, size_t cap, uint32_t s) {
   snprintf(out, cap, "%lu:%02lu", static_cast<unsigned long>(s / 60), static_cast<unsigned long>(s % 60));
 }
 
+void drawNextCard(const paint::Canvas& c);
+
 template <typename Gfx>
 void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   const host::NowPlaying& n = host::now();
@@ -692,7 +718,231 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
   s_shown_level = pct;
   s_shown_muted = muted;
-  text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
+  if (host::queueValid() && host::queueCount() > 1) {
+    drawNextCard(c);
+  } else {
+    text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
+  }
+}
+
+// ------------------------------------------------------------------ queue
+/** Row pictures, decoded once per picture (the helper sends them one by one). */
+void refreshThumbs() {
+  const int px = host::queueThumbPx();
+  for (int i = 0; i < host::kQueueMax; ++i) {
+    const host::QueueRow& r = host::queueRow(i);
+    const uint8_t* src = i < host::queueCount() ? r.art : nullptr;
+    if (src == s_thumb_src[i]) continue;
+    s_thumb_src[i] = src;
+    if (src == nullptr) {
+      if (s_thumb[i] != nullptr) heap_caps_free(s_thumb[i]);
+      s_thumb[i] = nullptr;
+      continue;
+    }
+    LGFX_Sprite t(&tft);
+    t.setPsram(true);
+    t.setColorDepth(16);
+    if (t.createSprite(px, px) == nullptr) continue;
+    t.fillScreen(0);
+    if (t.drawJpg(src, r.art_len, 0, 0, px, px)) {
+      if (s_thumb[i] == nullptr) {
+        s_thumb[i] = static_cast<uint16_t*>(heap_caps_malloc(px * px * 2, MALLOC_CAP_SPIRAM));
+      }
+      if (s_thumb[i] != nullptr) memcpy(s_thumb[i], t.getBuffer(), px * px * 2);
+    }
+    t.deleteSprite();
+  }
+}
+
+/** A row picture (or a soft placeholder) with rounded corners. */
+void drawThumb(const paint::Canvas& c, int i, int x, int y, int sz) {
+  const int px = host::queueThumbPx();
+  const uint16_t* pic = (i >= 0 && i < host::kQueueMax) ? s_thumb[i] : nullptr;
+  if (pic == nullptr || sz != px) {
+    paint::roundRect(c, x, y, sz, sz, D(7), {120, 112, 190}, 70);
+    return;
+  }
+  const float r = D(7);
+  for (int yy = 0; yy < px; ++yy) {
+    const int cy = y + yy;
+    if (cy < 0 || cy >= kH) continue;
+    for (int xx = 0; xx < px; ++xx) {
+      const int cx = x + xx;
+      if (cx < 0 || cx >= kW) continue;
+      // Corner rounding: coverage by the distance to the corner's circle.
+      float cov = 1.0f;
+      const float qx = xx + 0.5f < r ? r - (xx + 0.5f) : (xx + 0.5f > px - r ? (xx + 0.5f) - (px - r) : 0.0f);
+      const float qy = yy + 0.5f < r ? r - (yy + 0.5f) : (yy + 0.5f > px - r ? (yy + 0.5f) - (px - r) : 0.0f);
+      if (qx > 0.0f && qy > 0.0f) cov = std::min(std::max(r - sqrtf(qx * qx + qy * qy) + 0.5f, 0.0f), 1.0f);
+      if (cov <= 0.0f) continue;
+      uint16_t& d = c.px[cy * kW + cx];
+      const uint16_t v = pic[yy * px + xx];
+      if (cov >= 1.0f) {
+        d = v;
+        continue;
+      }
+      int r0, g0, b0, r1, g1, b1;
+      paint::unpack(d, &r0, &g0, &b0);
+      paint::unpack(v, &r1, &g1, &b1);
+      d = paint::pack(static_cast<int>(r0 + (r1 - r0) * cov), static_cast<int>(g0 + (g1 - g0) * cov),
+                      static_cast<int>(b0 + (b1 - b0) * cov), cx, cy);
+    }
+  }
+}
+
+/** Bottom right of the music page: the next song; tapped, the queue opens. */
+void drawNextCard(const paint::Canvas& c) {
+  refreshThumbs();
+  const host::QueueRow& r = host::queueRow(1);
+  paint::roundRect(c, kNextX, kNextY, kNextW, kNextH, D(14), kWhite, 22, kWhite, 36);
+  const int ts = D(36);
+  const int px = host::queueThumbPx();
+  if (s_thumb[1] != nullptr && px == ts) {
+    drawThumb(c, 1, kNextX + D(8), kNextY + (kNextH - ts) / 2, ts);
+  } else {
+    paint::roundRect(c, kNextX + D(8), kNextY + (kNextH - ts) / 2, ts, ts, D(6), {120, 112, 190}, 70);
+    if (s_thumb[1] != nullptr) {  // the picture is 40 px: its middle 36
+      for (int yy = 0; yy < ts; ++yy)
+        for (int xx = 0; xx < ts; ++xx)
+          c.px[(kNextY + (kNextH - ts) / 2 + yy) * kW + kNextX + D(8) + xx] =
+              s_thumb[1][(yy + (px - ts) / 2) * px + xx + (px - ts) / 2];
+    }
+  }
+  const int tx = kNextX + D(8) + ts + D(10), tw = kNextX + kNextW - D(30) - tx;
+  char buf[80];
+  text::draw(c, text::Ui13, "SIRADAKİ", tx, kNextY + D(21), {158, 164, 196}, 255, text::Align::Left, 1);
+  text::fit(text::Ui13b, r.title, tw, buf, sizeof(buf));
+  text::draw(c, text::Ui13b, buf, tx, kNextY + D(39), kText);
+  // list icon
+  const int ix = kNextX + kNextW - D(22), iy = kNextY + kNextH / 2;
+  for (int k = -1; k <= 1; ++k) paint::roundRect(c, ix - D(8), iy + k * D(6) - D(1), k == 1 ? D(10) : D(14), D(2), D(1), kTextSoft, 255);
+}
+
+/** Small cover (cropped square) with its dark rim, for the open queue's left column. */
+void buildQueueBase(LGFX_Sprite& s) {
+  const auto c = cv(s);
+  paint::background(c);
+  size_t len = 0;
+  int cw = 0, ch = 0;
+  const uint8_t* jpg = host::cover(&len, &cw, &ch);
+  if (coverForNow()) {
+    if (cw <= 0 || ch <= 0 || cw > kW || ch > kH) cw = kW, ch = kH;
+    LGFX_Sprite pic(&tft);
+    pic.setPsram(true);
+    pic.setColorDepth(24);
+    if (pic.createSprite(cw, ch) != nullptr) {
+      pic.fillScreen(0);
+      if (pic.drawJpg(jpg, len, 0, 0, cw, ch)) {
+        const float k = std::max(static_cast<float>(kQCoverS) / cw, static_cast<float>(kQCoverS) / ch);
+        const float ox = (cw * k - kQCoverS) / 2.0f, oy = (ch * k - kQCoverS) / 2.0f;
+        const float rim = D(60);
+        for (int y = std::max(0, kQCoverY - static_cast<int>(rim)); y < std::min(kH, kQCoverY + kQCoverS + static_cast<int>(rim)); ++y) {
+          for (int x = std::max(0, kQCoverX - static_cast<int>(rim)); x < kQCoverX + kQCoverS + static_cast<int>(rim); ++x) {
+            const int lx = x - kQCoverX, ly = y - kQCoverY;
+            const float ex = std::max({0.0f, static_cast<float>(-lx), static_cast<float>(lx - (kQCoverS - 1))});
+            const float ey = std::max({0.0f, static_cast<float>(-ly), static_cast<float>(ly - (kQCoverS - 1))});
+            const float near = 1.0f - smooth01(sqrtf(ex * ex + ey * ey) / rim);
+            float r, g, b;
+            paint::backgroundRgb(kW, kH, x, y, &r, &g, &b);
+            const bool inside = lx >= 0 && ly >= 0 && lx < kQCoverS && ly < kQCoverS;
+            if (!inside) {
+              const float dk = near * 0.8f;
+              r += (kCoverBg.r - r) * dk, g += (kCoverBg.g - g) * dk, b += (kCoverBg.b - b) * dk;
+            } else {
+              const int sx = std::min(cw - 1, static_cast<int>((lx + ox) / k));
+              const int sy = std::min(ch - 1, static_cast<int>((ly + oy) / k));
+              const auto p = pic.readPixelRGB(sx, sy);
+              r = p.R8(), g = p.G8(), b = p.B8();
+            }
+            c.px[y * kW + x] = paint::pack(static_cast<int>(r + 0.5f), static_cast<int>(g + 0.5f),
+                                           static_cast<int>(b + 0.5f), x, y);
+          }
+        }
+      }
+      pic.deleteSprite();
+    }
+  }
+  paint::roundRect(c, kQPanelX, kQPanelY, kQPanelW, kQPanelH, D(18), kWhite, 16, kWhite, 34);
+  paint::roundRect(c, kQPanelX + D(1), kQPanelY + kQHeadH, kQPanelW - D(2), 1, 0, kWhite, 20);
+  s_qbase_cover_gen = host::coverGeneration();
+  s_qbase_id = host::now().id;
+  s_qbase_dirty = false;
+}
+
+template <typename Gfx>
+void drawQueueFront(Gfx& g, const paint::Canvas& c) {
+  const host::NowPlaying& n = host::now();
+  pageTabs(c, true);
+  radarPill(c);
+  refreshThumbs();
+  s_shown_qver = host::queueVersion();
+  char buf[200];
+  // Left: what plays, a little smaller.
+  const int tx = kQCoverX;
+  text::fit(text::Ui18b, n.title[0] ? n.title : "Bilinmeyen parça", kQLeftW, buf, sizeof(buf));
+  const int tb = D(262) + text::Ui18b.ascent;
+  text::draw(c, text::Ui18b, buf, tx, tb, kText);
+  text::fit(text::Ui13, n.artist[0] ? n.artist : n.album, kQLeftW, buf, sizeof(buf));
+  text::draw(c, text::Ui13, buf, tx, tb + text::Ui18b.descent + D(4) + text::Ui13.ascent, kTextSub);
+  const uint32_t pos = host::positionNow();
+  s_shown_pos = pos;
+  char t0[12], t1[12];
+  fmtTime(t0, sizeof(t0), pos);
+  fmtTime(t1, sizeof(t1), n.duration_s);
+  text::drawMid(c, text::Ui13, t0, tx, kQBarY + kBarH / 2, {195, 200, 222});
+  if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + kQLeftW, kQBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
+  const int bx = tx + kTimeW, bw = kQLeftW - 2 * kTimeW;
+  paint::roundRect(c, bx, kQBarY, bw, kBarH, kBarH / 2, kWhite, 46);
+  const float f =
+      n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
+  paint::gradientBar(c, bx, kQBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
+  paint::circle(c, bx + bw * f, kQBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  drawTransport(g, c, kQPrevCx, kQPlayCx, kQNextCx, kQCtrlY, kQSmallR, kQPlayR);
+
+  // Right: the queue.
+  const int count = host::queueCount();
+  text::draw(c, text::Ui15b, "Sıradakiler", kQPanelX + D(16), kQPanelY + D(24), kText);
+  snprintf(buf, sizeof(buf), "%s · %d parça", host::queueSource()[0] ? host::queueSource() : "Sıra", count);
+  text::draw(c, text::Ui13, buf, kQPanelX + D(16), kQPanelY + D(41), {158, 164, 196});
+  for (int k = -1; k <= 1; k += 2) {  // close cross
+    g.drawWideLine(kQCloseCx - D(7), kQCloseCy - k * D(7), kQCloseCx + D(7), kQCloseCy + k * D(7), D(1) + 1,
+                   col565({226, 229, 245}));
+  }
+  s_qscroll = std::max(0, std::min(s_qscroll, std::max(0, count - kQRows)));
+  const int ts = host::queueThumbPx();
+  for (int v = 0; v < kQRows; ++v) {
+    const int i = s_qscroll + v;
+    if (i >= count) break;
+    const host::QueueRow& r = host::queueRow(i);
+    const int y = kQPanelY + kQHeadH + v * kQRowH;
+    const bool cur = i == 0;
+    if (cur || i == s_qflash) {
+      paint::roundRect(c, kQPanelX + D(5), y + D(3), kQPanelW - D(10), kQRowH - D(6), D(11), kLavender,
+                       i == s_qflash ? 70 : 40);
+    } else if (v > 0) {
+      paint::roundRect(c, kQPanelX + D(14), y, kQPanelW - D(28), 1, 0, kWhite, 14);
+    }
+    drawThumb(c, i, kQPanelX + D(12), y + (kQRowH - ts) / 2, ts);
+    if (cur) {  // playing: three bars over its picture
+      const int bx0 = kQPanelX + D(12) + ts / 2 - D(8), by = y + kQRowH / 2 + D(8);
+      const int hs[3] = {D(10), D(16), D(8)};
+      for (int q = 0; q < 3; ++q) paint::roundRect(c, bx0 + q * D(6), by - hs[q], D(4), hs[q], D(1), kWhite, 235);
+    }
+    const int lx = kQPanelX + D(12) + ts + D(12);
+    const int dw = text::width(text::Ui13, r.dur);
+    const int lw = kQPanelX + kQPanelW - D(14) - dw - D(10) - lx;
+    text::fit(cur ? text::Ui13b : text::Ui13, r.title, lw, buf, sizeof(buf));
+    text::draw(c, cur ? text::Ui13b : text::Ui13, buf, lx, y + D(26), cur ? kWhite : Rgb{231, 233, 246});
+    text::fit(text::Ui13, r.artist, lw, buf, sizeof(buf));
+    text::draw(c, text::Ui13, buf, lx, y + D(44), {158, 164, 196});
+    text::drawMid(c, text::Ui13, r.dur, kQPanelX + kQPanelW - D(14), y + kQRowH / 2, {158, 164, 196}, 255,
+                  text::Align::Right);
+  }
+  if (count > kQRows) {  // where in the list
+    const int track = kQPanelH - kQHeadH - D(16), th = std::max(D(24), track * kQRows / count);
+    const int ty = kQPanelY + kQHeadH + D(8) + (track - th) * s_qscroll / std::max(1, count - kQRows);
+    paint::roundRect(c, kQPanelX + kQPanelW - D(6), ty, D(3), th, D(1), kWhite, 70);
+  }
 }
 
 void ensureBuffers() {
@@ -725,10 +975,30 @@ void composeInto(Gfx& g, const paint::Canvas& c) {
     drawTransport(g, c, kKPrevCx, kKPlayCx, kKNextCx, kKCtrlY, kKSmallR, kKPlayR);
     s_shown_level = pct;
     s_shown_muted = muted;
+  } else if (s_queue_open && host::queueValid()) {
+    LGFX_Sprite& qb = s_queue_base.getBuffer() != nullptr ? s_queue_base : s_music_base;
+    memcpy(c.px, qb.getBuffer(), kW * kH * 2);
+    drawQueueFront(g, c);
   } else {
     memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
     drawMusicFront(g, c);
   }
+}
+
+void openQueue(bool open) {
+  if (open == s_queue_open) return;
+  s_queue_open = open;
+  s_qscroll = 0;
+  s_qflash = -1;
+  if (open && s_queue_base.getBuffer() == nullptr) {
+    s_queue_base.setPsram(true);
+    s_queue_base.setColorDepth(16);
+    if (s_queue_base.createSprite(kW, kH) == nullptr) {
+      Console.println("deck: queue panel shares the music screen's memory");
+    }
+  }
+  s_qbase_dirty = true;
+  if (!open && s_queue_base.getBuffer() == nullptr) s_music_dirty = true;  // it was borrowed
 }
 
 /** Put the current page together and show it. */
@@ -736,6 +1006,15 @@ void present() {
   if (!s_ready) return;
   if (s_page == Page::Keys) {
     if (s_keys_dirty || s_keys_gen != store::generation()) buildKeysBase();
+  } else if (s_queue_open && host::queueValid()) {
+    if (s_qbase_dirty || s_qbase_cover_gen != host::coverGeneration() || s_qbase_id != host::now().id) {
+      if (s_queue_base.getBuffer() != nullptr) {
+        buildQueueBase(s_queue_base);
+      } else {
+        buildQueueBase(s_music_base);  // no room for a third screen: borrowed
+        s_music_dirty = true;
+      }
+    }
   } else if (s_music_dirty || s_cover_gen != host::coverGeneration() || s_cover_for_id != host::now().id) {
     buildMusicBase();
   }
@@ -858,6 +1137,18 @@ bool tick() {
     s_page = Page::Keys;
     s_dirty = true;
   }
+  if (s_queue_open && !host::queueValid()) s_queue_open = false;  // the queue went away
+  if (s_qflash >= 0 && now - s_qflash_ms >= 400) {
+    s_qflash = -1;
+    s_dirty = true;
+  }
+  {
+    static uint32_t last_qver = 0;
+    if (host::queueVersion() != last_qver) {
+      last_qver = host::queueVersion();
+      if (s_page == Page::Music) s_dirty = true;
+    }
+  }
   if (s_page == Page::Music) {
     if (s_cover_gen != host::coverGeneration() || s_cover_for_id != n.id) s_dirty = true;
     if (n.valid && host::positionNow() != s_shown_pos) s_dirty = true;
@@ -904,8 +1195,26 @@ Touch touch(int fingers, int x, int y) {
         } else {
           s_target = Target::None;
         }
+      } else if (host::now().valid && s_queue_open && host::queueValid()) {
+        if (inCircle(x, y, kQCloseCx, kQCloseCy, D(26))) {
+          s_target = Target::QClose;
+        } else if (x >= kQPanelX && x < kQPanelX + kQPanelW && y >= kQPanelY + kQHeadH && y < kQPanelY + kQPanelH) {
+          s_target = Target::QList;
+          s_qscroll_down = s_qscroll;
+        } else if (inCircle(x, y, kQPrevCx, kQCtrlY, kQSmallR + D(10))) {
+          s_target = Target::Prev;
+        } else if (inCircle(x, y, kQPlayCx, kQCtrlY, kQPlayR + D(10))) {
+          s_target = Target::Play;
+        } else if (inCircle(x, y, kQNextCx, kQCtrlY, kQSmallR + D(10))) {
+          s_target = Target::Next;
+        } else {
+          s_target = Target::None;
+        }
       } else if (host::now().valid) {
-        if (inCircle(x, y, kPrevCx, kCtrlY, kSmallBtnR + D(8))) {
+        if (host::queueValid() && host::queueCount() > 1 && x >= kNextX - D(6) && x < kNextX + kNextW + D(6) &&
+            y >= kNextY - D(8) && y < kNextY + kNextH + D(8)) {
+          s_target = Target::QOpen;
+        } else if (inCircle(x, y, kPrevCx, kCtrlY, kSmallBtnR + D(8))) {
           s_target = Target::Prev;
         } else if (inCircle(x, y, kPlayCx, kCtrlY, kPlayR + D(8))) {
           s_target = Target::Play;
@@ -928,6 +1237,15 @@ Touch touch(int fingers, int x, int y) {
     const int dx = x - s_down_x, dy = y - s_down_y;
     const int move = abs(dx) + abs(dy);
     if (move > s_max_move) s_max_move = move;
+    if (s_target == Target::QList && abs(dy) >= abs(dx)) {  // the list follows the finger, row by row
+      const int rows = std::max(0, host::queueCount() - kQRows);
+      const int want = std::max(0, std::min(rows, s_qscroll_down - dy / kQRowH));
+      if (want != s_qscroll) {
+        s_qscroll = want;
+        presentSoon();
+      }
+      return Touch::None;
+    }
     // A sideways slide anywhere but on the knob / volume bar turns the page; it starts
     // early, so a quick flick over a key is a page turn and not a key press.
     if (s_target != Target::Knob && s_target != Target::VolBar && s_target != Target::Swipe &&
@@ -996,8 +1314,13 @@ Touch touch(int fingers, int x, int y) {
     const bool flick = abs(dx) >= D(24) && 2 * abs(dx) > 3 * abs(dy);
     if (t == Target::Swipe ||
         (flick && (t == Target::Key || t == Target::None || t == Target::Prev || t == Target::Play ||
-                   t == Target::Next || t == Target::Tab))) {
+                   t == Target::Next || t == Target::Tab || t == Target::QOpen || t == Target::QClose))) {
       if (t == Target::Key) s_pressed = -1;
+      if (s_queue_open) {  // a sideways slide first closes the queue
+        openQueue(false);
+        presentSoon();
+        return Touch::None;
+      }
       if (dx >= D(24)) {
         setPage(Page::Music);
       } else if (dx <= -D(24)) {
@@ -1014,7 +1337,33 @@ Touch touch(int fingers, int x, int y) {
     case Target::Swipe:
       return Touch::None;  // handled above
     case Target::Tab:
-      if (s_max_move < D(24)) setPage(tabAt(s_down_x, s_down_y) == 1 ? Page::Music : Page::Keys);
+      if (s_max_move < D(24)) {
+        if (tabAt(s_down_x, s_down_y) != 1) openQueue(false);
+        setPage(tabAt(s_down_x, s_down_y) == 1 ? Page::Music : Page::Keys);
+      }
+      return Touch::None;
+    case Target::QOpen:
+      if (s_max_move < D(20)) {
+        openQueue(true);
+        presentSoon();
+      }
+      return Touch::None;
+    case Target::QClose:
+      if (s_max_move < D(24)) {
+        openQueue(false);
+        presentSoon();
+      }
+      return Touch::None;
+    case Target::QList:
+      if (s_max_move < D(16)) {
+        const int row = s_qscroll + (s_down_y - (kQPanelY + kQHeadH)) / kQRowH;
+        if (row > 0 && row < host::queueCount()) {  // the playing one needs nothing
+          host::sendQueuePlay(row);
+          s_qflash = row;
+          s_qflash_ms = millis();
+          presentSoon();
+        }
+      }
       return Touch::None;
     case Target::Knob:
       if (s_total_deg < 8.0f && s_max_move < D(14) && now - s_down_ms < 700) {

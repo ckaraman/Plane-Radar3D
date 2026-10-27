@@ -65,7 +65,42 @@ uint32_t coverId();
 bool coverReceiving();
 uint32_t coverGeneration();
 
+/**
+ * The YouTube Music queue from the helper's browser extension, from the current song on:
+ *   PR:QBEGIN {"gen":7,"n":12,"src":"YouTube Music"}   then n x
+ *   PR:QITEM {"k":0,"x":14,"t":"…","a":"…","d":"3:58"}   (k = row, x = place in the queue)
+ *   PR:QEND                                   each answered PR:QACK {}
+ *   PR:QCLEAR                                 no queue (another app plays)
+ *   PR:QARTBEGIN {"len":n,"crc":c,"k":0,"gen":7} PR:QART <seq> <b64> PR:QARTEND
+ *        a row's small cover (JPEG, queueThumbPx() square), chunks as for the album cover
+ * To the helper: PR:QPLAY {"x":14,"t":"…"} — play that song.
+ */
+struct QueueRow {
+  char title[64];
+  char artist[48];
+  char dur[10];
+  uint16_t index;            // place in the browser's queue
+  const uint8_t* art;        // JPEG or nullptr
+  size_t art_len;
+};
+constexpr int kQueueMax = 30;
+bool queueValid();
+int queueCount();
+const QueueRow& queueRow(int i);
+const char* queueSource();
+/** Changes with every new queue and every row picture. */
+uint32_t queueVersion();
+int queueThumbPx();
+void sendQueuePlay(int row);
+
 // Line handlers (serial_setup).
+void handleQueueBegin(const char* json);
+void handleQueueItem(const char* json);
+void handleQueueEnd();
+void handleQueueClear();
+void handleQueueArtBegin(const char* json);
+void handleQueueArtChunk(char* args);
+void handleQueueArtEnd();
 void handleVol(const char* json);
 void handleNow(const char* json);
 void handleCoverBegin(const char* json);

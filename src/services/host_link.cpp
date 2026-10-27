@@ -4,8 +4,10 @@
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
 
+#include <algorithm>
 #include <cstring>
 
+#include "config.h"
 #include "hardware/console.h"
 #include "services/map_store.h"
 
@@ -228,6 +230,204 @@ void handleCoverEnd() {
   s_stage_len = s_stage_got = 0;
   ++s_cover_gen;
   reply("OK", "{\"cover\":true}");
+}
+
+// ------------------------------------------------------------------ queue
+namespace {
+
+QueueRow s_q[kQueueMax];
+int s_qn = 0;
+bool s_qvalid = false;
+uint32_t s_qgen = 0;
+uint32_t s_qversion = 1;
+char s_qsrc[24] = "";
+
+QueueRow s_qs[kQueueMax];  // rows coming in
+int s_qsn = 0, s_qs_want = 0;
+uint32_t s_qs_gen = 0;
+bool s_qs_open = false;
+char s_qs_src[24] = "";
+
+// A row picture coming in (like the cover).
+uint8_t* s_art = nullptr;
+size_t s_art_len = 0, s_art_got = 0;
+uint32_t s_art_crc = 0;
+long s_art_next = 1;
+int s_art_k = -1;
+constexpr size_t kMaxArt = 48 * 1024;
+
+void freeArts(QueueRow* rows, int n) {
+  for (int i = 0; i < n; ++i) {
+    if (rows[i].art != nullptr) heap_caps_free(const_cast<uint8_t*>(rows[i].art));
+    rows[i].art = nullptr;
+    rows[i].art_len = 0;
+  }
+}
+
+void dropArt() {
+  if (s_art != nullptr) heap_caps_free(s_art);
+  s_art = nullptr;
+  s_art_len = s_art_got = 0;
+  s_art_k = -1;
+}
+
+void qack() { reply("QACK", "{}"); }
+
+}  // namespace
+
+bool queueValid() { return s_qvalid && s_qn > 0; }
+int queueCount() { return s_qvalid ? s_qn : 0; }
+const QueueRow& queueRow(int i) { return s_q[i < 0 ? 0 : (i >= kQueueMax ? kQueueMax - 1 : i)]; }
+const char* queueSource() { return s_qsrc; }
+uint32_t queueVersion() { return s_qversion; }
+int queueThumbPx() { return 40 * config::kDisplayWidth / 800; }
+
+void sendQueuePlay(int row) {
+  if (!queueValid() || row < 0 || row >= s_qn) return;
+  JsonDocument doc;
+  doc["x"] = s_q[row].index;
+  doc["t"] = s_q[row].title;
+  char buf[160];
+  serializeJson(doc, buf, sizeof(buf));
+  Console.printf("PR:QPLAY %s\n", buf);
+}
+
+void handleQueueBegin(const char* json) {
+  seen();
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) {
+    reply("ERR", "{\"msg\":\"bad_json\"}");
+    return;
+  }
+  s_qs_open = true;
+  s_qsn = 0;
+  s_qs_want = std::min<int>(doc["n"] | 0, kQueueMax);
+  s_qs_gen = doc["gen"] | 0u;
+  strlcpy(s_qs_src, doc["src"] | "", sizeof(s_qs_src));
+  qack();
+}
+
+void handleQueueItem(const char* json) {
+  seen();
+  JsonDocument doc;
+  if (!s_qs_open || deserializeJson(doc, json) != DeserializationError::Ok) {
+    reply("ERR", "{\"msg\":\"bad_queue\"}");
+    return;
+  }
+  const int k = doc["k"] | -1;
+  if (k == s_qsn && k < kQueueMax) {  // a repeated line (lost answer) is just answered again
+    QueueRow& r = s_qs[k];
+    strlcpy(r.title, doc["t"] | "", sizeof(r.title));
+    strlcpy(r.artist, doc["a"] | "", sizeof(r.artist));
+    strlcpy(r.dur, doc["d"] | "", sizeof(r.dur));
+    r.index = doc["x"] | 0;
+    r.art = nullptr;
+    r.art_len = 0;
+    ++s_qsn;
+  }
+  qack();
+}
+
+void handleQueueEnd() {
+  seen();
+  if (s_qs_open) {
+    dropArt();
+    freeArts(s_q, s_qn);
+    memcpy(s_q, s_qs, sizeof(s_q));
+    s_qn = s_qsn;
+    s_qgen = s_qs_gen;
+    strlcpy(s_qsrc, s_qs_src, sizeof(s_qsrc));
+    s_qvalid = s_qn > 0;
+    s_qs_open = false;
+    ++s_qversion;
+  }
+  qack();
+}
+
+void handleQueueClear() {
+  seen();
+  dropArt();
+  freeArts(s_q, s_qn);
+  s_qn = 0;
+  s_qvalid = false;
+  s_qs_open = false;
+  ++s_qversion;
+  qack();
+}
+
+void handleQueueArtBegin(const char* json) {
+  seen();
+  dropArt();
+  JsonDocument doc;
+  if (deserializeJson(doc, json) != DeserializationError::Ok) {
+    reply("ERR", "{\"msg\":\"bad_json\"}");
+    return;
+  }
+  const size_t len = doc["len"] | 0u;
+  const int k = doc["k"] | -1;
+  if ((doc["gen"] | 0u) != s_qgen || k < 0 || k >= s_qn || len == 0 || len > kMaxArt) {
+    reply("ERR", "{\"msg\":\"art_skip\"}");
+    return;
+  }
+  s_art = static_cast<uint8_t*>(heap_caps_malloc(len, MALLOC_CAP_SPIRAM));
+  if (s_art == nullptr) {
+    reply("ERR", "{\"msg\":\"art_no_memory\"}");
+    return;
+  }
+  s_art_len = len;
+  s_art_got = 0;
+  s_art_crc = doc["crc"] | 0u;
+  s_art_next = 1;
+  s_art_k = k;
+  reply("QARTACK", "{\"seq\":0}");
+}
+
+void handleQueueArtChunk(char* args) {
+  seen();
+  char* data = strchr(args, ' ');
+  char body[32];
+  if (data == nullptr || s_art == nullptr) {
+    reply("ERR", "{\"msg\":\"bad_art_chunk\"}");
+    return;
+  }
+  *data++ = '\0';
+  const long seq = atol(args);
+  if (seq < s_art_next) {
+    snprintf(body, sizeof(body), "{\"seq\":%ld}", seq);
+    reply("QARTACK", body);
+    return;
+  }
+  uint8_t bytes[480];
+  const int n = seq > s_art_next ? -1 : b64Decode(data, bytes, sizeof(bytes));
+  if (n <= 0 || s_art_got + n > s_art_len) {
+    snprintf(body, sizeof(body), "{\"need\":%ld}", s_art_next);
+    reply("QARTNAK", body);
+    return;
+  }
+  memcpy(s_art + s_art_got, bytes, n);
+  s_art_got += n;
+  ++s_art_next;
+  snprintf(body, sizeof(body), "{\"seq\":%ld}", seq);
+  reply("QARTACK", body);
+}
+
+void handleQueueArtEnd() {
+  seen();
+  if (s_art == nullptr || s_art_got != s_art_len || s_art_k < 0 || s_art_k >= s_qn ||
+      (s_art_crc != 0 && services::map::crc32(s_art, s_art_len) != s_art_crc)) {
+    dropArt();
+    reply("ERR", "{\"msg\":\"bad_art\"}");
+    return;
+  }
+  QueueRow& r = s_q[s_art_k];
+  if (r.art != nullptr) heap_caps_free(const_cast<uint8_t*>(r.art));
+  r.art = s_art;
+  r.art_len = s_art_len;
+  s_art = nullptr;
+  s_art_len = s_art_got = 0;
+  s_art_k = -1;
+  ++s_qversion;
+  reply("OK", "{}");
 }
 
 void sendKey(int slot) { Console.printf("PR:KEY {\"i\":%d}\n", slot); }
