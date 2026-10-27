@@ -526,15 +526,24 @@ def run():
             open_editor()
             log("smoke: opened %d, window %s" % (round_, api._window))
             ok = False
-            for _ in range(60):
+            w = api._window
+            if w is not None:
+                log("smoke: shown %s" % w.events.shown.wait(30))
+                log("smoke: loaded %s" % w.events.loaded.wait(30))
+            for _ in range(20):
                 time.sleep(0.5)
                 w = api._window
-                try:
-                    if w is not None and w.evaluate_js("document.querySelectorAll('#grid .key').length") == 12:
-                        ok = True
-                        break
-                except Exception:  # noqa: BLE001 - page still loading
-                    pass
+                box = []
+                # evaluate_js waits for the page without a limit: asked in a thread, with one.
+                t = threading.Thread(target=lambda: box.append(
+                    w.evaluate_js("document.querySelectorAll('#grid .key').length")) if w is not None else None,
+                    daemon=True)
+                t.start()
+                t.join(5)
+                if box and box[0] == 12:
+                    ok = True
+                    break
+                log("smoke: page answered %r" % (box,))
             res.append("round %d editor %s" % (round_, "ok" if ok else "FAILED"))
             log(res[-1])
             w = api._window
