@@ -1,13 +1,19 @@
-"""Settings and the 12 deck keys, kept in %APPDATA%\\PlaneRadarDeck\\config.json."""
+"""Settings and the 12 deck keys, kept in %APPDATA%\\PlaneRadarDeck\\config.json (Windows) or
+~/Library/Application Support/PlaneRadarDeck/config.json (Mac)."""
 
 import copy
 import json
 import os
+import sys
 import threading
 
 SLOTS = 12
 
-APP_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "PlaneRadarDeck")
+IS_MAC = sys.platform == "darwin"
+if IS_MAC:
+    APP_DIR = os.path.join(os.path.expanduser("~/Library/Application Support"), "PlaneRadarDeck")
+else:
+    APP_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "PlaneRadarDeck")
 CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 
 # Action types (the editor's "Bu tuş ne yapsın?"):
@@ -21,6 +27,20 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 
 
 def _default_slots():
+    if IS_MAC:
+        s = [
+            {"label": "Önceki", "img": "", "action": {"type": "media", "code": 5}},
+            {"label": "Oynat / Dur", "img": "", "action": {"type": "media", "code": 3}},
+            {"label": "Sonraki", "img": "", "action": {"type": "media", "code": 4}},
+            {"label": "YouTube", "img": "", "action": {"type": "site", "url": "https://www.youtube.com", "browser": ""}},
+            {"label": "Hesap Makinesi", "img": "", "action": {"type": "app", "path": "/System/Applications/Calculator.app", "name": "Hesap Makinesi", "front": True}},
+            {"label": "İndirilenler", "img": "", "action": {"type": "folder", "path": os.path.join(os.path.expanduser("~"), "Downloads")}},
+            {"label": "Ekran görüntüsü", "img": "", "action": {"type": "keys", "combo": "Cmd+Shift+4"}},
+            {"label": "Notlar", "img": "", "action": {"type": "app", "path": "/System/Applications/Notes.app", "name": "Notlar", "front": True}},
+        ]
+        while len(s) < SLOTS:
+            s.append({"label": "", "img": "", "action": {"type": "none"}})
+        return s
     s = [
         {"label": "Önceki", "img": "", "action": {"type": "media", "code": 5}},
         {"label": "Oynat / Dur", "img": "", "action": {"type": "media", "code": 3}},

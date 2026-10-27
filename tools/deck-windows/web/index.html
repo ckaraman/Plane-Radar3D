@@ -180,7 +180,7 @@
     <section id="page-music" class="row" hidden>
       <div class="card" style="flex: 1 1 520px; max-width: 760px">
         <h2>Şimdi çalan</h2>
-        <p class="hint">Windows'ta çalan müziğin adı, süresi ve kapağı karta gider; müzik başlayınca kart Müzik ekranına geçer.</p>
+        <p class="hint" id="t-music">Windows'ta çalan müziğin adı, süresi ve kapağı karta gider; müzik başlayınca kart Müzik ekranına geçer.</p>
         <div class="np">
           <div class="ph" id="np-cover"></div>
           <div style="min-width: 0">
@@ -204,9 +204,9 @@
       <div style="flex: 1 1 560px; max-width: 760px; display: flex; flex-direction: column; gap: 16px">
         <div class="card" style="padding-top: 6px; padding-bottom: 6px">
           <h2 style="margin-top: 16px">Genel</h2>
-          <div class="opt"><label for="s-auto">Windows açılınca kendiliğinden başlat (görev çubuğunda)</label><input type="checkbox" id="s-auto"></div>
+          <div class="opt"><label for="s-auto" id="t-auto">Windows açılınca kendiliğinden başlat (görev çubuğunda)</label><input type="checkbox" id="s-auto"></div>
           <div class="opt"><label for="s-vol">Gerçek ses seviyesini kartta göster</label><input type="checkbox" id="s-vol"></div>
-          <div class="opt"><label for="s-close">Pencereyi kapatınca programdan tamamen çık<br><span class="small">Kapalıyken program görev çubuğunda çalışmaya devam eder; tuşlar ve müzik ekranı çalışır.</span></label><input type="checkbox" id="s-close"></div>
+          <div class="opt"><label for="s-close">Pencereyi kapatınca programdan tamamen çık<br><span class="small" id="t-close">Kapalıyken program görev çubuğunda çalışmaya devam eder; tuşlar ve müzik ekranı çalışır.</span></label><input type="checkbox" id="s-close"></div>
           <div class="btns" style="margin: 8px 0 16px"><button type="button" class="btn" id="b-exit">Programı kapat</button></div>
         </div>
         <div class="card">
@@ -432,7 +432,7 @@
         el('div', { class: 'line' }, [show, el('button', { type: 'button', class: 'btn', text: 'Listeden seç', onclick: openPicker })]));
       const cb = el('input', { type: 'checkbox', id: 'k-front', onchange: (e) => set('front')(e.target.checked) });
       cb.checked = a.front !== false;
-      p.append(el('label', { style: 'display:flex;align-items:center;gap:10px;margin-top:12px' }, [cb, 'Zaten açıksa yenisini açma, öne getir']));
+      if (!S.mac) p.append(el('label', { style: 'display:flex;align-items:center;gap:10px;margin-top:12px' }, [cb, 'Zaten açıksa yenisini açma, öne getir']));
     } else if (a.type === 'media') {
       const sel = el('select', { class: 'in', id: 'k-media', onchange: (e) => { a.code = parseInt(e.target.value, 10); saveSoon(); renderGrid(); } });
       for (const [v, t] of MEDIA) sel.append(el('option', { value: String(v), text: t }));
@@ -445,13 +445,13 @@
         const k = e.key;
         if (['Control', 'Shift', 'Alt', 'Meta'].includes(k)) return;
         const parts = [];
-        if (e.ctrlKey) parts.push('Ctrl'); if (e.altKey) parts.push('Alt'); if (e.shiftKey) parts.push('Shift'); if (e.metaKey) parts.push('Win');
+        if (e.ctrlKey) parts.push('Ctrl'); if (e.altKey) parts.push('Alt'); if (e.shiftKey) parts.push('Shift'); if (e.metaKey) parts.push(S.mac ? 'Cmd' : 'Win');
         const named = { ' ': 'Space', ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down', Escape: 'Esc', Delete: 'Delete', Backspace: 'Backspace', Enter: 'Enter', Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown', Insert: 'Insert', PrintScreen: 'PrintScreen' };
         let key = named[k] || (/^F\d{1,2}$/.test(k) ? k : (e.code.startsWith('Key') ? e.code.slice(3) : (e.code.startsWith('Digit') ? e.code.slice(5) : k.toUpperCase())));
         parts.push(key);
         a.combo = parts.join('+'); inp.value = a.combo; saveSoon();
       });
-      p.append(...field('Klavye kısayolu', inp), el('div', { class: 'small', style: 'margin-top:8px', text: 'Win tuşlu kısayollar için kutuya elle de yazabilirsin (ör. Win+Shift+S): kutuya çift tıkla.' }));
+      p.append(...field('Klavye kısayolu', inp), el('div', { class: 'small', style: 'margin-top:8px', text: S.mac ? 'Kısayolu kutuya elle de yazabilirsin (ör. Cmd+Shift+4): kutuya çift tıkla. Kartın kendisi gönderemediği kısayollar için Mac bir kez "Erişilebilirlik" izni ister.' : 'Win tuşlu kısayollar için kutuya elle de yazabilirsin (ör. Win+Shift+S): kutuya çift tıkla.' }));
       inp.addEventListener('dblclick', () => { inp.readOnly = false; inp.addEventListener('input', () => { a.combo = inp.value; saveSoon(); }, { once: false }); });
     } else if (a.type === 'text') {
       const ta = el('textarea', { class: 'in', id: 'k-text', oninput: (e) => { a.text = e.target.value; saveSoon(); } });
@@ -583,6 +583,12 @@
     $('#s-back').value = String(S.settings.back_seconds);
     $('#s-close').checked = !!S.settings.close_quits;
     $('#c-app').textContent = 'Plane Radar Deck ' + st.version;
+    S.mac = st.platform === 'mac';
+    if (S.mac) {
+      $('#t-music').textContent = "Mac'te çalan müziğin (Müzik, Spotify, tarayıcıda YouTube Music…) adı, süresi ve kapağı karta gider; müzik başlayınca kart Müzik ekranına geçer.";
+      $('#t-auto').textContent = 'Mac açılınca kendiliğinden başlat (menü çubuğunda)';
+      $('#t-close').textContent = 'Kapalıyken program menü çubuğunda çalışmaya devam eder; tuşlar ve müzik ekranı çalışır.';
+    }
     renderGrid(); renderEditor(); applyLive(st);
     setInterval(async () => { try { applyLive(await api().live()); } catch (_) { /* window closing */ } }, 1000);
   }

@@ -30,8 +30,8 @@ for _i in range(1, 13):
     _NAMED["f%d" % _i] = 0xC2 + _i - 1
 for _i in range(13, 25):
     _NAMED["f%d" % _i] = 0xF0 + _i - 13
-_MODS = {"ctrl": MOD_CTRL, "control": MOD_CTRL, "shift": MOD_SHIFT, "alt": MOD_ALT,
-         "win": MOD_GUI, "windows": MOD_GUI, "cmd": MOD_GUI}
+_MODS = {"ctrl": MOD_CTRL, "control": MOD_CTRL, "shift": MOD_SHIFT, "alt": MOD_ALT, "option": MOD_ALT,
+         "opt": MOD_ALT, "win": MOD_GUI, "windows": MOD_GUI, "cmd": MOD_GUI, "command": MOD_GUI}
 
 
 def parse_combo(combo):

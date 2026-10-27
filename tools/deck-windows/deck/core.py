@@ -3,11 +3,11 @@
 import threading
 import time
 
-from . import actions, blob
+from . import blob
 from .config import Config
 from .device import Device
-from .media import MediaWatcher, cover_jpeg
-from .volume import VolumeWatcher
+from .media import cover_jpeg
+from .plat import actions, media, volume
 
 
 class Core:
@@ -15,8 +15,8 @@ class Core:
         self.log = log
         self.config = Config()
         self.device = Device(self._card_event, log=log)
-        self.volume = VolumeWatcher(self._volume_changed, log=log)
-        self.media = MediaWatcher(self._media_changed, log=log)
+        self.volume = volume.VolumeWatcher(self._volume_changed, log=log)
+        self.media = media.MediaWatcher(self._media_changed, log=log)
         self.now = {"none": True}
         self._cover = None          # (jpeg, track id, w, h, version) for the card
         self._cover_ver = 0

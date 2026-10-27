@@ -58,8 +58,32 @@ jobs:
           name: deck-windows
           path: tools/deck-windows/dist/PlaneRadarDeck.exe
 
+  # Mac helper (same program, macOS parts): a .dmg for the site.
+  deckapp-mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: tools/deck-windows
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-mac.txt pyinstaller
+      - name: Build
+        working-directory: tools/deck-windows
+        run: ./build_mac.sh 2>&1 | tail -40; test -f dist/PlaneRadarDeck-mac.dmg || { echo "::error::mac build failed"; exit 1; }
+      - name: Self test
+        working-directory: tools/deck-windows
+        run: ./selftest_mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deck-mac
+          path: tools/deck-windows/dist/PlaneRadarDeck-mac.dmg
+
   firmware:
-    needs: deckapp
+    needs: [deckapp, deckapp-mac]
     # The site still goes out (with the firmware) if only the Windows helper failed.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
@@ -162,6 +186,13 @@ jobs:
           name: deck-windows
           path: out/deck
 
+      - name: Mac helper from the deckapp-mac job
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: deck-mac
+          path: out/deck
+
       - name: Assemble web site
         run: |
           set -x
@@ -185,6 +216,7 @@ jobs:
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
           if [ -f out/deck/PlaneRadarDeck.exe ]; then cp out/deck/PlaneRadarDeck.exe site/; else echo "::warning::Windows helper not built"; fi
+          if [ -f out/deck/PlaneRadarDeck-mac.dmg ]; then cp out/deck/PlaneRadarDeck-mac.dmg site/; else echo "::warning::Mac helper not built"; fi
           python3 - "$VERSION" "$VERSION_WS5" <<'PY'
           import json, sys
           version, version_ws5 = sys.argv[1], sys.argv[2]
