@@ -48,9 +48,18 @@ jobs:
           name: deck-windows
           path: tools/deck-windows/dist/PlaneRadarDeck.exe
 
-  # Mac helper (same program, macOS parts): a .dmg for the site.
+  # Mac helper (same program, macOS parts): a .dmg each for Apple M and Intel Macs.
   deckapp-mac:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            dmg: PlaneRadarDeck-mac.dmg
+          - runner: macos-15-intel
+            dmg: PlaneRadarDeck-mac-intel.dmg
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,11 +72,11 @@ jobs:
           pip install -r requirements-mac.txt pyinstaller
       - name: Build
         working-directory: tools/deck-windows
-        run: ./build_mac.sh 2>&1 | tail -40; test -f dist/PlaneRadarDeck-mac.dmg || { echo "::error::mac build failed"; exit 1; }
+        run: ./build_mac.sh ${{ matrix.dmg }} 2>&1 | tail -40; test -f dist/${{ matrix.dmg }} || { echo "::error::mac build failed"; exit 1; }
       - name: Self test
         working-directory: tools/deck-windows
-        run: ./selftest_mac.sh
+        run: echo "::notice::$(uname -m) $(sw_vers -productVersion)"; ./selftest_mac.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: deck-mac
-          path: tools/deck-windows/dist/PlaneRadarDeck-mac.dmg
+          name: deck-${{ matrix.dmg }}
+          path: tools/deck-windows/dist/${{ matrix.dmg }}

@@ -58,9 +58,18 @@ jobs:
           name: deck-windows
           path: tools/deck-windows/dist/PlaneRadarDeck.exe
 
-  # Mac helper (same program, macOS parts): a .dmg for the site.
+  # Mac helper (same program, macOS parts): a .dmg each for Apple M and Intel Macs.
   deckapp-mac:
-    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            dmg: PlaneRadarDeck-mac.dmg
+          - runner: macos-15-intel
+            dmg: PlaneRadarDeck-mac-intel.dmg
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -73,14 +82,14 @@ jobs:
           pip install -r requirements-mac.txt pyinstaller
       - name: Build
         working-directory: tools/deck-windows
-        run: ./build_mac.sh 2>&1 | tail -40; test -f dist/PlaneRadarDeck-mac.dmg || { echo "::error::mac build failed"; exit 1; }
+        run: ./build_mac.sh ${{ matrix.dmg }} 2>&1 | tail -40; test -f dist/${{ matrix.dmg }} || { echo "::error::mac build failed"; exit 1; }
       - name: Self test
         working-directory: tools/deck-windows
-        run: ./selftest_mac.sh
+        run: echo "::notice::$(uname -m) $(sw_vers -productVersion)"; ./selftest_mac.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: deck-mac
-          path: tools/deck-windows/dist/PlaneRadarDeck-mac.dmg
+          name: deck-${{ matrix.dmg }}
+          path: tools/deck-windows/dist/${{ matrix.dmg }}
 
   firmware:
     needs: [deckapp, deckapp-mac]
@@ -186,11 +195,12 @@ jobs:
           name: deck-windows
           path: out/deck
 
-      - name: Mac helper from the deckapp-mac job
+      - name: Mac helpers from the deckapp-mac jobs
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: deck-mac
+          pattern: deck-PlaneRadarDeck-mac*
+          merge-multiple: true
           path: out/deck
 
       - name: Assemble web site
@@ -216,7 +226,9 @@ jobs:
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
           if [ -f out/deck/PlaneRadarDeck.exe ]; then cp out/deck/PlaneRadarDeck.exe site/; else echo "::warning::Windows helper not built"; fi
-          if [ -f out/deck/PlaneRadarDeck-mac.dmg ]; then cp out/deck/PlaneRadarDeck-mac.dmg site/; else echo "::warning::Mac helper not built"; fi
+          for d in PlaneRadarDeck-mac.dmg PlaneRadarDeck-mac-intel.dmg; do
+            if [ -f "out/deck/$d" ]; then cp "out/deck/$d" site/; else echo "::warning::$d not built"; fi
+          done
           python3 - "$VERSION" "$VERSION_WS5" <<'PY'
           import json, sys
           version, version_ws5 = sys.argv[1], sys.argv[2]

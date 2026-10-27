@@ -1,15 +1,19 @@
 #!/bin/bash
-# Builds "Plane Radar Deck.app" and PlaneRadarDeck-mac.dmg on a Mac (CI: macos-14, arm64).
+# Builds "Plane Radar Deck.app" and a .dmg on a Mac: arm64 on an Apple M runner, x86_64 on
+# an Intel one (CI: macos-14 / macos-15-intel). Usage: build_mac.sh [dmg name]
 # The now-playing reader (MediaRemote Adapter, BSD 3-Clause) is built from a fixed commit.
 set -euo pipefail
 cd "$(dirname "$0")"
 MRA_COMMIT=0e82bf1c44ec39554fbfc402ec88a48c6ae2a0fd
 APP="dist/Plane Radar Deck.app"
+DMG="dist/${1:-PlaneRadarDeck-mac.dmg}"
+# Older macOS versions too (Intel Macs often stay on 11 - 13).
+export MACOSX_DEPLOYMENT_TARGET=11.0
 
 rm -rf build/mra-src mra
 git clone -q https://github.com/ungive/mediaremote-adapter build/mra-src
 git -C build/mra-src checkout -q "$MRA_COMMIT"
-cmake -S build/mra-src -B build/mra-src/build -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake -S build/mra-src -B build/mra-src/build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 >/dev/null
 cmake --build build/mra-src/build --config Release -j 4 >/dev/null
 mkdir -p mra
 cp build/mra-src/bin/mediaremote-adapter.pl mra/
@@ -41,5 +45,5 @@ codesign --verify --deep "$APP"
 rm -rf build/dmg && mkdir -p build/dmg
 ditto "$APP" "build/dmg/Plane Radar Deck.app"
 ln -s /Applications build/dmg/Applications
-hdiutil create -quiet -volname "Plane Radar Deck" -srcfolder build/dmg -ov -format UDZO dist/PlaneRadarDeck-mac.dmg
+hdiutil create -quiet -volname "Plane Radar Deck" -srcfolder build/dmg -ov -format UDZO "$DMG"
 ls -la dist
