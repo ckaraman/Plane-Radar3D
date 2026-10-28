@@ -36,8 +36,10 @@ Kararlar (kullanıcı onaylı):
 | kart → PC | `PR:HELLO {"fw":…,"sys":2,"feedv":1,"prefs":{…},"map":…,"elev":…,"deckv":…,…}` | Sürüm, ekran ayarları, harita durumu |
 | PC → kart | `PR:VOL {"v":42,"m":false}` | Ses + kalp atışı (~2 sn, bugünkü gibi) |
 
-Kart 20 sn hiç satır almazsa "PC yok" sayar: radar boşalır, saat ekranına geçer; saat,
-son `AEND` ile eşitlenmiş haliyle çalışmaya devam eder. Satır gelince kendiliğinden döner.
+Kart 20 sn uçak partisi (`AEND`) almazsa "PC yok" sayar: son listeyi siler, radar boşalır,
+15 sn sonra saat ekranına geçer (saat ayarı açıksa ve PC saati en az bir kez göndermişse; yoksa
+radar "PC programı bekleniyor" der). Saat, son `AEND` ile eşitlenmiş haliyle çalışır. Yeni
+parti gelince radar kendiliğinden döner. 1. sistem HELLO'da `"sys":1` bildirir.
 
 ### Uçaklar (her 2–5 sn bir parti)
 
@@ -64,7 +66,7 @@ indirir, ayrıştırır, kart yalnızca okur. Cevap gerekmez; kart son satırı 
 | Yön | Satır | Anlamı |
 |---|---|---|
 | PC → kart | `PR:SET {"lat":…,"lon":…,"tz":…,"clock":…,"miles":…,"runways":…,"rings":…,"weather":…}` | Bugünkü `SET`, Wi-Fi alanları olmadan |
-| kart → PC | `PR:PREFS {"range_km":15,"labels":true,"miles":false,…}` | **Yeni.** Ekrandaki menüden bir ayar değişince; PC menzile göre süzer ve kendi penceresinde gösterir |
+| kart → PC | `PR:PREFS {"range_km":15,"fetch_km":23,"miles":false}` | **Yeni.** Açılışta bir kez ve ekranda menzil ya da birim değişince. `range_km` = görünen menzil, `fetch_km` = PC'nin uçak indireceği yarıçap (menzilden biraz geniş) |
 
 `PREFS` sadece kartta değişen ekran ayarlarını taşır. Konum ve saat dilimi gibi veri ayarları
 PC'de tutulur (PC kaynaktır), karta `SET` ile gider.

@@ -160,6 +160,17 @@ void benchMemory() {
 // Runs at the redraw cadence: decide radar / clock / weather, then draw.
 void updateScreen() {
   const unsigned long now = millis();
+#if !defined(WITH_WIFI)
+  // System 2: the PC is the only source. Silent for 20 s (PC off, program closed): drop
+  // its last list, so the radar shows no frozen aircraft and the clock takes over.
+  static bool s_pc_seen = false;
+  const bool pc = services::usb_feed::active();
+  if (s_pc_seen && !pc) {
+    Console.println("PC silent - aircraft cleared");
+    services::adsb::publishExternal(nullptr, 0);
+  }
+  s_pc_seen = pc;
+#endif
   const size_t aircraft = aircraftInRange();
   const bool have_data = services::adsb::lastUpdateMs() != 0;
   if (aircraft > 0 || !have_data) {

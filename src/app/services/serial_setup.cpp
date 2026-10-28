@@ -83,6 +83,15 @@ void sendOk(bool rebooting, const char* ip = nullptr) {
   sendReply("OK", doc);
 }
 
+#if !defined(WITH_WIFI)
+/** Screen settings the PC needs (PR:PREFS, docs/PROTOCOL.md): it filters the aircraft by them. */
+void fillPrefs(JsonObject p) {
+  p["range_km"] = ui::radar::rangeCurrent().outer_km;
+  p["fetch_km"] = ui::radar::fetchRadiusKm();
+  p["miles"] = ui::radar::useMiles();
+}
+#endif
+
 void sendHello() {
   JsonDocument doc;
   doc["fw"] = config::kFirmwareVersion;
@@ -151,6 +160,13 @@ void sendHello() {
   doc["queuev"] = 1;                           // queue panel (PR:QBEGIN ...)
   doc["qthumb"] = services::host::queueThumbPx();  // its small covers, px
   doc["hostv"] = 2;  // Windows helper protocol (services/host_link.h): 2 = windowed cover, "pm"
+#endif
+#if defined(WITH_WIFI)
+  doc["sys"] = 1;
+#else
+  doc["sys"] = 2;
+  doc["feedv"] = 1;  // aircraft, weather and time come from the PC (docs/PROTOCOL.md)
+  fillPrefs(doc["prefs"].to<JsonObject>());
 #endif
   doc["w"] = config::kDisplayWidth;
   doc["h"] = config::kDisplayHeight;
@@ -711,6 +727,19 @@ void poll() {
       s_overflow = true;
     }
   }
+#if !defined(WITH_WIFI)
+  // A range or unit change on the screen goes to the PC at once (also once at start).
+  static int s_sent_range = -1;
+  static bool s_sent_miles = false;
+  if (!services::serial_ota::active() &&
+      (ui::radar::rangeIndex() != s_sent_range || ui::radar::useMiles() != s_sent_miles)) {
+    s_sent_range = ui::radar::rangeIndex();
+    s_sent_miles = ui::radar::useMiles();
+    JsonDocument doc;
+    fillPrefs(doc.to<JsonObject>());
+    sendReply("PREFS", doc);
+  }
+#endif
 }
 
 }  // namespace services::serial_setup

@@ -63,10 +63,10 @@ içinde. Sürümler `include/config.h` içinde.
 | 3 | 1. sistem firmware'i: deck / USB klavye çıkar | Tamam (kartta denendi) |
 | 4 | 1. sistem kurulum sayfası + kurtarma rehberi | Tamam (kartta denendi) |
 | 5 | 2. sistem USB protokolünün yazılı tasarımı ([PROTOCOL.md](PROTOCOL.md)) | Tamam |
-| 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den (6a indirme kodu `src/net`'e, 6b ws5'ten Wi-Fi çıkar, 6c PREFS / sys / PC yok → saat, 6d sayfa) | Bu adım (6a tamam) |
+| 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den (6a indirme kodu `src/net`'e, 6b ws5'ten Wi-Fi çıkar, 6c PREFS / sys / PC yok → saat, 6d sayfa) | Bu adım (6a, 6b kartta denendi; 6c yazıldı) |
 | 7 | PC programı: veri motoru (uçuş, rota, hava, saat) | |
 | 8 | PC programı: ayarlar, harita, firmware yükleme ve kurtarma | |
-| 9 | 2. sistem kurulum sayfası + SignPath (imzalı exe) başvurusu | |
+| 9 | 2. sistem kurulum sayfası + SignPath (imzalı exe) başvurusu. Açık karar: Defender `PlaneRadarDeck.exe`'yi `Trojan:Win32/Sabsik.TE.A!ml` diye engelliyor (PyInstaller tek dosya + imzasız, yanlış alarm); bootloader'ı kaynaktan derleme + zip ile yayınlama burada tekrar konuşulacak | |
 | 10 | Performans karşılaştırması, temizlik | |
 
 ## Kurulum sayfaları
