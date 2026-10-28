@@ -188,6 +188,10 @@ jobs:
           test -n "$VERSION" && test -n "$VERSION_RADAR"
           mkdir -p site
           cp web/index.html web/tz.json web/tz-LICENSE.txt site/
+          # System 1's page: the same page in its radar mode, reading every file from the site root.
+          mkdir -p site/radar
+          sed -e 's|^<head>$|<head>\n<base href="../">|' -e 's|^<body>$|<body data-sys="radar">|' web/index.html > site/radar/index.html
+          grep -q '<base href="../">' site/radar/index.html && grep -q 'data-sys="radar"' site/radar/index.html
           for ENV in ws5 radar; do
             B=out/$ENV
             cp $B/firmware.bin site/firmware-$ENV.bin

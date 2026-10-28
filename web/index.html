@@ -100,12 +100,15 @@
   /* Nothing below the model question until a model is picked; then only that model's parts. */
   body:not([data-model]) #steps { display: none; }
   body[data-model="4"] .m5, body[data-model="5"] .m4 { display: none !important; }
+  /* /radar/ copy (system 1, data-sys="radar"): .nr parts are hidden there, .or parts only show there. */
+  body[data-sys="radar"] .nr, body:not([data-sys="radar"]) .or { display: none !important; }
+  #model-card { display: none; }
   @media (max-width: 520px) { .grid2, .models { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>Plane Radar 3D kurulum</h1>
+  <h1>Plane Radar 3D kurulum<span class="or"> <span class="sub">(1. sistem: Wi-Fi radar)</span></span></h1>
   <p class="lead">Cihazı USB ile bilgisayara bağlayın, WiFi ve konumunuzu girin. Yazılım güncellemek için de aynı sayfayı kullanın.</p>
 
   <noscript><div class="msg err">Bu sayfa JavaScript gerektirir.</div></noscript>
@@ -265,29 +268,22 @@
         <p class="small"><strong>Bu bölümdeki düğmeler için BOOT gerekmez:</strong> önce 1. adımdan cihaza bağlanın, sonra düğmeye basın. Sayfa kartı kurulum moduna alıp bağlantıyı bırakır; ardından aynı düğmeye <strong>bir kez daha</strong> basıp listedeki kartı seçersiniz. (Kart çalışmıyorsa ve bağlanamıyorsanız: arka yüzdeki BOOT tuşunu basılı tutup RESET'e basın, BOOT'u bırakın.)</p>
         <div class="msg info" id="msg-flash5" hidden role="status" aria-live="polite"></div>
         <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
-        <div class="row">
+        <div class="row nr">
           <esp-web-install-button id="install-update-ws5" manifest="manifest-update-ws5.json">
             <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
             <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
             <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
           </esp-web-install-button>
         </div>
-        <p class="small">Cihaz hiç yanıt vermiyorsa ya da boşsa tam kurulum yapın. <strong>Bu işlem tüm ayarları siler</strong>; sonra 2. adımdan yeniden girmeniz gerekir. 1. adımdaki bağlantıyı elle kesmeyin, sayfa kendisi bırakır.</p>
-        <div class="row">
-          <esp-web-install-button id="install-full-ws5" manifest="manifest-full-ws5.json">
-            <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
-            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
-            <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
-          </esp-web-install-button>
-        </div>
-        <p class="small"><strong>Deneme: 1. sistem (yalnız WiFi radar, deck yok).</strong> Ayarlar ve harita kalır. Geri dönmek için 3. adımdaki “Yazılımı güncelle” yeter. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
-        <div class="row">
+        <div class="row or">
           <esp-web-install-button id="install-update-radar" manifest="manifest-update-radar.json">
-            <button slot="activate" class="btn" type="button">1. sistemi yükle (deneme)</button>
-            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
-            <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+            <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
+            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
+            <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
           </esp-web-install-button>
         </div>
+        <p class="small nr"><strong>1. sisteme geç (yalnız Wi-Fi radar, deck yok):</strong> <a href="radar/">1. sistemin sayfasını</a> açıp 3. adımdan “Yazılımı güncelle”ye basın. Ayarlar ve harita kalır.</p>
+        <p class="small or"><strong>Deck'li sisteme dönmek için:</strong> <a href="./">ana kurulum sayfasını</a> açıp 3. adımdan “Yazılımı güncelle”ye basın. Ayarlar ve harita kalır.</p>
       </div>
       <div class="row" style="margin-top:12px">
         <button type="button" class="btn danger" id="btn-reset" disabled>Ayarları sıfırla</button>
@@ -296,7 +292,7 @@
     </details>
   </section>
 
-  <section class="card" aria-labelledby="h-bridge">
+  <section class="card nr" aria-labelledby="h-bridge">
     <h2 id="h-bridge"><span class="step">4</span>Wi-Fi olmadan çalıştırmak (USB köprüsü)</h2>
     <p class="hint"><span class="m4">Anten takılı değilse ya da </span>Wi-Fi'ye bağlanamıyorsa uçuş verisini bu bilgisayar indirip USB kablosuyla cihaza gönderebilir. Windows ve Mac için ayrı paketler var, ek program kurmak gerekmez.</p>
     <div class="row" style="margin-top:12px">
@@ -308,7 +304,35 @@
     <p class="small">Köprü çalışırken bu sayfanın cihaza bağlı olmaması gerekir: önce yukarıdan “Bağlantıyı kes”e basın. Köprü penceresi açık kaldığı sürece radar çalışır.</p>
   </section>
 
-  <section class="card m5" aria-labelledby="h-deck">
+  <section class="card m5" aria-labelledby="h-recover">
+    <h2 id="h-recover">Kart açılmıyor ya da donuyorsa (kurtarma)</h2>
+    <p class="hint">Önce kabloyu çıkarıp yeniden takın. Kart yine açılmıyorsa, takılı kalıyorsa ya da bu sayfa bağlanamıyorsa yazılımı baştan yükleyin. Kartın içindeki yükleme modu silinemez, bu yüzden kart her zaman kurtarılabilir.</p>
+    <ol class="small">
+      <li>Kartı USB kablosuyla bilgisayara takın. 1. adımda bağlıysanız önce “Bağlantıyı kes”e basın.</li>
+      <li>Kartın arka yüzündeki <strong>BOOT</strong> tuşunu basılı tutun, <strong>RESET</strong> tuşuna basıp bırakın, sonra BOOT'u bırakın. Ekran kararabilir; kart şimdi yükleme modunda bekliyor.</li>
+      <li>Aşağıdaki “Tam kurulum” düğmesine basın ve listede kartı seçin (adı genelde “USB JTAG/serial debug unit”).</li>
+      <li>Açılan pencerede “Erase device” kutusunu <strong>işaretlemeden</strong> deneyin. Wi-Fi, konum ve diğer ayarlar silinir, harita kalır.</li>
+      <li>Bittiğinde RESET'e bir kez basın, sonra 2. adımdan ayarları yeniden girin.</li>
+      <li>Kart hâlâ açılmıyorsa aynı adımları “Erase device” <strong>işaretli</strong> tekrarlayın. Harita da silinir; 2. adımda “Cihaza kaydet” onu yeniden indirir.</li>
+    </ol>
+    <div class="row nr">
+      <esp-web-install-button id="install-full-ws5" manifest="manifest-full-ws5.json">
+        <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
+        <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
+        <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+      </esp-web-install-button>
+    </div>
+    <div class="row or">
+      <esp-web-install-button id="install-full-radar" manifest="manifest-full-radar.json">
+        <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
+        <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
+        <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+      </esp-web-install-button>
+    </div>
+    <div class="msg info" id="msg-flash5r" hidden role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="card m5 nr" aria-labelledby="h-deck">
     <h2 id="h-deck"><span class="step">5</span>Kontrol tuşları <span class="sub">(stream deck ekranı)</span></h2>
     <div class="msg info" style="margin-bottom:14px"><strong>Windows ve Mac için Plane Radar Deck:</strong> tuşları bilgisayardaki bu programla da ayarlayabilirsiniz. Program ayrıca istediğiniz siteyi istediğiniz tarayıcıda açar, program başlatır, gerçek ses seviyesini ve çalan şarkıyı (kapağıyla) karta gönderir.<br><a class="btn primary" href="PlaneRadarDeck.exe" download style="margin:8px 6px 4px 0">Windows programını indir</a><a class="btn primary" href="PlaneRadarDeck-mac.dmg" download style="margin:8px 6px 4px 0">Mac (Apple M işlemci)</a><a class="btn primary" href="PlaneRadarDeck-mac-intel.dmg" download style="margin:8px 0 4px">Mac (Intel işlemci)</a><br><span class="small">Windows ilk açılışta “bilinmeyen yayımcı” uyarısı verebilir: “Ek bilgi → Yine de çalıştır”. Mac'te: indirilen dosyayı açıp “Plane Radar Deck”i Uygulamalar'a sürükleyin; ilk açılışta uygulamaya sağ tıklayıp “Aç” deyin. Hangi Mac sürümünü indireceğinizi Apple menüsü › Bu Mac Hakkında'daki “Yonga” (Apple M) ya da “İşlemci” (Intel) satırı gösterir. Program açıkken bu sayfa karta bağlanamaz; programın menüsünden “Bağlantıyı bırak” deyin.</span></div>
     <p class="hint">Radardaki ızgara düğmesiyle açılan kontrol ekranının 12 tuşuna resim, yazı ve işlev verin. Tuşlar USB kablosundan bilgisayara klavye tuşu olarak gider; sağdaki yuvarlak düğme sesi açar / kısar, dokununca sessize alır. Bir tuşa tıklayıp aşağıdan düzenleyin, sonra “Cihaza gönder”e basın.</p>
@@ -599,7 +623,7 @@
       // The 5" Waveshare board (ESP32-S3) has its own image; older firmware sends no "hw".
       const hw = state.device && state.device.hw;
       if (modelMismatch()) throw new Error('bağlı cihaz seçili modelle uyuşmuyor');
-      const fwFile = state.model === '5' ? (hw === 'ws5b' ? 'firmware-ws5b.bin' : 'firmware-ws5.bin') : 'firmware.bin';
+      const fwFile = state.model === '5' ? (hw === 'ws5b' ? 'firmware-ws5b.bin' : 'firmware-' + SYS + '.bin') : 'firmware.bin';
       const r = await fetch(fwFile + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
       if (!r.ok) throw new Error('indirme ' + r.status);
       const fw = new Uint8Array(await r.arrayBuffer());
@@ -1862,12 +1886,13 @@
   // Latest version for the chosen model; refresh the installers' manifest URLs.
   function applyLatest() {
     const v = state.versions || {};
-    state.latest = (state.model === '5' ? v.version_ws5 : v.version) || null;
+    state.latest = (state.model === '5' ? v['version_' + SYS] : v.version) || null;
     // The installer fetches its manifest with normal caching (up to ~10 min on GitHub Pages), which
     // could offer the previous version. A unique query string always fetches the current one.
     for (const id of INSTALLERS) {
       const el = $('#' + id), base = el && (el.getAttribute('manifest') || '').split('?')[0];
-      if (el && base) el.setAttribute('manifest', base + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now());
+      // Absolute: the installer resolves it against the page address, not the /radar/ copy's <base>.
+      if (el && base) el.setAttribute('manifest', new URL(base, document.baseURI).href.split('?')[0] + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now());
     }
     renderVersion();
   }
@@ -1877,6 +1902,10 @@
     const cur = state.connected && state.device ? state.device.fw : null;
     if (!state.latest) { setMsg(el, '', ''); return; }
     if (!cur) { setMsg(el, 'info', 'En yeni yazılım sürümü: ' + state.latest + '. Cihaza bağlanırsanız sürümünü de gösteririm.'); return; }
+    if (SYS === 'radar' ? /^5in-/.test(cur) : /^radar-/.test(cur)) {
+      setMsg(el, 'warn', 'Bu kartta ' + (SYS === 'radar' ? "deck'li sistem" : '1. sistem') + ' yüklü (sürüm ' + cur + '). Aşağıdaki “Yazılımı güncelle” bu sayfanın sistemini (' + state.latest + ') yükler; ayarlar ve harita kalır.');
+      return;
+    }
     if (cur === state.latest) setMsg(el, 'ok', 'Cihazınız güncel (sürüm ' + cur + ').');
     else setMsg(el, 'warn', 'Cihazdaki sürüm ' + cur + ', en yeni sürüm ' + state.latest + '. Aşağıdan güncelleyebilirsiniz.');
   }
@@ -1890,7 +1919,7 @@
     if (!(state.port && state.connected)) return; // not connected (blank board, or prepared): installer opens
     ev.preventDefault();
     ev.stopPropagation();
-    const msg = $('#msg-flash5');
+    const msg = ev.currentTarget.closest('.m5').querySelector('[id^="msg-flash5"]');
     try {
       if (modelMismatch()) throw new Error('model');
       if (state.device && state.device.usb === 'kb') await ensureSetupUsb(msg);
@@ -1910,7 +1939,9 @@
   }
 
   // ------------------------------------------------------------------ model
-  const INSTALLERS = ['install-update', 'install-full', 'install-update-ws5', 'install-full-ws5', 'install-update-radar'];
+  const INSTALLERS = ['install-update', 'install-full', 'install-update-ws5', 'install-full-ws5', 'install-update-radar', 'install-full-radar'];
+  // Which firmware this page installs: the /radar/ copy (data-sys="radar") is system 1.
+  const SYS = document.body.dataset.sys === 'radar' ? 'radar' : 'ws5';
   const MODEL_NAMES = { '4': '4" Radar (ESP32-WROOM + 4.0" ekran)', '5': '5" Radar (Waveshare ESP32-S3-Touch-LCD-5)' };
 
   function setModel(m, remember) {
@@ -2298,16 +2329,12 @@
     }
     $('#btn-model-change').addEventListener('click', changeModel);
     // Capture on the row: runs before the installer's own click handler.
-    for (const id of ['install-update-ws5', 'install-full-ws5', 'install-update-radar']) {
+    for (const id of ['install-update-ws5', 'install-full-ws5', 'install-update-radar', 'install-full-radar']) {
       const el = document.getElementById(id);
       if (el && el.parentElement) el.parentElement.addEventListener('click', prepFlash5, true);
     }
-    {
-      // ?model=4 / ?model=5 in the address, else the last choice on this computer.
-      let m = new URLSearchParams(location.search).get('model');
-      if (m !== '4' && m !== '5') { try { m = localStorage.getItem('pr3d-model'); } catch (_) { m = null; } }
-      if (m === '4' || m === '5') setModel(m, false);
-    }
+    // shortcut: this repo is 5"-only, so the model question is hidden; its 4" parts go in stage 10.
+    setModel('5', false);
     renderConnection();
     loadZones();
     loadLatest();

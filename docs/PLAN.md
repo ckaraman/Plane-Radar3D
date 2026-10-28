@@ -8,7 +8,7 @@ Tek kart (Waveshare ESP32-S3-Touch-LCD-5, 800×480), iki ayrı firmware. Biri y�
 | Veri | Kart WiFi'den indirir (adsb.fi, Open-Meteo, adsbdb) | PC programı indirir, ayrıştırır, USB'den hazır gönderir |
 | Kartta WiFi / TLS | Var | Yok (RAM ve işlemci çizime kalır) |
 | Ekranlar | Radar, hava, saat, su | Radar, hava, saat, su, deck |
-| Kurulum | Kurulum sayfası (Wi-Fi, konum, harita, güncelleme) | Sayfa sadece PC programını indirtir; gerisi programdan |
+| Kurulum | `…/Plane-Radar3D/radar/` (Wi-Fi, konum, harita, güncelleme) | Ana sayfa; 9. aşamada sadece PC programını indirtir, gerisi programdan |
 | PC kapalıyken | — | Saat ekranı (kart ayrıca besleniyorsa) |
 
 ## Kod düzeni
@@ -59,8 +59,8 @@ Deck'e ait her satır `#if defined(WITH_DECK)` içinde. Sürümler `include/conf
 | 0 | Git, GitHub girişi, yeni repo | Tamam |
 | 1 | Mevcut kod yeni repoda derleniyor ve yayında | Tamam |
 | 2 | Tek dal, `core/net/deck/app` klasörleri, sadece 800×480 derlemesi (davranış aynı) | Tamam |
-| 3 | 1. sistem firmware'i: deck / USB klavye çıkar | Bu adım |
-| 4 | 1. sistem kurulum sayfası + kurtarma rehberi | |
+| 3 | 1. sistem firmware'i: deck / USB klavye çıkar | Tamam (kartta denendi) |
+| 4 | 1. sistem kurulum sayfası + kurtarma rehberi | Bu adım |
 | 5 | 2. sistem USB protokolünün yazılı tasarımı | |
 | 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den | |
 | 7 | PC programı: veri motoru (uçuş, rota, hava, saat) | |
@@ -68,7 +68,16 @@ Deck'e ait her satır `#if defined(WITH_DECK)` içinde. Sürümler `include/conf
 | 9 | 2. sistem kurulum sayfası + SignPath (imzalı exe) başvurusu | |
 | 10 | Performans karşılaştırması, temizlik | |
 
+## Kurulum sayfaları
+
+Tek dosya: `web/index.html`. CI onu `site/radar/index.html` olarak da kopyalar; kopyaya
+`<base href="../">` (dosyalar kökten okunur) ve `<body data-sys="radar">` eklenir. Sayfada `.nr`
+sınıflı parçalar 1. sistemde gizlenir, `.or` sınıflılar sadece 1. sistemde görünür; JS'deki `SYS`
+hangi firmware'in (`firmware-ws5.bin` / `firmware-radar.bin`) yükleneceğini seçer. 1. sistem kartı
+ekranda `/radar` adresini gösterir (`include/config.h`).
+
 ## Kurtarma (kart açılmıyorsa)
 
 ESP32-S3'ün silinemeyen yükleme modu var: BOOT'u basılı tut, RESET'e bas-bırak, BOOT'u bırak.
-Sonra kurulum sayfasından "Tam kurulum".
+Sonra kurulum sayfasının sonundaki kurtarma kartından "Tam kurulum" (ayarlar silinir, harita
+kalır; "Erase device" işaretlenirse harita da silinir).

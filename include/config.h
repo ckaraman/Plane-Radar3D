@@ -12,22 +12,24 @@ namespace config {
 #if defined(WITH_DECK)
 constexpr char kFirmwareVersion[] = "5in-0.36.2";
 #else  // system 1: Wi-Fi radar without the stream deck (env:radar)
-constexpr char kFirmwareVersion[] = "radar-1.0.0";
+constexpr char kFirmwareVersion[] = "radar-1.1.0";
 #endif
 
 // --- USB setup page address shown on the setup screen ---
 // CI writes include/setup_url.h with the GitHub Pages address of the repository
-// ("owner.github.io/repo"). Without it the address below is used: the existing
-// plane-radar-clock setup page speaks the same USB protocol as this firmware.
+// ("owner.github.io/repo"). Without it (local builds) this repository's page is used.
 #if defined(__has_include)
 #if __has_include("setup_url.h")
 #include "setup_url.h"
 #endif
 #endif
-#ifdef SETUP_PAGE_URL
+#ifndef SETUP_PAGE_URL
+#define SETUP_PAGE_URL "ckaraman.github.io/Plane-Radar3D"
+#endif
+#if defined(WITH_DECK)
 constexpr char kSetupPageUrl[] = SETUP_PAGE_URL;
-#else
-constexpr char kSetupPageUrl[] = "ckaraman.github.io/plane-radar-3d";
+#else  // system 1 has its own page
+constexpr char kSetupPageUrl[] = SETUP_PAGE_URL "/radar";
 #endif
 
 /** Per-attempt STA connect wait (ms); retried kWifiConnectAttempts times. */
