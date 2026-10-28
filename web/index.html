@@ -713,7 +713,7 @@
   // ------------------------------------------------------------ USB modes
   // 5" board from 5in-0.30: its one USB port is a USB keyboard + serial port ("kb") for the
   // stream deck, or the plain USB-Serial/JTAG port ("setup"). Long uploads need setup mode:
-  // the keyboard-mode serial port loses data on them. Firmware: include/hardware/console.h.
+  // the keyboard-mode serial port loses data on them. Firmware: src/core/hardware/console.h.
   async function ensureSetupUsb(msg) {
     const dev = state.device || {};
     if (dev.usb !== 'kb') return; // already in setup mode, or firmware without the two modes
@@ -985,7 +985,7 @@
 
   // ------------------------------------------------------------------ map
   // Coast lines and main roads around the chosen location, from OpenStreetMap.
-  // Binary format and limits: include/services/map_store.h in the firmware.
+  // Binary format and limits: src/core/services/map_store.h in the firmware.
   // Device range presets: label km (shown on ring 3) -> outer ring = label x 4/3. The map must also fill
   // the screen beyond the outer ring (the round screen reaches ~1.12 x the outer ring), so it is
   // downloaded to 1.13 x the outer ring of the widest range the person picks.
@@ -1970,7 +1970,7 @@
   }
 
   // ---------------------------------------------------------- deck keys
-  // Stream deck keys on the 5" board. Blob format: firmware include/services/deck_store.h.
+  // Stream deck keys on the 5" board. Blob format: firmware src/deck/services/deck_store.h.
   // Media codes = services::hid::Media (0 vol+, 1 vol-, 2 mute, 3 play/pause, 4 next, 5 prev),
   // key codes = Arduino keyboard codes (F13 = 0xF0 ... F24 = 0xFB, letters as lowercase ASCII).
   const DECK_SLOTS = 12, DECK_KEY_BG = [36, 40, 73]; // a key on the card's new background

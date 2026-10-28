@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generates src/ui/fonts_tr.cpp / include/ui/fonts_tr.h: FreeSans bitmap fonts (same
+Generates src/core/ui/fonts_tr.cpp / src/core/ui/fonts_tr.h: FreeSans bitmap fonts (same
 rendering as Adafruit's fontconvert, so they look like LovyanGFX's FreeSans*pt7b)
 plus the Turkish letters and the degree sign, using LovyanGFX's sparse EncodeRange.
 
@@ -8,9 +8,9 @@ plus the Turkish letters and the degree sign, using LovyanGFX's sparse EncodeRan
   python3 tools/fonts/make_tr_fonts.py /usr/share/fonts/truetype/freefont          # 4" board
   python3 tools/fonts/make_tr_fonts.py /usr/share/fonts/truetype/freefont --ws5    # 5" board
 
---ws5b renders them 1.875x into src/ui/fonts_tr_ws5b.cpp (1024x600 "5B" panel).
+--ws5b renders them 1.875x into src/core/ui/fonts_tr_ws5b.cpp (1024x600 "5B" panel).
 --ws5 renders the same fonts 1.5x larger (800x480 panel, same physical size) into
-src/ui/fonts_tr_ws5.cpp. Each file compiles only for its board (BOARD_WS5 guard).
+src/core/ui/fonts_tr_ws5.cpp. Each file compiles only for its board (BOARD_WS5 guard).
 """
 import os
 import sys
@@ -105,7 +105,7 @@ def main():
     out += footer
     out += ["", "}  // namespace ui::font", "", "#endif", ""]
     name = "fonts_tr_ws5b.cpp" if ws5b else "fonts_tr_ws5.cpp" if ws5 else "fonts_tr.cpp"
-    with open(os.path.join(root, "src", "ui", name), "w") as f:
+    with open(os.path.join(root, "src", "core", "ui", name), "w") as f:
         f.write("\n".join(out))
     if ws5:
         return  # the header is shared
@@ -116,7 +116,7 @@ def main():
     for name, _, size in FONTS:
         hdr.append(f"extern const lgfx::GFXfont {name};  // {size} pt")
     hdr += ['', '}  // namespace ui::font', '']
-    with open(os.path.join(root, "include", "ui", "fonts_tr.h"), "w") as f:
+    with open(os.path.join(root, "src", "core", "ui", "fonts_tr.h"), "w") as f:
         f.write("\n".join(hdr))
 
 

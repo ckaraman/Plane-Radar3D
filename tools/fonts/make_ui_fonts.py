@@ -8,7 +8,7 @@ SIL Open Font License 1.1), 4-bit coverage per pixel, drawn by ui/ui_text.cpp.
   python3 tools/fonts/make_ui_fonts.py path/to/extras/ttf          # 5" (800 x 480)
   python3 tools/fonts/make_ui_fonts.py path/to/extras/ttf --ws5b   # 5B (1024 x 600)
 
-Writes src/ui/ui_fonts_ws5.cpp or src/ui/ui_fonts_ws5b.cpp (each compiles for its board).
+Writes src/deck/ui/ui_fonts_ws5.cpp or src/deck/ui/ui_fonts_ws5b.cpp (each compiles for its board).
 """
 import os
 import sys
@@ -84,7 +84,7 @@ def main():
         print(f"{name}: {px} px, {len(data)} bytes, {len(glyphs)} glyphs")
     out += ["}  // namespace", ""] + footer + ["", "}  // namespace ui::text", "", "#endif", ""]
     name = "ui_fonts_ws5b.cpp" if ws5b else "ui_fonts_ws5.cpp"
-    with open(os.path.join(root, "src", "ui", name), "w") as f:
+    with open(os.path.join(root, "src", "deck", "ui", name), "w") as f:
         f.write("\n".join(out))
 
 

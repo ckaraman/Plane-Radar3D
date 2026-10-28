@@ -1,4 +1,4 @@
-"""The key set sent to the card. Format: firmware include/services/deck_store.h.
+"""The key set sent to the card. Format: firmware src/deck/services/deck_store.h.
 
 Version 1: 'D' 'K' 1 12 icon_px volume_steps; small square pictures above the label.
 Version 2: 'D' 'K' 2 12 key_w key_h volume_steps 0; each picture is the whole key.

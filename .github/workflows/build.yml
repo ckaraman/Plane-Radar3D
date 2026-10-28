@@ -1,13 +1,10 @@
-# Builds both device models and publishes the setup / update page with their firmware:
-#   main branch -> 4" ESP32-WROOM-32U + ST7796 (Arduino core 2.0.14)
-#   ws5 branch  -> 5" Waveshare ESP32-S3-Touch-LCD-5 / -5B (Arduino core 3, pioarduino)
-# A push to ws5 starts this workflow on main (see the workflow on that branch), so the
-# site always carries the latest firmware of both.
+# Builds the 5" Waveshare ESP32-S3-Touch-LCD-5 (800x480) firmware and the PC helper,
+# and publishes the setup / update page with them (GitHub Pages).
 name: Build
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -19,7 +16,7 @@ permissions:
   contents: read
 
 jobs:
-  # Windows helper for the 5" control screen (tools/deck-windows): one .exe for the site.
+  # Windows helper for the control screen (helper/): one .exe for the site.
   deckapp:
     runs-on: windows-latest
     steps:
@@ -28,22 +25,22 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        working-directory: tools/deck-windows
+        working-directory: helper
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
       - name: Icon
-        working-directory: tools/deck-windows
+        working-directory: helper
         run: python -c "import app; img = app.tray_image().resize((256, 256)); img.save('icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
       - name: Build
-        working-directory: tools/deck-windows
+        working-directory: helper
         run: >
           pyinstaller --noconfirm --onefile --windowed --name PlaneRadarDeck --icon icon.ico
           --add-data "web;web" --add-data "browser-extension;browser-extension" --collect-all webview
           --collect-submodules winrt --collect-submodules websockets
           --hidden-import pystray._win32 --hidden-import win32com.client app.py
       - name: Self test (the packed program starts and loads its parts)
-        working-directory: tools/deck-windows
+        working-directory: helper
         shell: pwsh
         run: |
           $p = Start-Process -FilePath dist\PlaneRadarDeck.exe -ArgumentList "--selftest","--deep" -Wait -PassThru
@@ -57,7 +54,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: deck-windows
-          path: tools/deck-windows/dist/PlaneRadarDeck.exe
+          path: helper/dist/PlaneRadarDeck.exe
 
   # Mac helper (same program, macOS parts): a .dmg each for Apple M and Intel Macs.
   deckapp-mac:
@@ -77,99 +74,73 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        working-directory: tools/deck-windows
+        working-directory: helper
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-mac.txt pyinstaller
       - name: Build
-        working-directory: tools/deck-windows
+        working-directory: helper
         run: ./build_mac.sh ${{ matrix.dmg }} 2>&1 | tail -40; test -f dist/${{ matrix.dmg }} || { echo "::error::mac build failed"; exit 1; }
       - name: Self test
-        working-directory: tools/deck-windows
+        working-directory: helper
         run: echo "::notice::$(uname -m) $(sw_vers -productVersion)"; ./selftest_mac.sh
       - uses: actions/upload-artifact@v4
         with:
           name: deck-${{ matrix.dmg }}
-          path: tools/deck-windows/dist/${{ matrix.dmg }}
+          path: helper/dist/${{ matrix.dmg }}
 
   firmware:
     needs: [deckapp, deckapp-mac]
-    # The site still goes out (with the firmware) if only the Windows helper failed.
+    # The site still goes out (with the firmware) if only a helper failed.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (4", this branch)
-        uses: actions/checkout@v4
-
-      - name: Checkout ws5 branch (5")
-        uses: actions/checkout@v4
-        with:
-          ref: ws5
-          path: ws5
+      - uses: actions/checkout@v4
 
       - name: Cache PlatformIO
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
-            ~/.platformio/.cache
             .pio/libdeps
-            ws5/.pio/libdeps
-          key: ${{ runner.os }}-pio2-${{ hashFiles('platformio.ini', 'ws5/platformio.ini') }}
+          key: ${{ runner.os }}-pio3-${{ hashFiles('platformio.ini') }}
           restore-keys: |
-            ${{ runner.os }}-pio2-
+            ${{ runner.os }}-pio3-
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install PlatformIO
-        run: pip install --upgrade platformio
-
       - name: Write setup page address (shown on the device screen)
         run: |
           OWNER=$(echo "${GITHUB_REPOSITORY%%/*}" | tr 'A-Z' 'a-z')
           REPO="${GITHUB_REPOSITORY#*/}"
           printf '#pragma once\n#define SETUP_PAGE_URL "%s.github.io/%s"\n' "$OWNER" "$REPO" > include/setup_url.h
-          cp include/setup_url.h ws5/include/setup_url.h
           cat include/setup_url.h
 
-      - name: Build + merge (4")
-        run: pio run -e wroom32u -t merge
-
-      # The 5" boards build on Arduino core 3 (pioarduino), whose Arduino libraries are
-      # rebuilt with custom_sdkconfig. Own venv: PlatformIO 6.1.18 (its SCons works with
-      # the lib rebuild), click < 8.2 (esptool 5), uv (ESP-IDF Python deps). Each env gets
-      # its own PlatformIO core dir: the rebuild replaces the libs in the packages folder.
-      - name: Set up PlatformIO for the 5" boards
+      # Arduino core 3 (pioarduino), whose Arduino libraries are rebuilt with custom_sdkconfig.
+      # Own venv: PlatformIO 6.1.18 (its SCons works with the lib rebuild), click < 8.2
+      # (esptool 5), uv (ESP-IDF Python deps), and its own core dir (the rebuild replaces
+      # the libs in the packages folder).
+      - name: Set up PlatformIO
         run: |
           python -m venv "$HOME/pio-s3"
           "$HOME/pio-s3/bin/pip" install "platformio==6.1.18" "click<8.2" uv
 
-      - name: Build + merge (5" 800x480 and 5B 1024x600)
-        working-directory: ws5
+      - name: Build + merge
         run: |
           export PATH="$HOME/pio-s3/bin:$PATH"
-          # The library rebuild wipes .pio/build, so each env's images are copied out at once.
           # Errors as annotations: readable without downloading the log.
-          pio_annotated() {
-            set -o pipefail
-            "$@" 2>&1 | tee pio.log || {
-              grep -nE "error|Error|undefined reference|overflow|too big" pio.log | head -40 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
-              tail -12 pio.log | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
-              return 1
-            }
+          set -o pipefail
+          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio run -e ws5 -t merge 2>&1 | tee pio.log || {
+            grep -nE "error|Error|undefined reference|overflow|too big" pio.log | head -40 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
+            tail -12 pio.log | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
+            exit 1
           }
-          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio_annotated pio run -e ws5 -t merge
-          mkdir -p ../out/ws5 ../out/ws5b
-          cp .pio/build/ws5/*.bin ../out/ws5/
           # Guard: the board has octal PSRAM; a quad-PSRAM build boot-loops on it.
-          grep -q "CONFIG_SPIRAM_MODE_OCT 1" .pio/build/ws5/config/sdkconfig.h || { echo "::error::ws5 built without octal PSRAM"; exit 1; }
-          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5b" pio_annotated pio run -e ws5b -t merge
-          cp .pio/build/ws5b/*.bin ../out/ws5b/
-          grep -q "CONFIG_SPIRAM_MODE_OCT 1" .pio/build/ws5b/config/sdkconfig.h || { echo "::error::ws5b built without octal PSRAM"; exit 1; }
-          ls -l ../out/ws5 ../out/ws5b
+          grep -q "CONFIG_SPIRAM_MODE_OCT 1" .pio/build/ws5/config/sdkconfig.h || { echo "::error::built without octal PSRAM"; exit 1; }
+          ls -l .pio/build/ws5/*.bin
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -177,17 +148,13 @@ jobs:
           name: plane-radar-3d-firmware
           if-no-files-found: error
           path: |
-            .pio/build/wroom32u/firmware-merged.bin
-            .pio/build/wroom32u/firmware.bin
-            out/ws5/firmware-merged.bin
-            out/ws5/firmware.bin
-            out/ws5b/firmware-merged.bin
-            out/ws5b/firmware.bin
+            .pio/build/ws5/firmware-merged.bin
+            .pio/build/ws5/firmware.bin
 
       - name: Helper protocol tests (fake card)
         run: |
           pip install pyserial pillow "websockets>=13"
-          python tools/deck-windows/tests/test_core.py
+          python helper/tests/test_core.py
 
       - name: Windows helper from the deckapp job
         continue-on-error: true
@@ -208,21 +175,15 @@ jobs:
         run: |
           set -x
           trap 'echo "::error title=assemble::failed at line $LINENO: $BASH_COMMAND"' ERR
-          ver() { sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' "$1" | head -n 1; }
-          VERSION=$(ver include/config.h)
-          VERSION_WS5=$(ver ws5/include/config.h)
-          test -n "$VERSION" && test -n "$VERSION_WS5"
+          VERSION=$(sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' include/config.h | head -n 1)
+          test -n "$VERSION"
           mkdir -p site
           cp web/index.html web/tz.json web/tz-LICENSE.txt site/
-          B=.pio/build/wroom32u
-          cp $B/firmware.bin $B/firmware-merged.bin $B/bootloader.bin $B/partitions.bin site/
-          W=out/ws5
-          cp $W/firmware.bin site/firmware-ws5.bin
-          cp $W/firmware-merged.bin site/firmware-merged-ws5.bin
-          cp $W/bootloader.bin site/bootloader-ws5.bin
-          cp $W/partitions.bin site/partitions-ws5.bin
-          cp out/ws5b/firmware.bin site/firmware-ws5b.bin
-          cp out/ws5b/firmware-merged.bin site/firmware-merged-ws5b.bin
+          B=.pio/build/ws5
+          cp $B/firmware.bin site/firmware-ws5.bin
+          cp $B/firmware-merged.bin site/firmware-merged-ws5.bin
+          cp $B/bootloader.bin site/bootloader-ws5.bin
+          cp $B/partitions.bin site/partitions-ws5.bin
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
@@ -230,38 +191,30 @@ jobs:
           for d in PlaneRadarDeck-mac.dmg PlaneRadarDeck-mac-intel.dmg; do
             if [ -f "out/deck/$d" ]; then cp "out/deck/$d" site/; else echo "::warning::$d not built"; fi
           done
-          python3 - "$VERSION" "$VERSION_WS5" <<'PY'
+          python3 - "$VERSION" <<'PY'
           import json, sys
-          version, version_ws5 = sys.argv[1], sys.argv[2]
+          version = sys.argv[1]
 
-          def write(path, name, ver, chip, parts):
+          def write(path, name, parts):
               with open(path, "w", encoding="utf-8") as f:
-                  json.dump({"name": name, "version": ver, "new_install_prompt_erase": True,
-                             "builds": [{"chipFamily": chip, "parts": parts}]}, f, indent=2)
+                  json.dump({"name": name, "version": version, "new_install_prompt_erase": True,
+                             "builds": [{"chipFamily": "ESP32-S3", "parts": parts}]}, f, indent=2)
 
-          # 4": update keeps the settings (NVS at 0x9000); the classic ESP32 boots from 0x1000.
-          write("site/manifest-update.json", "Plane Radar 3D 4in update", version, "ESP32", [
-              {"path": "bootloader.bin", "offset": 4096},
-              {"path": "partitions.bin", "offset": 32768},
-              {"path": "firmware.bin", "offset": 65536}])
-          write("site/manifest-full.json", "Plane Radar 3D 4in full install", version, "ESP32",
-                [{"path": "firmware-merged.bin", "offset": 0}])
-          # 5": the S3 boots from 0x0. The old-method update writes the first app slot, so it
+          # The S3 boots from 0x0. The old-method update writes the first app slot, so it
           # also blanks otadata (0xE000): otherwise a board that ran from the second slot after a
           # USB update would keep booting that one. NVS (settings) and the map stay.
           with open("site/otadata-blank.bin", "wb") as f:
               f.write(b"\xff" * 0x2000)
-          write("site/manifest-update-ws5.json", "Plane Radar 3D 5in update", version_ws5, "ESP32-S3", [
+          write("site/manifest-update-ws5.json", "Plane Radar 3D 5in update", [
               {"path": "bootloader-ws5.bin", "offset": 0},
               {"path": "partitions-ws5.bin", "offset": 32768},
               {"path": "otadata-blank.bin", "offset": 57344},
               {"path": "firmware-ws5.bin", "offset": 65536}])
-          write("site/manifest-full-ws5.json", "Plane Radar 3D 5in full install", version_ws5, "ESP32-S3",
+          write("site/manifest-full-ws5.json", "Plane Radar 3D 5in full install",
                 [{"path": "firmware-merged-ws5.bin", "offset": 0}])
-          write("site/manifest-full-ws5b.json", "Plane Radar 3D 5in (5B 1024x600) full install", version_ws5,
-                "ESP32-S3", [{"path": "firmware-merged-ws5b.bin", "offset": 0}])
+          # shortcut: "version" (the old 4in key) repeats the 5in one until the page drops the 4in model (stage 4).
           with open("site/version.json", "w", encoding="utf-8") as f:
-              json.dump({"version": version, "version_ws5": version_ws5}, f)
+              json.dump({"version": version, "version_ws5": version}, f)
           PY
           ls -l site
 

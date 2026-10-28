@@ -1,6 +1,6 @@
 # Plane Radar 3D
 
-> **Bu dal (`ws5`) 5" Waveshare ESP32-S3-Touch-LCD-5 sürümüdür.** 4" ESP32-WROOM sürümü `main` dalında. Kurulum sayfası (`web/`) ve yayın `main` dalından yapılır; bu dala gönderim, `main`'deki derlemeyi başlatır ve iki modelin yazılımı birlikte yayınlanır.
+> **Bu repo yalnızca 5" Waveshare ESP32-S3-Touch-LCD-5 (800×480) kartını destekler.** Firmware, kurulum sayfası (`web/`) ve PC programı (`helper/`) tek dalda (`main`). Kod düzeni ve iki sisteme (WiFi radar / PC destekli radar + deck) ayrılma planı: [docs/PLAN.md](docs/PLAN.md). 4" sürüm ve eski geçmiş: [plane-radar-3D](https://github.com/ckaraman/plane-radar-3D) (arşiv). Aşağıdaki 4" bölümleri ileride temizlenecek.
 
 
 Bu proje **ESP32-WROOM-32U**, **4.0" ST7796S dokunmatik SPI ekran** (480×320, XPT2046) ve **SHT30** sensörüyle çalışan perspektif (3D) uçuş radarıdır. Uçuş verisi [adsb.fi](https://opendata.adsb.fi/) üzerinden alınır.
@@ -50,8 +50,8 @@ Ekrana 1,5 sn basılı tutunca açılır: Ekranı 180° çevir, Uçak etiketleri
 
 ### Teknik notlar (5")
 
-- Arduino çekirdeği 3.x (pioarduino 55.03.30, ESP-IDF 5.5). Arduino kütüphaneleri RGB ekran için önerilen ayarlarla yeniden derlenir (`custom_sdkconfig`: octal PSRAM, 64 bayt önbellek satırı, kod PSRAM'den, Wi-Fi tamponları iç bellekte). Derleme: PlatformIO 6.1.18 + `click<8.2` + `uv`, her ortam (ws5 / ws5b) ayrı `PLATFORMIO_CORE_DIR` ile (bkz. main dalındaki iş akışı).
-- Ekran sürücüsü esp_lcd RGB + "bounce buffer" (`include/hardware/bus_rgb_bounce.hpp`), **üç kare tamponu**: kareler ekranın göstermediği tampona çizilir, yırtılma olmaz ve çizim ekran tazelemesini beklemez.
+- Arduino çekirdeği 3.x (pioarduino 55.03.30, ESP-IDF 5.5). Arduino kütüphaneleri RGB ekran için önerilen ayarlarla yeniden derlenir (`custom_sdkconfig`: octal PSRAM, 64 bayt önbellek satırı, kod PSRAM'den, Wi-Fi tamponları iç bellekte). Derleme: PlatformIO 6.1.18 + `click<8.2` + `uv`, ayrı bir `PLATFORMIO_CORE_DIR` ile (bkz. `.github/workflows/build.yml`).
+- Ekran sürücüsü esp_lcd RGB + "bounce buffer" (`src/core/hardware/bus_rgb_bounce.hpp`), **üç kare tamponu**: kareler ekranın göstermediği tampona çizilir, yırtılma olmaz ve çizim ekran tazelemesini beklemez.
 - Kare 8 bitlik paletli bir tampona (PSRAM) çizilir, 256 girişli renk tablosuyla ekran tamponuna aktarılır.
 - **Hızlandırmalar:**
   - Kamera dururken zemin, harita, halkalar ve simgeler ayrı bir tamponda saklanır; her karede yalnızca uçakların ve yazıların değiştirdiği bölgeler geri yüklenir.
@@ -59,7 +59,7 @@ Ekrana 1,5 sn basılı tutunca açılır: Ekranı 180° çevir, Uçak etiketleri
   - Zemin 16 satırlık şeritler halinde hızlı iç bellekte çizilir.
   - Zemin iki çekirdekte birlikte çizilir (üst kısmı ikinci çekirdek); paylaşım ölçülen sürelere göre kendiliğinden ayarlanır. Görüntü kalitesi hareket sırasında da düşmez.
 - Seri logda 30 saniyede bir `radar3d:` satırı: kare hızı, sabit/dönen kare sayısı, aşama süreleri (zemin, çizgiler, uçaklar, arayüz, aktarım), panel tazeleme hızı.
-- Panel zamanlaması: 800×480 için Waveshare'in kendi değerleri (16 MHz), 1024×600 için 14 MHz. Ayar: `include/hardware/lgfx_config.hpp`.
+- Panel zamanlaması: 800×480 için Waveshare'in kendi değerleri (16 MHz), 1024×600 için 14 MHz. Ayar: `src/core/hardware/lgfx_config.hpp`.
 - Kartta BOOT tuşu kısayolu yok (GPIO0 ekran veri hattı).
 
 ## Malzeme
@@ -184,12 +184,11 @@ pio run -e wroom32u
 pio run -e wroom32u -t merge    # firmware-merged.bin (0x0'a yazılır)
 pio run -e ws5                  # Waveshare 5" (ESP32-S3)
 pio run -e ws5 -t merge
-pio run -e ws5b -t merge          # Waveshare 5B (1024×600)
 ```
 
 Projeyi GitHub'a koyarsanız `.github/workflows/build.yml` her gönderimde derleme yapar ve `.bin` dosyalarını Actions sekmesinde hazır eder.
 
-Pinler ve zamanlamalar `include/config.h` içinde. Renk paleti ve kamera ayarları `src/ui/radar3d.cpp` içinde.
+Pinler ve zamanlamalar `include/config.h` içinde. Renk paleti ve kamera ayarları `src/core/ui/radar3d.cpp` içinde.
 
 ## Türkçe karakterler
 
