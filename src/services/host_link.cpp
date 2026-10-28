@@ -239,14 +239,23 @@ void handleCoverEnd() {
 // ------------------------------------------------------------------ queue
 namespace {
 
-QueueRow s_q[kQueueMax];
+// Rows in PSRAM, made on the first queue: internal RAM is what the TLS connections of
+// the radar and the forecast need (a few KB less and they fail).
+QueueRow* s_q = nullptr;
 int s_qn = 0;
 bool s_qvalid = false;
 uint32_t s_qgen = 0;
 uint32_t s_qversion = 1;
 char s_qsrc[24] = "";
 
-QueueRow s_qs[kQueueMax];  // rows coming in
+QueueRow* s_qs = nullptr;  // rows coming in
+const QueueRow kNoRow{};
+
+bool ensureRows() {
+  if (s_q == nullptr) s_q = static_cast<QueueRow*>(heap_caps_calloc(kQueueMax, sizeof(QueueRow), MALLOC_CAP_SPIRAM));
+  if (s_qs == nullptr) s_qs = static_cast<QueueRow*>(heap_caps_calloc(kQueueMax, sizeof(QueueRow), MALLOC_CAP_SPIRAM));
+  return s_q != nullptr && s_qs != nullptr;
+}
 int s_qsn = 0, s_qs_want = 0;
 uint32_t s_qs_gen = 0;
 bool s_qs_open = false;
@@ -281,7 +290,10 @@ void qack() { reply("QACK", "{}"); }
 
 bool queueValid() { return s_qvalid && s_qn > 0; }
 int queueCount() { return s_qvalid ? s_qn : 0; }
-const QueueRow& queueRow(int i) { return s_q[i < 0 ? 0 : (i >= kQueueMax ? kQueueMax - 1 : i)]; }
+const QueueRow& queueRow(int i) {
+  if (s_q == nullptr || i < 0 || i >= kQueueMax) return kNoRow;
+  return s_q[i];
+}
 const char* queueSource() { return s_qsrc; }
 uint32_t queueVersion() { return s_qversion; }
 int queueThumbPx() { return 40 * config::kDisplayWidth / 800; }
@@ -301,6 +313,10 @@ void handleQueueBegin(const char* json) {
   JsonDocument doc;
   if (deserializeJson(doc, json) != DeserializationError::Ok) {
     reply("ERR", "{\"msg\":\"bad_json\"}");
+    return;
+  }
+  if (!ensureRows()) {
+    reply("ERR", "{\"msg\":\"queue_no_memory\"}");
     return;
   }
   s_qs_open = true;
@@ -337,7 +353,7 @@ void handleQueueEnd() {
   if (s_qs_open) {
     dropArt();
     freeArts(s_q, s_qn);
-    memcpy(s_q, s_qs, sizeof(s_q));
+    memcpy(s_q, s_qs, sizeof(QueueRow) * kQueueMax);
     s_qn = s_qsn;
     s_qgen = s_qs_gen;
     strlcpy(s_qsrc, s_qs_src, sizeof(s_qsrc));

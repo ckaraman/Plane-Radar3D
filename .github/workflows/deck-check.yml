@@ -45,6 +45,10 @@ jobs:
           for sym in HWCDC::begin USBCDC::begin tud_hid_n_report tud_cdc_n_write; do
             $NM -C $B/firmware.elf | grep -q "$sym" && echo "::notice::$sym linked" || { echo "::error::$sym missing"; exit 1; }
           done
+          # Internal RAM taken by variables (what the TLS connections are left): the largest.
+          SZ=$(ls ~/.pio-core-${{ matrix.env }}/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-size 2>/dev/null || ls ~/.pio-core-${{ matrix.env }}/packages/toolchain-xtensa-esp*/bin/*-size | head -1)
+          echo "::notice::sections $($SZ -A $B/firmware.elf | grep -E '^\.(dram0|iram0|flash|ext_ram)' | awk '{printf "%s=%d ", $1, $2}')"
+          echo "::notice::largest internal-RAM variables: $($NM -C -S --size-sort $B/firmware.elf | awk '$1 ~ /^3fc/ && $3 ~ /^[bBdD]$/' | tail -18 | awk '{printf "%d %s; ", strtonum("0x"$2), $4}')"
           ls -l $B/*.bin
       - uses: actions/upload-artifact@v4
         with:

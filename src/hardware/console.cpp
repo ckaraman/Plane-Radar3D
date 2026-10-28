@@ -26,6 +26,9 @@ namespace {
 /** Setup mode returns to keyboard mode after this long without a line from the page. */
 constexpr unsigned long kSetupIdleMs = 3UL * 60UL * 1000UL;
 constexpr size_t kRxBuffer = 4096;  // the page and the bridge send lines in bursts
+// Keyboard mode: the helper sends one line at a time and waits for the answer; a smaller
+// buffer leaves internal RAM to the radar's and the forecast's TLS connections.
+constexpr size_t kRxBufferKeyboard = 2048;
 
 // TinyUSB mode: own PID so the PC does not mix it up with the USB-Serial/JTAG port
 // (0x303a:0x1001); both modes keep Espressif's VID, which the setup page looks for.
@@ -101,7 +104,7 @@ void begin() {
     // Constructed here, before USB.begin(): the CDC and HID interfaces register with
     // TinyUSB when created, and the USB descriptors are built when USB starts.
     s_cdc = new USBCDC(0);
-    s_cdc->setRxBufferSize(kRxBuffer);
+    s_cdc->setRxBufferSize(kRxBufferKeyboard);
     s_cdc->begin(115200);
     s_io = s_cdc;
     services::hid::begin();
