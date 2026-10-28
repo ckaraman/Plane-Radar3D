@@ -29,11 +29,15 @@ Status get(const char* callsign, Route* out);
 /** Store a result (from the network task or the USB feed). */
 void put(const char* callsign, const Route* route);  // nullptr = no route known
 
-/** Network task: look up the most recently requested callsign over HTTPS. */
-void fetchPending();
-
 /** A route lookup is waiting (fetchPending() would make a request). */
 bool hasPending();
+
+/** The callsign waiting for a lookup ("" when none). */
+void pendingCallsign(char* out, size_t out_len);
+
+/** Network task (system 1 only: src/net/services/route_fetch.cpp): look up the most
+ *  recently requested callsign over HTTPS. */
+void fetchPending();
 
 /** UTF-8 for the display fonts: Turkish letters kept, other accents -> nearest ASCII. */
 void foldAscii(const char* in, char* out, size_t out_len);

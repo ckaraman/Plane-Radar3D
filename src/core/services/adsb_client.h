@@ -45,18 +45,20 @@ const Aircraft* aircraftList();
  */
 unsigned long lastUpdateMs();
 
+/** Replace the aircraft list with data that came from elsewhere (Wi-Fi fetch, USB feed). */
+void publishExternal(const Aircraft* src, size_t count);
+
+/** Aircraft within radius_km of a point (no copy of the list). */
+size_t countWithin(double lat0, double lon0, float radius_km);
+
+// --- Wi-Fi fetch (system 1 only: src/net/services/adsb_fetch.cpp) ---
+
 /** Hook invoked during long HTTP I/O (e.g. wifiLoop). Optional. */
 using PollFn = void (*)();
 void setPollFn(PollFn fn);
 
-/** Replace the aircraft list with data that came from elsewhere (USB feed). */
-void publishExternal(const Aircraft* src, size_t count);
-
 /** Fetch aircraft within fetch_radius_km of center_lat/lon from adsb.fi. */
 bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km);
-
-/** Aircraft within radius_km of a point (no copy of the list). */
-size_t countWithin(double lat0, double lon0, float radius_km);
 
 /** Name of the data source in use (adsb.fi, or a fallback after a failure). */
 const char* sourceName();
