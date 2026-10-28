@@ -1,0 +1,2328 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plane Radar 3D Kurulum</title>
+<meta name="description" content="Plane Radar 3D cihazını USB ile bağlayıp WiFi, konum ve saat ayarlarını yapın, yazılımı güncelleyin.">
+<style>
+  :root {
+    --bg: #f4f6f4; --card: #ffffff; --text: #17201b; --muted: #5b6a61; --line: #d9e0db;
+    --accent: #14803c; --accent-text: #ffffff; --accent-soft: #e3f3e8;
+    --warn-bg: #fff4d6; --warn-text: #6b4a00; --err-bg: #fde4e1; --err-text: #8a1c12;
+    --ok-bg: #e0f3e6; --ok-text: #0f5a2a; --info-bg: #e6eef8; --info-text: #1d3f6e;
+    --field: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1411; --card: #151d18; --text: #e6efe9; --muted: #9db0a4; --line: #2a3830;
+      --accent: #3ec06b; --accent-text: #06210f; --accent-soft: #17301f;
+      --warn-bg: #3a2f10; --warn-text: #f3d891; --err-bg: #3d1c19; --err-text: #f6b9b2;
+      --ok-bg: #12301d; --ok-text: #a9e6bf; --info-bg: #14263d; --info-text: #b5d0f2;
+      --field: #0f1612;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 56px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.1rem; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 0 0 16px; }
+  .card > p.hint { color: var(--muted); margin: 0 0 14px; font-size: .95rem; }
+  .step { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center;
+    border-radius: 50%; background: var(--accent); color: var(--accent-text); font-weight: 700; font-size: .9rem; margin-right: 8px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  label { display: block; font-weight: 600; margin: 14px 0 4px; }
+  .sub { font-weight: 400; color: var(--muted); font-size: .9rem; }
+  input[type=text], input[type=password], input[type=number], input[type=search], select {
+    width: 100%; min-height: 44px; padding: 8px 12px; font: inherit; color: var(--text);
+    background: var(--field); border: 1px solid var(--line); border-radius: 10px;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible, a:focus-visible {
+    outline: 3px solid var(--accent); outline-offset: 2px;
+  }
+  .btn { min-height: 44px; padding: 8px 18px; font: inherit; font-weight: 600; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .btn.danger { color: var(--err-text); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .msg { margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; font-size: .95rem; }
+  .msg[hidden] { display: none; }
+  .msg.info { background: var(--info-bg); color: var(--info-text); }
+  .msg.ok { background: var(--ok-bg); color: var(--ok-text); }
+  .msg.warn { background: var(--warn-bg); color: var(--warn-text); }
+  .msg.err { background: var(--err-bg); color: var(--err-text); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; }
+  .chip { background: var(--accent-soft); border-radius: 999px; padding: 3px 12px; font-size: .9rem; }
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  fieldset:disabled { opacity: .45; }
+  .checks label { display: flex; gap: 10px; align-items: center; font-weight: 400; margin: 10px 0 0; min-height: 28px; }
+  .checks input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .results { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+  .results button { width: 100%; text-align: left; min-height: 44px; padding: 8px 12px; font: inherit; color: var(--text);
+    background: var(--field); border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .results button:hover { border-color: var(--accent); }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+  small, .small { color: var(--muted); font-size: .85rem; }
+  .pw { display: flex; gap: 8px; }
+  code { background: var(--accent-soft); padding: 1px 6px; border-radius: 6px; font-size: .9em; }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
+  esp-web-install-button { display: inline-block; }
+  esp-web-install-button button { cursor: pointer; }
+  /* If the install component cannot load, do not show its fallback messages. */
+  esp-web-install-button:not(:defined) > [slot="unsupported"],
+  esp-web-install-button:not(:defined) > [slot="not-allowed"] { display: none; }
+  .models { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .model { text-align: left; padding: 14px; min-height: 92px; font: inherit; color: var(--text); cursor: pointer;
+    background: var(--field); border: 2px solid var(--line); border-radius: 12px; }
+  .model:hover { border-color: var(--accent); }
+  .deck-wrap { display: flex; gap: 12px; align-items: center; margin: 8px 0 14px; }
+  .deck-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; flex: 1; }
+  .deck-key { aspect-ratio: 1.05; border-radius: 10px; background: #12202e; color: #fff; border: 2px solid #30566e;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit;
+    font-size: .78rem; line-height: 1.15; cursor: pointer; padding: 4px; overflow: hidden; text-align: center; }
+  .deck-key img { width: 52%; height: 52%; object-fit: contain; }
+  .deck-key[aria-pressed="true"] { border-color: var(--accent); outline: 3px solid var(--accent); outline-offset: 1px; }
+  .deck-knob { width: 26%; aspect-ratio: 1; border-radius: 50%; flex: none; display: flex; align-items: center;
+    justify-content: center; font-weight: 700; color: #9db0bc; background: #0e1824; border: 10px solid #1c3042; }
+  #deck-editor { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 0 0 12px; }
+  #deck-editor legend { font-weight: 600; padding: 0 6px; }
+  .model strong { display: block; font-size: 1.1rem; margin-bottom: 2px; }
+  .model span { color: var(--muted); font-size: .9rem; }
+  /* Nothing below the model question until a model is picked; then only that model's parts. */
+  body:not([data-model]) #steps { display: none; }
+  body[data-model="4"] .m5, body[data-model="5"] .m4 { display: none !important; }
+  @media (max-width: 520px) { .grid2, .models { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Plane Radar 3D kurulum</h1>
+  <p class="lead">Cihazı USB ile bilgisayara bağlayın, WiFi ve konumunuzu girin. Yazılım güncellemek için de aynı sayfayı kullanın.</p>
+
+  <noscript><div class="msg err">Bu sayfa JavaScript gerektirir.</div></noscript>
+  <div id="unsupported" class="msg warn" hidden>
+    Bu tarayıcı USB cihazlarla konuşamıyor. Lütfen bilgisayarınızda <strong>Google Chrome</strong> veya
+    <strong>Microsoft Edge</strong> ile açın. (Telefon, Safari ve Firefox desteklenmiyor.)
+  </div>
+
+  <section class="card" id="model-card" aria-labelledby="h-model">
+    <h2 id="h-model">Hangi cihazı kuruyorsunuz?</h2>
+    <div class="models" id="model-pick">
+      <button type="button" class="model" data-pick="4">
+        <strong>4" Radar</strong>
+        <span>ESP32-WROOM-32U kart + 4.0" ST7796 dokunmatik ekran (480×320)</span>
+      </button>
+      <button type="button" class="model" data-pick="5">
+        <strong>5" Radar</strong>
+        <span>Waveshare ESP32-S3-Touch-LCD-5, ekran ve kart tek parça (800×480)</span>
+      </button>
+    </div>
+    <div class="row" id="model-chosen" hidden>
+      <span>Cihaz: <strong id="model-name"></strong></span>
+      <button type="button" class="btn" id="btn-model-change">Değiştir</button>
+    </div>
+  </section>
+
+  <div id="steps">
+  <section class="card" aria-labelledby="h-connect">
+    <h2 id="h-connect"><span class="step">1</span>Cihazı bağlayın</h2>
+    <p class="hint">Cihazı USB kablosuyla bilgisayara takın, sonra düğmeye basıp açılan listeden cihazı seçin.</p>
+    <div class="row">
+      <button type="button" class="btn primary" id="btn-connect">Cihaza bağlan</button>
+      <button type="button" class="btn" id="btn-disconnect" hidden>Bağlantıyı kes</button>
+    </div>
+    <div class="chips" id="device-chips" hidden></div>
+    <div class="msg info" id="msg-connect" hidden role="status" aria-live="polite"></div>
+    <div class="msg warn" id="msg-model" hidden role="status" aria-live="polite"></div>
+    <details id="connect-help">
+      <summary>Cihaz listede görünmüyor</summary>
+      <p class="small">
+        • Kabloyu kontrol edin: bazı kablolar yalnızca şarj içindir, veri kablosu gerekir.<br>
+        • Cihazın <strong>BOOT</strong> düğmesine basılı tutarak USB'yi takın, sonra tekrar deneyin.<span class="m5"> (5" kartta BOOT tuşu kartın arka yüzünde.)</span><br>
+        • Arduino IDE, seri monitör gibi bir program ya da başka bir sekme cihazı kullanıyor olabilir, kapatın.<br>
+        • <button type="button" class="btn" id="btn-connect-all">Tüm USB cihazlarını listele</button>
+      </p>
+    </details>
+    <details id="diag">
+      <summary>Tanılama kaydı (bağlanamıyorsanız açın)</summary>
+      <p class="small">Cihazdan gelen ham yazılar burada görünür. Sorun sürerse bu metni kopyalayıp gönderin.</p>
+      <pre id="diag-log" style="max-height:220px;overflow:auto;white-space:pre-wrap;font-size:12px;margin:0 0 8px"></pre>
+      <button type="button" class="btn" id="btn-copylog">Kaydı kopyala</button>
+    </details>
+  </section>
+
+  <form class="card" id="settings" aria-labelledby="h-settings" novalidate>
+    <h2 id="h-settings"><span class="step">2</span>Ayarlar</h2>
+    <fieldset id="settings-fields" disabled>
+      <p class="hint" id="settings-hint">Önce 1. adımda cihaza bağlanın.</p>
+
+      <label for="ssid">WiFi ağı <span class="sub">(yalnızca 2,4 GHz ağlar)</span></label>
+      <div class="row">
+        <input type="text" id="ssid" autocomplete="off" spellcheck="false" style="flex:1 1 220px" placeholder="Ağ adı">
+        <button type="button" class="btn" id="btn-scan">Ağları tara</button>
+      </div>
+      <div class="msg info" id="msg-scan" hidden role="status" aria-live="polite"></div>
+      <ul class="results" id="nets-list"></ul>
+
+      <label for="pass">WiFi şifresi</label>
+      <div class="pw">
+        <input type="password" id="pass" autocomplete="off" spellcheck="false" placeholder="Şifresiz ağlarda boş bırakın">
+        <button type="button" class="btn" id="btn-showpass" aria-pressed="false">Göster</button>
+      </div>
+      <small id="wifi-keep" hidden>Cihaz şu an bir ağa bağlı. Ağ adını boş bırakırsanız mevcut bağlantı korunur.</small>
+
+      <label for="city">Konum <span class="sub">(radarın merkezi; şehir merkezi yeterlidir, tam adres gerekmez)</span></label>
+      <div class="row">
+        <input type="search" id="city" placeholder="Şehir ya da ilçe ara, örn. Bakırköy" style="flex:1 1 220px" autocomplete="off">
+        <button type="button" class="btn" id="btn-search">Ara</button>
+        <button type="button" class="btn" id="btn-geo">Konumumu kullan</button>
+      </div>
+      <ul class="results" id="results"></ul>
+      <div class="msg info" id="msg-loc" hidden role="status" aria-live="polite"></div>
+
+      <div class="grid2">
+        <div>
+          <label for="lat">Enlem</label>
+          <input type="number" id="lat" step="0.0001" min="-90" max="90" inputmode="decimal" placeholder="41.0082">
+        </div>
+        <div>
+          <label for="lon">Boylam</label>
+          <input type="number" id="lon" step="0.0001" min="-180" max="180" inputmode="decimal" placeholder="28.9784">
+        </div>
+      </div>
+      <small><a id="map-link" href="https://www.openstreetmap.org/" target="_blank" rel="noopener">Haritada kontrol et</a></small>
+
+      <label for="tz">Saat dilimi</label>
+      <select id="tz"></select>
+      <small id="tz-posix"></small>
+
+      <div class="checks">
+        <label><input type="checkbox" id="opt-clock" checked> Gökyüzünde uçak yokken saati göster</label>
+        <label><input type="checkbox" id="opt-weather" checked> Hava durumu (Open-Meteo: şu an ve 5 günlük tahmin, HAVA düğmesiyle açılır)</label>
+        <label><input type="checkbox" id="opt-miles"> Mesafeleri mil olarak göster</label>
+        <label><input type="checkbox" id="opt-runways" checked> Havalimanı pistlerini göster</label>
+        <label><input type="checkbox" id="opt-rings" checked> Radar halkalarını ve artı çizgilerini göster (kapatırsanız yalnızca harita, uçaklar ve yön harfleri görünür)</label>
+      </div>
+
+      <label for="opt-map">Radarın zeminine harita (deniz, göller, kıyı çizgisi, ana yollar) ve 3B arazi yükseklikleri</label>
+      <select id="opt-map">
+        <option value="17">Geniş: yaklaşık 26 km çevre (25 km menzil için)</option>
+        <option value="15" selected>Normal: yaklaşık 23 km çevre (15 km menzil için, önerilen)</option>
+        <option value="10">Dar: yaklaşık 15 km çevre</option>
+        <option value="5">Çok dar: yaklaşık 7,5 km çevre</option>
+        <option value="0">Haritasız (harita verisi indirilmez)</option>
+      </select>
+      <small id="map-note"></small>
+
+      <div class="row" style="margin-top:18px">
+        <button type="submit" class="btn primary" id="btn-save">Cihaza kaydet</button>
+      </div>
+      <div class="msg info" id="msg-save" hidden role="status" aria-live="polite"></div>
+    </fieldset>
+  </form>
+
+  <section class="card" aria-labelledby="h-update">
+    <h2 id="h-update"><span class="step">3</span>Yazılımı güncelle</h2>
+    <p class="hint">Güncelleme yalnızca yazılımı yeniler; WiFi, konum ve diğer ayarlarınız silinmez.</p>
+    <div class="msg info" id="msg-version" hidden role="status" aria-live="polite"></div>
+    <div class="row" style="margin-top:12px">
+      <button type="button" class="btn primary" id="btn-usb-update" disabled>Yazılımı güncelle</button>
+    </div>
+    <progress id="ota-progress" max="100" value="0" hidden style="width:100%;height:14px;margin-top:10px"></progress>
+    <div class="msg info" id="msg-ota" hidden role="status" aria-live="polite"></div>
+    <p class="small">1. adımda cihaza bağlıyken çalışır. Yeni yazılım USB kablosundan gönderilir, <strong>BOOT düğmesine basmanız gerekmez</strong>. Yaklaşık 3 dakika sürer; bu sırada kabloyu çıkarmayın ve sayfayı kapatmayın. Ayarlarınız silinmez. Bir sorun olursa cihaz eski yazılımla çalışmaya devam eder.</p>
+
+    <details>
+      <summary>Gelişmiş</summary>
+      <div class="m4">
+        <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Gerekirse kartta BOOT'u basılı tutup EN'e basın, BOOT'u bırakın, sonra düğmeye basın. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
+        <div class="row">
+          <esp-web-install-button id="install-update" manifest="manifest-update.json">
+            <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
+            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
+            <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
+          </esp-web-install-button>
+        </div>
+        <p class="small">Cihaz hiç yanıt vermiyorsa ya da boşsa tam kurulum yapın. <strong>Bu işlem tüm ayarları siler</strong>; sonra 2. adımdan yeniden girmeniz gerekir. Cihaz görünmüyorsa BOOT düğmesine basılı tutarak USB'yi takın, sonra bırakın.</p>
+        <div class="row">
+          <esp-web-install-button id="install-full" manifest="manifest-full.json">
+            <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
+            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
+            <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+          </esp-web-install-button>
+        </div>
+      </div>
+      <div class="m5">
+        <p class="small"><strong>Bu bölümdeki düğmeler için BOOT gerekmez:</strong> önce 1. adımdan cihaza bağlanın, sonra düğmeye basın. Sayfa kartı kurulum moduna alıp bağlantıyı bırakır; ardından aynı düğmeye <strong>bir kez daha</strong> basıp listedeki kartı seçersiniz. (Kart çalışmıyorsa ve bağlanamıyorsanız: arka yüzdeki BOOT tuşunu basılı tutup RESET'e basın, BOOT'u bırakın.)</p>
+        <div class="msg info" id="msg-flash5" hidden role="status" aria-live="polite"></div>
+        <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
+        <div class="row">
+          <esp-web-install-button id="install-update-ws5" manifest="manifest-update-ws5.json">
+            <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
+            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
+            <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
+          </esp-web-install-button>
+        </div>
+        <p class="small">Cihaz hiç yanıt vermiyorsa ya da boşsa tam kurulum yapın. <strong>Bu işlem tüm ayarları siler</strong>; sonra 2. adımdan yeniden girmeniz gerekir. 1. adımdaki bağlantıyı elle kesmeyin, sayfa kendisi bırakır.</p>
+        <div class="row">
+          <esp-web-install-button id="install-full-ws5" manifest="manifest-full-ws5.json">
+            <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
+            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
+            <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+          </esp-web-install-button>
+        </div>
+        <p class="small">Kartınızın ekranı 1024×600 ise (ESP32-S3-Touch-LCD-5<strong>B</strong>, kutuda SKU 28151) bunun yerine:</p>
+        <div class="row">
+          <esp-web-install-button id="install-full-ws5b" manifest="manifest-full-ws5b.json">
+            <button slot="activate" class="btn" type="button">5B (1024×600) tam kurulum</button>
+            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
+            <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+          </esp-web-install-button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button type="button" class="btn danger" id="btn-reset" disabled>Ayarları sıfırla</button>
+      </div>
+      <p class="small">“Ayarları sıfırla” bağlı cihazdaki WiFi, konum ve birim ayarlarını siler ve cihazı yeniden başlatır.</p>
+    </details>
+  </section>
+
+  <section class="card" aria-labelledby="h-bridge">
+    <h2 id="h-bridge"><span class="step">4</span>Wi-Fi olmadan çalıştırmak (USB köprüsü)</h2>
+    <p class="hint"><span class="m4">Anten takılı değilse ya da </span>Wi-Fi'ye bağlanamıyorsa uçuş verisini bu bilgisayar indirip USB kablosuyla cihaza gönderebilir. Windows ve Mac için ayrı paketler var, ek program kurmak gerekmez.</p>
+    <div class="row" style="margin-top:12px">
+      <a class="btn primary" href="radar-usb-kopru.zip">Windows köprüsünü indir</a>
+      <a class="btn primary" href="radar-usb-kopru-mac.zip">Mac köprüsünü indir</a>
+    </div>
+    <p class="small"><strong>Windows:</strong> Zip dosyasını ayıklayın ve <strong>USB-Kopru-Baslat.bat</strong> dosyasına çift tıklayın. Windows uyarı verirse “Ek bilgi → Yine de çalıştır” deyin.</p>
+    <p class="small"><strong>Mac:</strong> Terminal'i açın, <code>python3 </code> yazın (sonunda boşluk), indirilen <strong>usb-kopru-mac</strong> klasöründeki <strong>radar_kopru.py</strong> dosyasını Terminal penceresine sürükleyin ve Enter'a basın. macOS “komut satırı geliştirici araçları”nı kurmayı önerirse “Yükle” deyin (tek seferlik). Çift tıklamayla açmak için bir kez Terminal'de <code>xattr -dr com.apple.quarantine ~/Downloads/usb-kopru-mac</code> çalıştırın; sonra <strong>Kopru-Baslat.command</strong> açılır (macOS “Done / Move to Trash” uyarısını bu yüzden verir, “Move to Trash” demeyin).</p>
+    <p class="small">Köprü çalışırken bu sayfanın cihaza bağlı olmaması gerekir: önce yukarıdan “Bağlantıyı kes”e basın. Köprü penceresi açık kaldığı sürece radar çalışır.</p>
+  </section>
+
+  <section class="card m5" aria-labelledby="h-deck">
+    <h2 id="h-deck"><span class="step">5</span>Kontrol tuşları <span class="sub">(stream deck ekranı)</span></h2>
+    <div class="msg info" style="margin-bottom:14px"><strong>Windows ve Mac için Plane Radar Deck:</strong> tuşları bilgisayardaki bu programla da ayarlayabilirsiniz. Program ayrıca istediğiniz siteyi istediğiniz tarayıcıda açar, program başlatır, gerçek ses seviyesini ve çalan şarkıyı (kapağıyla) karta gönderir.<br><a class="btn primary" href="PlaneRadarDeck.exe" download style="margin:8px 6px 4px 0">Windows programını indir</a><a class="btn primary" href="PlaneRadarDeck-mac.dmg" download style="margin:8px 6px 4px 0">Mac (Apple M işlemci)</a><a class="btn primary" href="PlaneRadarDeck-mac-intel.dmg" download style="margin:8px 0 4px">Mac (Intel işlemci)</a><br><span class="small">Windows ilk açılışta “bilinmeyen yayımcı” uyarısı verebilir: “Ek bilgi → Yine de çalıştır”. Mac'te: indirilen dosyayı açıp “Plane Radar Deck”i Uygulamalar'a sürükleyin; ilk açılışta uygulamaya sağ tıklayıp “Aç” deyin. Hangi Mac sürümünü indireceğinizi Apple menüsü › Bu Mac Hakkında'daki “Yonga” (Apple M) ya da “İşlemci” (Intel) satırı gösterir. Program açıkken bu sayfa karta bağlanamaz; programın menüsünden “Bağlantıyı bırak” deyin.</span></div>
+    <p class="hint">Radardaki ızgara düğmesiyle açılan kontrol ekranının 12 tuşuna resim, yazı ve işlev verin. Tuşlar USB kablosundan bilgisayara klavye tuşu olarak gider; sağdaki yuvarlak düğme sesi açar / kısar, dokununca sessize alır. Bir tuşa tıklayıp aşağıdan düzenleyin, sonra “Cihaza gönder”e basın.</p>
+    <div class="deck-wrap">
+      <div class="deck-grid" id="deck-grid" role="group" aria-label="Kontrol tuşları"></div>
+      <div class="deck-knob" aria-hidden="true">SES</div>
+    </div>
+    <label for="deck-os">Bu kart hangi bilgisayara bağlı? <span class="sub">(ses düğmesinin bir turu sessizden tam sese gider)</span></label>
+    <select id="deck-os" style="margin-bottom:12px">
+      <option value="16">Mac</option>
+      <option value="50">Windows</option>
+    </select>
+    <fieldset id="deck-editor">
+      <legend id="deck-legend">Tuş 1</legend>
+      <label for="deck-label">Tuşta görünen yazı <span class="sub">(boş bırakılabilir)</span></label>
+      <input id="deck-label" type="text" maxlength="22" autocomplete="off">
+      <label for="deck-action" style="margin-top:10px">İşlev</label>
+      <select id="deck-action"></select>
+      <div id="deck-combo" hidden style="margin-top:10px">
+        <div class="checks">
+          <label><input type="checkbox" id="deck-ctrl"> Ctrl</label>
+          <label><input type="checkbox" id="deck-alt"> Alt <span class="sub">(Mac: Option)</span></label>
+          <label><input type="checkbox" id="deck-shift"> Shift</label>
+          <label><input type="checkbox" id="deck-gui"> Win <span class="sub">(Mac: Cmd)</span></label>
+        </div>
+        <label for="deck-key-char" style="margin-top:8px">Tuş <span class="sub">(bir harf ya da rakam, a-z / 0-9)</span></label>
+        <input id="deck-key-char" type="text" maxlength="1" autocomplete="off" style="max-width:6em">
+      </div>
+      <label for="deck-file" style="margin-top:10px">Resim <span class="sub">(PNG, JPG, SVG; şeffaf alanlar tuş renginde görünür)</span></label>
+      <div class="row">
+        <input id="deck-file" type="file" accept="image/*">
+        <button type="button" class="btn" id="btn-deck-noimg">Resmi kaldır</button>
+      </div>
+    </fieldset>
+    <div class="row">
+      <button type="button" class="btn primary" id="btn-deck-send" disabled>Cihaza gönder</button>
+      <button type="button" class="btn" id="btn-deck-defaults">Varsayılan tuşlara dön</button>
+    </div>
+    <progress id="deck-progress" max="100" value="0" hidden style="width:100%;margin-top:10px"></progress>
+    <div class="msg" id="msg-deck" role="status" hidden></div>
+    <p class="small"><strong>Bir web sitesini ya da programı açtırmak için</strong> tuşa F13–F24'ten birini verin ve bilgisayarda o tuşu bir işe bağlayın. Windows'ta AutoHotkey ile tek satır yeter, ör. <code>F13::Run "https://youtube.com"</code>. Mac'te Kestirmeler uygulamasında “URL Aç” kestirmesine klavye kısayolu atayın ya da Hammerspoon kullanın (Mac F13–F20'yi tanır).</p>
+    <p class="small">Gönderirken kart birkaç saniyeliğine kurulum moduna geçer (tuşlar o sırada çalışmaz), bitince klavye moduna döner. Düzenlediğiniz tuşlar bu tarayıcıda da saklanır.</p>
+  </section>
+
+  </div><!-- #steps -->
+
+  <footer>
+    Şehir araması <a href="https://open-meteo.com/en/docs/geocoding-api" target="_blank" rel="noopener">Open-Meteo</a> servisini kullanır;
+    girdiğiniz yer adı oraya gönderilir, başka hiçbir bilgi paylaşılmaz. WiFi şifresi yalnızca USB üzerinden cihaza yazılır.
+    Harita çizgileri © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap katkıda bulunanları</a> (ODbL);
+    Overpass servisinden indirilir, yalnızca seçtiğiniz konumun koordinatları gönderilir.
+    Uçak verisi: <a href="https://opendata.adsb.fi/" target="_blank" rel="noopener">adsb.fi</a>.
+    Hava durumu: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0).
+    Saat dilimi tablosu: <a href="https://github.com/nayarsystems/posix_tz_db" target="_blank" rel="noopener">posix_tz_db</a> (MIT).
+  </footer>
+</main>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module"></script>
+<script>
+(() => {
+  'use strict';
+
+  const $ = (s) => document.querySelector(s);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const DEFAULT_LAT = 52.3676, DEFAULT_LON = 4.9041; // firmware default (Amsterdam): treated as "not set yet"
+
+  const state = {
+    port: null, reader: null, readDone: null, pending: null,
+    connected: false, device: null, zones: {}, latest: null, expectingDrop: false, otaHandler: null,
+  };
+
+  function setMsg(el, kind, text) {
+    el.className = 'msg ' + kind;
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
+  // ---------------------------------------------------------------- serial
+  async function openPort(port) {
+    await port.open({ baudRate: 115200, bufferSize: 16384 });
+    // Do not touch DTR/RTS: on this chip they can reset it, and a plain open works like a serial terminal.
+    state.port = port;
+    startReading(port);
+  }
+
+  function startReading(port) {
+    const reader = port.readable.getReader();
+    state.reader = reader;
+    state.readDone = (async () => {
+      let buf = '';
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl;
+          while ((nl = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, nl).replace(/\r$/, '');
+            buf = buf.slice(nl + 1);
+            onLine(line);
+          }
+          if (buf.length > 20000) buf = buf.slice(-2000); // endless log text without newlines
+        }
+      } catch (_) { /* unplugged or closed */ }
+      try { reader.releaseLock(); } catch (_) { /* already released */ }
+    })();
+  }
+
+  const diag = { lines: [], boots: 0 };
+  function note(text) {
+    const t = new Date().toLocaleTimeString('tr-TR');
+    diag.lines.push(t + '  ' + text);
+    if (diag.lines.length > 300) diag.lines.shift();
+    const el = $('#diag-log');
+    if (el) { el.textContent = diag.lines.join('\n'); el.scrollTop = el.scrollHeight; }
+  }
+
+  function onLine(line) {
+    if (line.length) note(line.length > 300 ? line.slice(0, 300) + '…' : line);
+    if (/Plane Radar (3D )?v\d/.test(line)) diag.boots++;
+    const at = line.indexOf('PR:');
+    if (at < 0) return; // ordinary firmware log text
+    const m = /^PR:([A-Z]+)\s*(.*)$/.exec(line.slice(at));
+    if (!m) return;
+    let data = {};
+    try { if (m[2]) data = JSON.parse(m[2]); } catch (_) { return; }
+    if (state.otaHandler && (m[1] === 'OTAACK' || m[1] === 'OTANAK' || m[1] === 'ERR')) { state.otaHandler(m[1], data); return; }
+    const p = state.pending;
+    if (p && p.tags.includes(m[1])) {
+      state.pending = null;
+      clearTimeout(p.timer);
+      p.resolve({ tag: m[1], data });
+    }
+  }
+
+  async function sendLine(text) {
+    const writer = state.port.writable.getWriter();
+    try {
+      // Leading newline ends any half-received junk line on the device side.
+      const bytes = encoder.encode('\n' + text + '\n');
+      for (let i = 0; i < bytes.length; i += 64) {
+        await writer.write(bytes.slice(i, i + 64));
+        if (i + 64 < bytes.length) await sleep(8);
+      }
+    } finally {
+      writer.releaseLock();
+    }
+  }
+
+  async function request(text, tags, timeoutMs) {
+    if (!state.port) throw new Error('not-connected');
+    if (state.pending) throw new Error('busy');
+    const reply = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { state.pending = null; reject(new Error('timeout')); }, timeoutMs);
+      state.pending = { tags, resolve, timer };
+    });
+    reply.catch(() => {}); // a timeout after a failed send must not surface as unhandled
+    try {
+      await sendLine(text);
+    } catch (e) {
+      if (state.pending) { clearTimeout(state.pending.timer); state.pending = null; }
+      throw e;
+    }
+    return reply;
+  }
+
+  async function closePort() {
+    const port = state.port;
+    state.port = null;
+    state.connected = false;
+    if (state.pending) { clearTimeout(state.pending.timer); state.pending = null; }
+    try { if (state.reader) await state.reader.cancel(); } catch (_) { /* gone */ }
+    try { if (state.readDone) await state.readDone; } catch (_) { /* gone */ }
+    try { if (port) await port.close(); } catch (_) { /* gone */ }
+    state.reader = null; state.readDone = null;
+  }
+
+  // ------------------------------------------------------------ connection
+  async function connect(showAll) {
+    const msg = $('#msg-connect');
+    let port;
+    try {
+      port = showAll
+        ? await navigator.serial.requestPort()
+        : await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }, { usbVendorId: 0x10c4 }, { usbVendorId: 0x1a86 }] }); // Espressif, Silicon Labs CP210x, WCH CH340
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') {
+        setMsg(msg, 'warn', 'Cihaz seçilmedi. Listede göremiyorsanız aşağıdaki “Cihaz listede görünmüyor” bölümüne bakın.');
+        $('#connect-help').open = true;
+      } else {
+        setMsg(msg, 'err', 'Bağlantı başlatılamadı: ' + (e && e.message ? e.message : e));
+      }
+      return;
+    }
+    setMsg(msg, 'info', 'Bağlanılıyor…');
+    diag.boots = 0;
+    note('Bağlantı denemesi başladı');
+    let hello = null;
+    // The chip can restart (and the USB port vanish and come back) while we open it,
+    // so on a lost port wait for it to return and try again instead of giving up.
+    for (let attempt = 0; attempt < 4 && !hello; attempt++) {
+      if (attempt > 0) {
+        setMsg(msg, 'info', 'Cihaz yeniden görünüyor, tekrar deneniyor… (' + attempt + '/3)');
+        port = await waitForPort(port);
+        if (!port) break;
+      }
+      try {
+        await openPort(port);
+      } catch (e) {
+        note('Port açılamadı: ' + (e && e.message ? e.message : e));
+        if (attempt === 0) {
+          setMsg(msg, 'err', 'Port açılamadı. Arduino IDE, seri monitör ya da başka bir sekme cihazı kullanıyor olabilir; kapatıp tekrar deneyin.');
+          state.port = null;
+          return;
+        }
+        continue;
+      }
+      hello = await handshake();
+      if (!hello) {
+        const lost = !state.port;
+        await closePort();
+        if (!lost) break; // port is fine but the device does not answer: reopening would only reset it again
+      }
+    }
+    if (!hello) {
+      renderConnection();
+      if (diag.boots >= 2) {
+        setMsg(msg, 'err', 'Cihaz sürekli yeniden başlıyor (' + diag.boots + ' kez). Yazılım çöküyor olabilir; aşağıdaki “Tanılama kaydı” bölümünü açıp içeriğini paylaşın.');
+      } else if (diag.lines.length > 1) {
+        setMsg(msg, 'err', 'Cihaz yazı gönderiyor ama sorumuza yanıt vermiyor (eski yazılım olabilir). “Tanılama kaydı” bölümüne bakın; gerekirse 3. adımdan Tam kurulum yapın.');
+      } else {
+        setMsg(msg, 'err', 'Cihazdan hiç veri gelmedi. Veri kablosu ve başka USB portu deneyin; BOOT basılı tutarak takıp bırakın, sonra tekrar deneyin. “Tanılama kaydı” bölümüne bakın.');
+      }
+      $('#diag').open = true;
+      return;
+    }
+    state.device = hello;
+    state.connected = true;
+    state.expectingDrop = false;
+    setMsg(msg, '', '');
+    prefill(hello);
+    renderConnection();
+    renderVersion();
+  }
+
+  async function waitForPort(prev) {
+    for (let i = 0; i < 12; i++) {
+      await sleep(500);
+      try {
+        const ports = await navigator.serial.getPorts();
+        const same = ports.find((p) => p === prev);
+        const esp = ports.filter((p) => { const i2 = p.getInfo(); return [0x303a, 0x10c4, 0x1a86].includes(i2.usbVendorId); });
+        const pick = same || esp[0];
+        if (pick) { await sleep(800); return pick; }
+      } catch (_) { /* retry */ }
+    }
+    note('Cihaz yeniden görünmedi');
+    return null;
+  }
+
+  async function handshake() {
+    // Opening the port can restart the chip, so keep asking while it boots.
+    for (let i = 0; i < 16; i++) {
+      try {
+        const r = await request('PR:HELLO', ['HELLO'], 1500);
+        return r.data;
+      } catch (e) {
+        if (!state.port) return null;
+        await sleep(300);
+      }
+    }
+    return null;
+  }
+
+
+  // ---------------------------------------------------------------- USB update
+  // The running firmware receives the new image over the cable and writes it to its
+  // second app slot (no download mode, no BOOT button). Protocol: firmware serial_ota.h.
+  async function usbUpdate() {
+    const msg = $('#msg-ota'), bar = $('#ota-progress'), btn = $('#btn-usb-update');
+    if (!state.port || !state.connected) { setMsg(msg, 'warn', 'Önce 1. adımdan cihaza bağlanın.'); return; }
+    btn.disabled = true;
+    bar.hidden = false; bar.value = 0;
+    try {
+      setMsg(msg, 'info', 'Yeni yazılım indiriliyor…');
+      // The 5" Waveshare board (ESP32-S3) has its own image; older firmware sends no "hw".
+      const hw = state.device && state.device.hw;
+      if (modelMismatch()) throw new Error('bağlı cihaz seçili modelle uyuşmuyor');
+      const fwFile = state.model === '5' ? (hw === 'ws5b' ? 'firmware-ws5b.bin' : 'firmware-ws5.bin') : 'firmware.bin';
+      const r = await fetch(fwFile + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) throw new Error('indirme ' + r.status);
+      const fw = new Uint8Array(await r.arrayBuffer());
+      // The start line is retried a few times: on a device busy with Wi-Fi (TLS takes
+      // most of the free memory for a moment) an older firmware can fail to read it.
+      const fwCrc = crc32(fw);
+      // 5in-0.29.x ran USB as a keyboard without the setup mode: its serial port stalls on
+      // the update. Those two versions are updated once with the old method (BOOT + RESET).
+      if (/^5in-0\.29\./.test(String((state.device && state.device.fw) || ''))) throw new Error('fw029');
+      await ensureSetupUsb(msg);
+      setMsg(msg, 'info', 'Yazılım cihaza gönderiliyor…');
+      let begin = null;
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          begin = await request('PR:OTABEGIN ' + JSON.stringify({ len: fw.length, crc: fwCrc }), ['OTAACK', 'ERR'], 20000);
+        } catch (e) {
+          if (String(e && e.message) !== 'timeout' || attempt === 5) throw e;
+          begin = null;
+        }
+        if (begin && begin.tag === 'OTAACK') break;
+        const why = begin ? (begin.data.msg || 'ota') : 'timeout';
+        if (!/bad_json|timeout/.test(why) || attempt === 5) throw new Error(why);
+        note('OTABEGIN tekrar deneniyor (' + why + ', deneme ' + (attempt + 1) + '/5)');
+        setMsg(msg, 'info', 'Cihaz meşgul, yeniden deneniyor (' + (attempt + 1) + '/5)…');
+        await sleep(1500 * attempt);
+      }
+      // One chunk at a time: while the chip writes flash it cannot take in more bytes,
+      // so the next line goes out only after the answer to the previous one.
+      const v2 = ((state.device && state.device.otav) | 0) >= 2;
+      const CH = 480, total = Math.ceil(fw.length / CH);
+      let answer = null, wake = null;
+      state.otaHandler = (tag, data) => {
+        answer = { tag, data };
+        if (wake) { const w = wake; wake = null; w(); }
+      };
+      const waitAnswer = (ms) => new Promise((res) => {
+        if (answer) return res();
+        wake = res;
+        setTimeout(() => { if (wake === res) { wake = null; res(); } }, ms);
+      });
+      const t0 = Date.now();
+      const writer = state.port.writable.getWriter();
+      try {
+        let seq = 1, tries = 0;
+        while (seq <= total) {
+          const part = fw.subarray((seq - 1) * CH, Math.min(seq * CH, fw.length));
+          let bin = ''; for (let i = 0; i < part.length; i++) bin += String.fromCharCode(part[i]);
+          answer = null;
+          await writer.write(encoder.encode('PR:OTA ' + seq + (v2 ? ' ' + part.length : '') + ' ' + btoa(bin) + '\n'));
+          await waitAnswer(4000);
+          const a = answer;
+          if (a && a.tag === 'OTAACK' && (a.data.seq | 0) === seq) {
+            seq++; tries = 0;
+          } else if (a && a.tag === 'OTANAK') {
+            seq = Math.max(1, a.data.seq | 0);
+            if (++tries > 8) throw new Error('bağlantı kararsız');
+          } else if (a && a.tag === 'ERR') {
+            throw new Error(a.data.msg || 'ota');
+          } else {
+            if (!v2 || ++tries > 8) throw new Error('cihaz yanıt vermedi');  // v1 cannot resend safely
+          }
+          if (seq % 8 === 0) {
+            const pct = Math.floor(((seq - 1) / total) * 100);
+            bar.value = pct;
+            const rate = (seq - 1) / Math.max(1, (Date.now() - t0) / 1000);
+            const left = rate > 0 ? Math.round((total - seq + 1) / rate) : 0;
+            setMsg(msg, 'info', 'Cihaza gönderiliyor: %' + pct + (left ? ' (yaklaşık ' + (left >= 60 ? Math.ceil(left / 60) + ' dk' : left + ' sn') + ' kaldı)' : '') + '. Kabloyu çıkarmayın.');
+          }
+        }
+      } finally {
+        writer.releaseLock();
+        state.otaHandler = null;
+      }
+      bar.value = 100;
+      setMsg(msg, 'info', 'Doğrulanıyor…');
+      state.expectingDrop = true;
+      const done = await request('PR:OTAEND', ['OTADONE', 'ERR'], 30000);
+      if (done.tag === 'ERR') throw new Error(done.data.msg || 'ota');
+      setMsg(msg, 'ok', 'Yazılım yazıldı, cihaz yeniden başlıyor…');
+      await sleep(6000);
+      const d = await handshake();
+      state.expectingDrop = false;
+      if (d) { state.device = d; renderConnection(); renderVersion(); }
+      setMsg(msg, 'ok', 'Güncelleme tamamlandı' + (d && d.fw ? ' (cihazdaki sürüm ' + d.fw + ').' : '.'));
+    } catch (e) {
+      state.otaHandler = null;
+      state.expectingDrop = false;
+      try { if (state.port) await sendLine('PR:OTAABORT'); } catch (_) { /* gone */ }
+      const m = String(e && e.message ? e.message : e);
+      const old = /unknown_command|ota_not_started/.test(m);
+      setMsg(msg, 'err', m === 'fw029'
+        ? 'Cihazdaki 5in-0.29 sürümü bu düğmeyle güncellenemiyor (USB klavye modunun bir hatası). Bir kereliğine aşağıdaki “Gelişmiş → Eski yöntemle güncelle”yi kullanın: kartın BOOT tuşunu basılı tutup RESET’e basın, BOOT’u bırakın, sonra düğmeye basıp kartı seçin. Ayarlar silinmez; sonraki güncellemeler yine bu düğmeyle olur.'
+        : old
+        ? 'Cihazdaki yazılım USB güncellemeyi henüz bilmiyor. Bir kereliğine aşağıdaki “Gelişmiş → Tam kurulum” ile yükleyin; sonraki güncellemeler bu düğmeyle olur.'
+        : ERRORS[m] || ('Güncelleme tamamlanamadı (' + m + '). Cihaz eski yazılımla çalışmaya devam eder; tekrar deneyin.'));
+    } finally {
+      btn.disabled = !state.connected;
+    }
+  }
+
+  async function disconnect() {
+    // A 5" board left in setup mode goes back to keyboard mode (stream deck) right away.
+    if (state.port && state.device && state.device.usb === 'setup') {
+      state.expectingDrop = true;
+      try { await request('PR:USBNORMAL', ['USBMODE'], 2000); } catch (_) { /* old firmware or gone */ }
+    }
+    await closePort();
+    renderConnection();
+  }
+
+  // ------------------------------------------------------------ USB modes
+  // 5" board from 5in-0.30: its one USB port is a USB keyboard + serial port ("kb") for the
+  // stream deck, or the plain USB-Serial/JTAG port ("setup"). Long uploads need setup mode:
+  // the keyboard-mode serial port loses data on them. Firmware: include/hardware/console.h.
+  async function ensureSetupUsb(msg) {
+    const dev = state.device || {};
+    if (dev.usb !== 'kb') return; // already in setup mode, or firmware without the two modes
+    if (msg) setMsg(msg, 'info', 'Kart kurulum moduna geçiyor (birkaç saniye)…');
+    note('USB kurulum moduna geçiliyor');
+    state.expectingDrop = true;
+    try { await request('PR:USBSETUP', ['USBMODE'], 3000); } catch (_) { /* it restarts anyway */ }
+    await closePort();
+    let port = null;
+    for (let i = 0; i < 30 && !port; i++) {
+      await sleep(500);
+      try {
+        const ports = await navigator.serial.getPorts();
+        port = ports.find((p) => { const f = p.getInfo(); return f.usbVendorId === 0x303a && f.usbProductId === 0x1001; }) || null;
+      } catch (_) { /* retry */ }
+    }
+    if (!port) {
+      state.expectingDrop = false;
+      renderConnection();
+      throw new Error('usb_reselect');
+    }
+    await sleep(700);
+    try { await openPort(port); } catch (_) { state.expectingDrop = false; renderConnection(); throw new Error('usb_mode'); }
+    const d = await handshake();
+    state.expectingDrop = false;
+    if (!d) { await closePort(); renderConnection(); throw new Error('usb_mode'); }
+    state.device = d;
+    state.connected = true;
+    renderConnection();
+  }
+
+  // After a deck upload: back to keyboard mode now (else the board waits a few minutes).
+  async function backToKeyboard() {
+    if (!(state.port && state.device && state.device.usb === 'setup')) return false;
+    state.expectingDrop = true;
+    try { await request('PR:USBNORMAL', ['USBMODE'], 2000); } catch (_) { /* restarting */ }
+    await closePort();
+    renderConnection();
+    return true;
+  }
+
+  function onPortLost() {
+    note('USB bağlantısı koptu');
+    if (!state.port && !state.connected) return;
+    closePort().then(() => {
+      renderConnection();
+      if (state.expectingDrop) {
+        setMsg($('#msg-connect'), 'info', 'Cihaz yeniden başlıyor. Birkaç saniye sonra ekranında radar ya da saat görünmeli.');
+      } else {
+        setMsg($('#msg-connect'), 'warn', 'Cihazla bağlantı koptu. Kabloyu kontrol edip tekrar bağlanın.');
+      }
+    });
+  }
+
+  function renderConnection() {
+    const on = state.connected;
+    $('#btn-connect').hidden = on;
+    $('#btn-disconnect').hidden = !on;
+    $('#settings-fields').disabled = !on;
+    $('#btn-reset').disabled = !on;
+    $('#btn-usb-update').disabled = !on;
+    $('#btn-deck-send').disabled = !on;
+    $('#settings-hint').hidden = on;
+    const chips = $('#device-chips');
+    chips.hidden = !on;
+    chips.textContent = '';
+    if (on) {
+      const d = state.device;
+      const items = [
+        'Bağlı',
+        'Yazılım ' + d.fw,
+        d.wifi ? 'WiFi: ' + d.ssid + ' (' + d.ip + ')' : 'WiFi: bağlı değil',
+        'Kimlik ' + d.mac,
+      ];
+      if (d.map > 0) items.push('Harita: ' + Math.round(d.map / 1024) + ' KB');
+      if (d.usb) items.push(d.usb === 'kb' ? 'USB: klavye modu' : 'USB: kurulum modu');
+      for (const t of items) {
+        const s = document.createElement('span');
+        s.className = 'chip';
+        s.textContent = t;
+        chips.appendChild(s);
+      }
+    }
+    $('#wifi-keep').hidden = !(on && state.device && state.device.wifi);
+    renderModelCheck();
+  }
+
+  // -------------------------------------------------------------- settings
+  async function loadZones() {
+    try {
+      const r = await fetch('tz.json');
+      state.zones = await r.json();
+    } catch (_) {
+      state.zones = { 'Europe/Istanbul': '<+03>-3', 'UTC': 'UTC0' };
+    }
+    const sel = $('#tz');
+    sel.textContent = '';
+    for (const name of Object.keys(state.zones).sort()) {
+      const o = document.createElement('option');
+      o.value = name;
+      o.textContent = name.replace(/_/g, ' ');
+      sel.appendChild(o);
+    }
+    setZone(browserZone());
+  }
+
+  function browserZone() {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) { return 'UTC'; }
+  }
+
+  function setZone(name) {
+    const sel = $('#tz');
+    if (name && state.zones[name]) sel.value = name;
+    else if (state.zones['Europe/Istanbul']) sel.value = 'Europe/Istanbul';
+    showPosix();
+  }
+
+  function showPosix() {
+    const posix = state.zones[$('#tz').value] || '';
+    $('#tz-posix').textContent = posix ? 'Cihaza yazılacak değer: ' + posix : '';
+  }
+
+  function zoneForPosix(posix) {
+    const mine = browserZone();
+    if (state.zones[mine] === posix) return mine;
+    return Object.keys(state.zones).find((k) => state.zones[k] === posix) || mine;
+  }
+
+  function prefill(d) {
+    const isDefault = Math.abs(d.lat - DEFAULT_LAT) < 1e-4 && Math.abs(d.lon - DEFAULT_LON) < 1e-4;
+    if (!isDefault) {
+      $('#lat').value = Number(d.lat).toFixed(4);
+      $('#lon').value = Number(d.lon).toFixed(4);
+    }
+    setZone(zoneForPosix(d.tz));
+    $('#opt-clock').checked = !!d.clock;
+    $('#opt-weather').disabled = d.weather === undefined;   // old firmware: no weather screen
+    $('#opt-weather').checked = d.weather === undefined ? true : !!d.weather;
+    $('#opt-miles').checked = !!d.miles;
+    $('#opt-runways').checked = !!d.runways;
+    $('#opt-rings').disabled = d.rings === undefined;   // old firmware: no ring option
+    $('#opt-rings').checked = d.rings === undefined ? true : !!d.rings;
+    $('#opt-map').disabled = d.map === undefined;      // old firmware: no map support
+    if (d.map === undefined) $('#opt-map').value = '0';
+    else { try { const v = localStorage.getItem('mapRange'); if (v && [...$('#opt-map').options].some((o) => o.value === v)) $('#opt-map').value = v; } catch (_) { /* optional */ } }
+    $('#ssid').value = d.wifi ? d.ssid : '';
+    $('#pass').value = '';
+    updateMapLink();
+    updateMapNote();
+  }
+
+  function updateMapLink() {
+    const lat = parseFloat($('#lat').value), lon = parseFloat($('#lon').value);
+    const a = $('#map-link');
+    a.href = (isFinite(lat) && isFinite(lon))
+      ? 'https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lon + '#map=11/' + lat + '/' + lon
+      : 'https://www.openstreetmap.org/';
+  }
+
+  // Every network found is a button in a list below the field (a <datalist> showed only the
+  // names matching what the field already held, i.e. just the saved network).
+  async function scanNetworks() {
+    const msg = $('#msg-scan'), btn = $('#btn-scan'), list = $('#nets-list');
+    btn.disabled = true;
+    list.textContent = '';
+    setMsg(msg, 'info', 'Çevredeki ağlar taranıyor… (yaklaşık 5 saniye)');
+    try {
+      const r = await request('PR:SCAN', ['SCAN', 'ERR'], 20000);
+      if (r.tag === 'ERR') throw new Error(r.data.msg || 'scan');
+      const nets = r.data.nets || [];
+      for (const n of nets) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        const bars = n.r >= -60 ? 'güçlü' : n.r >= -72 ? 'orta' : 'zayıf';
+        b.textContent = n.s + '  ·  sinyal ' + bars + (n.o ? '  ·  şifresiz' : '');
+        b.addEventListener('click', () => {
+          $('#ssid').value = n.s;
+          $('#pass').value = '';
+          list.textContent = '';
+          setMsg(msg, 'ok', 'Seçildi: ' + n.s + (n.o ? ' (şifresiz ağ).' : '. Şimdi şifresini yazın.'));
+          if (!n.o) $('#pass').focus();
+        });
+        li.appendChild(b);
+        list.appendChild(li);
+      }
+      setMsg(msg, nets.length ? 'ok' : 'warn', nets.length
+        ? nets.length + ' ağ bulundu. Bağlanmak istediğinizi aşağıdan seçin.'
+        : 'Hiç ağ bulunamadı. Cihaz yalnızca 2,4 GHz ağları görür; modemde 2,4 GHz’in açık olduğundan emin olun. Ağ adını elle de yazabilirsiniz.');
+    } catch (e) {
+      setMsg(msg, 'err', 'Tarama başarısız oldu. Birkaç saniye sonra tekrar deneyin ya da ağ adını elle yazın.');
+    }
+    btn.disabled = false;
+  }
+
+  async function searchCity() {
+    const q = $('#city').value.trim();
+    const msg = $('#msg-loc'), list = $('#results');
+    list.textContent = '';
+    if (q.length < 2) { setMsg(msg, 'warn', 'En az 2 harf yazın.'); return; }
+    setMsg(msg, 'info', 'Aranıyor…');
+    try {
+      const url = 'https://geocoding-api.open-meteo.com/v1/search?count=6&language=tr&format=json&name=' + encodeURIComponent(q);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('http ' + res.status);
+      const data = await res.json();
+      const found = data.results || [];
+      if (!found.length) { setMsg(msg, 'warn', 'Sonuç bulunamadı. Başka bir yazımı deneyin ya da enlem/boylamı elle girin.'); return; }
+      setMsg(msg, '', '');
+      for (const r of found) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = [r.name, r.admin2, r.admin1, r.country].filter(Boolean).join(', ');
+        b.addEventListener('click', () => {
+          setLocation(r.latitude, r.longitude);
+          if (r.timezone) setZone(r.timezone);
+          list.textContent = '';
+          setMsg(msg, 'ok', 'Seçildi: ' + b.textContent);
+        });
+        li.appendChild(b);
+        list.appendChild(li);
+      }
+    } catch (e) {
+      setMsg(msg, 'err', 'Arama yapılamadı (internet bağlantınızı kontrol edin). Enlem ve boylamı elle de girebilirsiniz.');
+    }
+  }
+
+  function setLocation(lat, lon) {
+    $('#lat').value = Number(lat).toFixed(4);
+    $('#lon').value = Number(lon).toFixed(4);
+    updateMapLink();
+  }
+
+  function useMyLocation() {
+    const msg = $('#msg-loc');
+    if (!navigator.geolocation) { setMsg(msg, 'warn', 'Tarayıcı konum vermiyor. Şehir arayın ya da elle girin.'); return; }
+    setMsg(msg, 'info', 'Konum isteniyor… tarayıcının izin sorusunu onaylayın.');
+    navigator.geolocation.getCurrentPosition((pos) => {
+      setLocation(pos.coords.latitude, pos.coords.longitude);
+      setZone(browserZone());
+      setMsg(msg, 'ok', 'Konumunuz alındı. Doğru görünmüyorsa şehir arayarak değiştirin.');
+    }, () => {
+      setMsg(msg, 'warn', 'Konum alınamadı (izin verilmedi olabilir). Şehir arayın ya da elle girin.');
+    }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
+  }
+
+  const ERRORS = {
+    auth_failed: 'WiFi şifresi hatalı görünüyor. Şifreyi kontrol edip tekrar deneyin.',
+    ssid_not_found: 'Ağ bulunamadı. Adı kontrol edin; cihaz yalnızca 2,4 GHz ağları görür.',
+    timeout: 'WiFi’ye bağlanılamadı (zaman aşımı). Sinyal zayıf olabilir; cihazı modeme yaklaştırın.',
+    bad_location: 'Konum geçersiz. Enlem -90…90, boylam -180…180 arasında olmalı.',
+    bad_timezone: 'Saat dilimi geçersiz.',
+    bad_wifi: 'WiFi adı en fazla 32, şifre en fazla 63 karakter olabilir.',
+    bad_wifi_password: 'WiFi şifresi en az 8 karakter olmalı (şifresiz ağlarda boş bırakın).',
+    bad_json: 'Cihaz gönderilen veriyi anlamadı. Sayfayı yenileyip tekrar deneyin.',
+    unknown_command: 'Cihaz yazılımı bu komutu bilmiyor. 3. adımdan yazılımı güncelleyin.',
+    map_too_big: 'Harita cihaz hafızasına sığmadı.',
+    bad_map: 'Harita cihazda doğrulanamadı (veri bozuk geldi).',
+    bad_map_chunk: 'Harita verisi cihaza bozuk ulaştı.',
+    usb_reselect: 'Kart kurulum moduna geçti ama tarayıcı onu henüz tanımıyor. 1. adımdan “Cihaza bağlan”a basıp listedeki kartı seçin, sonra işlemi tekrar başlatın (yalnızca ilk seferde gerekir).',
+    usb_mode: 'Kart kurulum moduna geçtikten sonra yanıt vermedi. Tekrar bağlanıp deneyin.',
+    usb_setup: 'Kart klavye modunda kaldı. Sayfayı yenileyip tekrar bağlanın.',
+    deck_too_big: 'Tuş verisi cihaza sığmadı.',
+    bad_deck: 'Tuş verisi cihazda doğrulanamadı (bozuk geldi), tekrar gönderin.',
+    bad_deck_chunk: 'Tuş verisi cihaza bozuk ulaştı, tekrar gönderin.',
+  };
+
+
+  // ------------------------------------------------------------------ map
+  // Coast lines and main roads around the chosen location, from OpenStreetMap.
+  // Binary format and limits: include/services/map_store.h in the firmware.
+  // Device range presets: label km (shown on ring 3) -> outer ring = label x 4/3. The map must also fill
+  // the screen beyond the outer ring (the round screen reaches ~1.12 x the outer ring), so it is
+  // downloaded to 1.13 x the outer ring of the widest range the person picks.
+  const MAP_RANGES = { 5: 5 * 4 / 3, 10: 10 * 4 / 3, 15: 15 * 4 / 3, 17: 17 * 4 / 3 };
+  const mapRadiusFor = (label) => MAP_RANGES[label] ? Math.ceil(MAP_RANGES[label] * 1.13 * 10) / 10 : 0;
+  const MAP_MAX_KM = 26, MAP_MAX_POINTS = 3000, MAP_MAX_RING_POINTS = 2500, MAP_MAX_BYTES = 31000, KM_PER_DEG = 111;
+  // Public Overpass servers are often busy or rate-limited, so several mirrors are tried in rounds.
+  const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter',
+                    'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+  const overpassCache = new Map();       // survives retries on the same page (same place and size)
+
+  function crc32(bytes) {
+    let table = crc32.table;
+    if (!table) {
+      table = crc32.table = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); table[n] = c >>> 0; }
+    }
+    let crc = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) crc = table[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+
+  // Sends the query to all mirrors at once and takes the first good answer (the others
+  // are cancelled): a busy server no longer costs a 30 s wait before the next is tried.
+  async function overpassRace(q, timeoutMs, reasons) {
+    const ctls = OVERPASS.map(() => new AbortController());
+    const timer = setTimeout(() => ctls.forEach((c) => c.abort()), timeoutMs);
+    try {
+      return await Promise.any(OVERPASS.map(async (url, i) => {
+        const host = new URL(url).hostname;
+        try {
+          const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: ctls[i].signal,
+                                       headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+          if (!r.ok) throw new Error(r.status === 429 ? 'sunucu meşgul (429)' : 'HTTP ' + r.status);
+          const j = JSON.parse(await r.text());                // an HTML error page throws here
+          if (!j || !Array.isArray(j.elements)) throw new Error('geçersiz yanıt');
+          if (j.remark && /runtime error|timed out|out of memory/i.test(j.remark)) throw new Error('sunucu meşgul');
+          ctls.forEach((c, k) => { if (k !== i) c.abort(); });
+          return j.elements;
+        } catch (e) {
+          if (reasons) reasons.push(host + ': ' + (e && e.name === 'AbortError' ? 'zaman aşımı' : (e && e.message) || 'bağlanılamadı'));
+          throw e;
+        }
+      }));
+    } finally { clearTimeout(timer); }
+  }
+
+  async function fetchOverpass(lat, lon, radiusKm, onStatus) {
+    const key = lat.toFixed(4) + ',' + lon.toFixed(4) + ',' + radiusKm;
+    if (overpassCache.has(key)) return overpassCache.get(key);
+    const fetchKm = radiusKm * 1.25;               // a little wider than the circle so its edge is cut exactly
+    const dLat = fetchKm / KM_PER_DEG, dLon = fetchKm / (KM_PER_DEG * Math.cos(lat * Math.PI / 180));
+    const bbox = [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map((v) => v.toFixed(5)).join(',');
+    const notRiver = '["water"!~"^(river|riverbank|canal|stream|ditch|drain|wastewater|pool|fountain|moat|basin)$"]';
+    const q = '[out:json][timeout:40];(way["natural"="coastline"](' + bbox + ');' +
+      'way["highway"~"^(motorway|trunk)$"](' + bbox + ');' +
+      'way["natural"="water"]' + notRiver + '(' + bbox + ');' +
+      'relation["natural"="water"]' + notRiver + '(' + bbox + ');' +
+      'way["landuse"="reservoir"](' + bbox + '););out geom(' + bbox + ');';
+    const reasons = [];
+    for (let round = 0; round < 2; round++) {
+      if (onStatus) onStatus('Harita sunucularına bağlanılıyor' + (round ? ' (yeniden deneniyor)' : '') + '…');
+      try {
+        const els = await overpassRace(q, 35000, reasons);
+        overpassCache.set(key, els);
+        return els;
+      } catch (_) { /* all mirrors failed this round */ }
+      if (round < 1) await sleep(2000);
+    }
+    const err = new Error('network'); err.reasons = reasons;
+    throw err;
+  }
+
+  // ---- places for the 5" board: airports (IATA code + runways), landmarks, towns.
+  // Map blob entries (firmware radar3d.cpp loadPois): type 4 = runway centre line
+  // (2 points); type 5 = place: word 0 position, word 1 [kind, name length, 0, 0],
+  // then the UTF-8 name padded to 4 bytes. Older firmware skips both types.
+  const AIRPORT_KM = 60;   // airports are shown at every range, beyond the map's area too
+  const bboxFor = (lat, lon, km) => {
+    const dLat = km / KM_PER_DEG, dLon = km / (KM_PER_DEG * Math.cos(lat * Math.PI / 180));
+    return '(' + [lat - dLat, lon - dLon, lat + dLat, lon + dLon].map((v) => v.toFixed(5)).join(',') + ')';
+  };
+  async function fetchPlaces(lat, lon, radiusKm) {
+    const b = bboxFor(lat, lon, radiusKm), ab = bboxFor(lat, lon, Math.max(radiusKm, AIRPORT_KM));
+    const q = '[out:json][timeout:25];way["aeroway"="runway"]' + ab + ';out geom;(' +
+      'nwr["aeroway"="aerodrome"]["iata"]' + ab + ';' +
+      'nwr["tourism"="attraction"]["wikidata"]["name"]' + b + ';' +
+      'nwr["man_made"~"^(tower|lighthouse)$"]["wikidata"]["name"]' + b + ';' +
+      'nwr["leisure"="stadium"]["wikidata"]["name"]' + b + ';' +
+      'nwr["historic"~"^(castle|monument|fort|palace)$"]["wikidata"]["name"]' + b + ';' +
+      'nwr["tourism"~"^(zoo|museum|theme_park)$"]["wikidata"]["name"]' + b + ';' +
+      'nwr["leisure"="park"]["wikipedia"]["name"]' + b + ';' +
+      'nwr["amenity"="place_of_worship"]["wikipedia"]["name"]' + b + ';' +
+      'way["bridge"="yes"]["highway"~"^(motorway|trunk)$"]["wikidata"]["name"]' + b + ';' +
+      ');out center tags;';
+    for (let round = 0; round < 2; round++) {
+      try { return await overpassRace(q, 30000, null); } catch (_) { /* busy: once more */ }
+    }
+    return null;   // places are optional
+  }
+
+  // Landmark symbol on the 5" map: 1 stadium, 2 zoo, 3 tower, 4 castle / historic,
+  // 5 bridge, 6 museum, 7 park, 8 place of worship, 0 other (plain diamond).
+  function landmarkCategory(t) {
+    if (t.leisure === 'stadium') return 1;
+    if (t.tourism === 'zoo') return 2;
+    if (t.man_made === 'tower' || t.man_made === 'lighthouse') return 3;
+    if (t.historic) return 4;
+    if (t.bridge) return 5;
+    if (t.tourism === 'museum') return 6;
+    if (t.leisure === 'park' || t.tourism === 'theme_park') return 7;
+    if (t.amenity === 'place_of_worship') return 8;
+    return 0;
+  }
+
+  function buildPlaceEntries(elements, lat, lon, radiusKm) {
+    const cosL = Math.cos(lat * Math.PI / 180);
+    const xy = (la, lo) => [(lo - lon) * KM_PER_DEG * cosL, (la - lat) * KM_PER_DEG];
+    const inside = ([x, y]) => x * x + y * y <= radiusKm * radiusKm;
+    const insideAp = ([x, y]) => x * x + y * y <= Math.max(radiusKm, AIRPORT_KM) ** 2;
+    const pos = (el) => el.type === 'node' ? xy(el.lat, el.lon) : (el.center ? xy(el.center.lat, el.center.lon) : null);
+    const runways = [], airports = [], landmarks = [], towns = [];
+    for (const el of elements) {
+      const t = el.tags || {};
+      if (t.aeroway === 'runway' && el.geometry && el.geometry.length >= 2) {
+        const a = xy(el.geometry[0].lat, el.geometry[0].lon), z = xy(el.geometry[el.geometry.length - 1].lat, el.geometry[el.geometry.length - 1].lon);
+        if (Math.hypot(z[0] - a[0], z[1] - a[1]) >= 0.8 && (insideAp(a) || insideAp(z))) runways.push([a, z]);
+        continue;
+      }
+      const p = pos(el);
+      if (!p) continue;
+      if (t.aeroway === 'aerodrome') {
+        if (/^[A-Z]{3}$/.test(t.iata || '') && insideAp(p)) airports.push({ p, name: t.iata, kind: 0 });
+        continue;
+      }
+      if (!inside(p)) continue;
+      else if (t.place) towns.push({ p, name: t.name, kind: 2, rank: t.place === 'city' ? 0 : t.place === 'town' ? 1 : 2 });
+      else if (t.name) {
+        const cat = landmarkCategory(t);
+        // Places with their own symbol first, then the better known ones.
+        if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.wikipedia ? 0 : 1 });   // no symbol: left out
+      }
+    }
+    // Spread out: a place closer than `gap` km to one already taken is skipped.
+    const pick = (list, max, gap, taken) => {
+      const out = [];
+      for (const it of list) {
+        if (out.length >= max) break;
+        if (taken.concat(out).some((o) => Math.hypot(o.p[0] - it.p[0], o.p[1] - it.p[1]) < gap)) continue;
+        if (Math.hypot(it.p[0], it.p[1]) < 0.6) continue;     // home has its own marker
+        out.push(it);
+      }
+      return out;
+    };
+    const near = (a, b) => Math.hypot(a.p[0], a.p[1]) - Math.hypot(b.p[0], b.p[1]);
+    const ap = pick(airports.sort(near), 4, 2, []);
+    // Landmarks: one of each kind first, in this order of kinds (bridge, tower, stadium,
+    // place of worship, historic, museum, zoo, park), then a second of each, and so on,
+    // so two stadiums never push out the only tower.
+    const CAT_ORDER = [5, 3, 1, 8, 4, 6, 2, 7];
+    const byCat = CAT_ORDER.map((c) => landmarks.filter((l) => l.cat === c).sort((a, b) => a.rank - b.rank || near(a, b)));
+    const lm = [];
+    const gap = radiusKm * 0.12;
+    for (let round = 0; lm.length < 6 && byCat.some((l) => l.length); round++) {
+      for (const list of byCat) {
+        if (lm.length >= 6) break;
+        while (list.length) {   // the best one of this kind that is not too close to one taken
+          const it = list.shift();
+          if (Math.hypot(it.p[0], it.p[1]) < 0.6) continue;
+          if (ap.concat(lm).some((o) => Math.hypot(o.p[0] - it.p[0], o.p[1] - it.p[1]) < gap)) continue;
+          lm.push(it);
+          break;
+        }
+      }
+    }
+    const tw = [];   // town / district names: left out, they crowded the screen
+    const enc = new TextEncoder();
+    const entries = [];
+    const q = (v) => Math.max(-32767, Math.min(32767, Math.round(v * 100)));   // 10 m units
+    // Runways of the airports kept (within 5 km of one), nearest airports first.
+    const rwys = runways.filter(([a, z]) => ap.some((o) => Math.hypot(o.p[0] - (a[0] + z[0]) / 2, o.p[1] - (a[1] + z[1]) / 2) < 5));
+    for (const [a, z] of rwys.slice(0, 16)) {
+      const raw = new Uint8Array(8), dv = new DataView(raw.buffer);
+      dv.setInt16(0, q(a[0]), true); dv.setInt16(2, q(a[1]), true); dv.setInt16(4, q(z[0]), true); dv.setInt16(6, q(z[1]), true);
+      entries.push({ type: 4, n: 2, raw });
+    }
+    for (const it of ap.concat(lm, tw)) {
+      let name = enc.encode(it.name);
+      if (name.length > 23) {                                   // cut on a character boundary
+        let s = it.name;
+        while (enc.encode(s + '.').length > 23) s = s.slice(0, -1);
+        name = enc.encode(s.trimEnd() + '.');
+      }
+      const words = 2 + Math.ceil(name.length / 4);
+      const raw = new Uint8Array(words * 4), dv = new DataView(raw.buffer);
+      dv.setInt16(0, q(it.p[0]), true); dv.setInt16(2, q(it.p[1]), true);
+      raw[4] = it.kind; raw[5] = name.length; raw[6] = it.cat || 0;
+      raw.set(name, 8);
+      entries.push({ type: 5, n: words, raw });
+    }
+    return entries;
+  }
+
+  // Built-up areas for the 5" map: OSM residential / commercial / industrial land use,
+  // only their bounding boxes, rasterised into a coarse grid of how much of each cell
+  // is town (0..15). Map entry type 6: word 0 = [N, 0, radius x10 (u16)], then N*N
+  // nibbles, low nibble first, rows south to north, cells west to east.
+  // Forest and woodland (map entry type 7, same grid as type 6): the polygons are
+  // rasterised properly (even-odd, 4x4 samples per cell), forests are large and their
+  // bounding boxes would paint whole valleys green.
+  // Built-up land use (bounding boxes only) and forests (full outlines) in one request:
+  // Overpass allows each address only a couple of requests at a time, and separate
+  // requests next to the map's were being turned away.
+  async function fetchCover(lat, lon, radiusKm) {
+    const b = bboxFor(lat, lon, radiusKm);
+    const q = '[out:json][timeout:50];way["landuse"~"^(residential|commercial|industrial|retail)$"]' + b + ';out ids bb;' +
+      '(way["landuse"="forest"]' + b + ';way["natural"="wood"]' + b +
+      ';relation["landuse"="forest"]' + b + ';relation["natural"="wood"]' + b + ';);out skel geom qt;';
+    for (let round = 0; round < 2; round++) {
+      try {
+        const els = await overpassRace(q, 55000, null);
+        return {
+          urban: els.filter((e) => e.type === 'way' && !e.geometry),
+          forest: els.filter((e) => e.type === 'relation' || (e.type === 'way' && e.geometry)),
+        };
+      } catch (_) { /* busy: once more */ }
+    }
+    return null;
+  }
+  function buildForestEntry(elements, lat, lon, radiusKm) {
+    const N = 48, SS = 4, M = N * SS, R = radiusKm, cosL = Math.cos(lat * Math.PI / 180);
+    const toX = (lo) => ((lo - lon) * KM_PER_DEG * cosL + R) / (2 * R) * M;
+    const toY = (la) => ((la - lat) * KM_PER_DEG + R) / (2 * R) * M;
+    const edges = [];   // [x0, y0, x1, y1] in sample units
+    const addLine = (g) => {
+      if (!g || g.length < 2) return;
+      for (let i = 1; i < g.length; i++) {
+        const a = g[i - 1], z = g[i];
+        if (!a || !z) continue;
+        const y0 = toY(a.lat), y1 = toY(z.lat);
+        if (y0 === y1) continue;
+        edges.push([toX(a.lon), y0, toX(z.lon), y1]);
+      }
+    };
+    // A way that is also a member of a forest relation would cancel itself out (even-odd).
+    const inRel = new Set();
+    for (const el of elements) if (el.type === 'relation' && el.members) for (const m of el.members) if (m.type === 'way') inRel.add(m.ref);
+    for (const el of elements) {
+      if (el.type === 'way') {
+        const g = el.geometry;
+        if (inRel.has(el.id)) continue;
+        if (g && g.length > 2 && g[0].lat === g[g.length - 1].lat && g[0].lon === g[g.length - 1].lon) addLine(g);
+      } else if (el.type === 'relation' && el.members) {
+        for (const m of el.members) if (m.type === 'way') addLine(m.geometry);
+      }
+    }
+    if (!edges.length) return null;
+    // Bucket edges by sample row so each row only looks at the edges crossing it.
+    const rows = Array.from({ length: M }, () => []);
+    for (const e of edges) {
+      const lo = Math.max(0, Math.ceil(Math.min(e[1], e[3]) - 0.5)), hi = Math.min(M - 1, Math.ceil(Math.max(e[1], e[3]) - 0.5) - 1);
+      for (let r = lo; r <= hi; r++) rows[r].push(e);
+    }
+    const cov = new Float32Array(N * N);
+    for (let r = 0; r < M; r++) {
+      const yc = r + 0.5, xs = [];
+      for (const [x0, y0, x1, y1] of rows[r]) {
+        if ((y0 <= yc) !== (y1 <= yc)) xs.push(x0 + (yc - y0) * (x1 - x0) / (y1 - y0));
+      }
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const a = Math.max(0, Math.ceil(xs[k] - 0.5)), z = Math.min(M - 1, Math.ceil(xs[k + 1] - 0.5) - 1);
+        for (let c = a; c <= z; c++) cov[((r / SS) | 0) * N + ((c / SS) | 0)] += 1 / (SS * SS);
+      }
+    }
+    const raw = new Uint8Array(4 + N * N / 2), dv = new DataView(raw.buffer);
+    raw[0] = N; dv.setUint16(2, Math.round(R * 10), true);
+    let any = false;
+    for (let k = 0; k < N * N; k++) {
+      const v = Math.max(0, Math.min(15, Math.round(cov[k] / 0.7 * 15)));   // 70 % wooded = full forest
+      if (v) any = true;
+      raw[4 + (k >> 1)] |= v << ((k & 1) * 4);
+    }
+    return any ? { type: 7, n: raw.length / 4, raw } : null;
+  }
+
+  function buildUrbanEntry(elements, lat, lon, radiusKm) {
+    const N = 48, R = radiusKm, cell = 2 * R / N, cosL = Math.cos(lat * Math.PI / 180);
+    const cov = new Float32Array(N * N);
+    for (const el of elements) {
+      const bb = el.bounds;
+      if (!bb) continue;
+      const x0 = (bb.minlon - lon) * KM_PER_DEG * cosL, x1 = (bb.maxlon - lon) * KM_PER_DEG * cosL;
+      const y0 = (bb.minlat - lat) * KM_PER_DEG, y1 = (bb.maxlat - lat) * KM_PER_DEG;
+      if ((x1 - x0) * (y1 - y0) > 25) continue;              // huge boxes (whole districts) are not town density
+      const i0 = Math.max(0, Math.floor((x0 + R) / cell)), i1 = Math.min(N - 1, Math.floor((x1 + R) / cell));
+      const j0 = Math.max(0, Math.floor((y0 + R) / cell)), j1 = Math.min(N - 1, Math.floor((y1 + R) / cell));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const cx0 = -R + i * cell, cy0 = -R + j * cell;
+        const ox = Math.min(x1, cx0 + cell) - Math.max(x0, cx0), oy = Math.min(y1, cy0 + cell) - Math.max(y0, cy0);
+        if (ox > 0 && oy > 0) cov[j * N + i] += (ox * oy) / (cell * cell);
+      }
+    }
+    const raw = new Uint8Array(4 + N * N / 2), dv = new DataView(raw.buffer);
+    raw[0] = N; dv.setUint16(2, Math.round(R * 10), true);
+    let any = false;
+    for (let k = 0; k < N * N; k++) {
+      const v = Math.max(0, Math.min(15, Math.round(cov[k] / 0.6 * 15)));   // 60 % covered = fully town
+      if (v) any = true;
+      raw[4 + (k >> 1)] |= v << ((k & 1) * 4);
+    }
+    return any ? { type: 6, n: raw.length / 4, raw } : null;
+  }
+
+  // Appends extra entries to a map blob (count at offset 12).
+  function appendEntries(blob, entries) {
+    const extra = entries.reduce((s, e) => s + 3 + e.raw.length, 0);
+    if (!entries.length || blob.length + extra > MAP_MAX_BYTES) return blob;
+    const out = new Uint8Array(blob.length + extra);
+    out.set(blob);
+    const dv = new DataView(out.buffer);
+    dv.setUint16(12, dv.getUint16(12, true) + entries.length, true);
+    let o = blob.length;
+    for (const e of entries) { out[o] = e.type; dv.setUint16(o + 1, e.n, true); out.set(e.raw, o + 3); o += 3 + e.raw.length; }
+    out.lakes = blob.lakes;
+    out.places = entries.filter((e) => e.type === 5).length;
+    return out;
+  }
+
+  function simplify(pts, tol) {          // Douglas-Peucker, iterative
+    const n = pts.length;
+    if (n < 3) return pts;
+    const keep = new Uint8Array(n); keep[0] = keep[n - 1] = 1;
+    const stack = [[0, n - 1]];
+    while (stack.length) {
+      const [a, b] = stack.pop();
+      const [ax, ay] = pts[a], [bx, by] = pts[b];
+      const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+      let maxd = 0, idx = -1;
+      for (let i = a + 1; i < b; i++) {
+        const [px, py] = pts[i];
+        let d;
+        if (len2 === 0) d = Math.hypot(px - ax, py - ay);
+        else { const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)); d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy)); }
+        if (d > maxd) { maxd = d; idx = i; }
+      }
+      if (maxd > tol && idx > 0) { keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+    }
+    return pts.filter((_, i) => keep[i]);
+  }
+
+  // ---- Geometry helpers (all in km, x = east, y = north, origin = chosen location) ----
+  const TAU = Math.PI * 2;
+
+  // Splits a polyline into the parts that lie inside the circle, cutting exactly at the circle.
+  function clipCircle(pts, R) {
+    const out = [];
+    let cur = null;
+    const inside = (p) => Math.hypot(p[0], p[1]) <= R;
+    let prev = pts[0];
+    if (inside(prev)) cur = { pts: [prev], entry: false, exit: false };
+    for (let i = 1; i < pts.length; i++) {
+      const a = prev, b = pts[i];
+      const dx = b[0] - a[0], dy = b[1] - a[1];
+      const A = dx * dx + dy * dy, B = 2 * (a[0] * dx + a[1] * dy), C = a[0] * a[0] + a[1] * a[1] - R * R;
+      const ts = [];
+      if (A > 1e-12) {
+        const D = B * B - 4 * A * C;
+        if (D > 0) {
+          const sq = Math.sqrt(D), t1 = (-B - sq) / (2 * A), t2 = (-B + sq) / (2 * A);
+          if (t1 > 0 && t1 < 1) ts.push(t1);
+          if (t2 > 0 && t2 < 1) ts.push(t2);
+        }
+      }
+      let state = cur !== null;
+      for (const t of ts) {
+        const ip = [a[0] + dx * t, a[1] + dy * t];
+        if (state) { cur.pts.push(ip); cur.exit = true; out.push(cur); cur = null; state = false; }
+        else { cur = { pts: [ip], entry: true, exit: false }; state = true; }
+      }
+      if (state && cur) cur.pts.push(b);
+      prev = b;
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  // Joins coastline ways that share an end node (direction is preserved: land on the left).
+  function stitchCoast(parts) {
+    const byStart = new Map();
+    parts.forEach((p, i) => byStart.set(p.k0, i));
+    const hasPred = new Set();
+    parts.forEach((p) => { if (byStart.has(p.k1)) hasPred.add(byStart.get(p.k1)); });
+    const used = new Array(parts.length).fill(false), chains = [];
+    const follow = (i) => {
+      const pts = parts[i].pts.slice();
+      used[i] = true;
+      let k = parts[i].k1;
+      while (byStart.has(k)) {
+        const j = byStart.get(k);
+        if (used[j]) break;
+        used[j] = true;
+        for (let q = 1; q < parts[j].pts.length; q++) pts.push(parts[j].pts[q]);
+        k = parts[j].k1;
+      }
+      return pts;
+    };
+    parts.forEach((p, i) => { if (!used[i] && !hasPred.has(i)) chains.push(follow(i)); });
+    parts.forEach((p, i) => { if (!used[i]) chains.push(follow(i)); });
+    return chains;
+  }
+
+  const polyLen = (s) => { let len = 0; for (let i = 1; i < s.length; i++) len += Math.hypot(s[i][0] - s[i - 1][0], s[i][1] - s[i - 1][1]); return len; };
+  const signedArea = (r) => { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+
+  // Sea polygons: the coastline keeps the water on its right, so each open piece is closed by
+  // following the circle clockwise to the next piece. Closed coastlines (islands) become holes.
+  function buildSeaRings(open, loops, R) {
+    const ang = (p) => Math.atan2(p[1], p[0]);
+    const rings = [];
+    const used = new Array(open.length).fill(false);
+    for (let s = 0; s < open.length; s++) {
+      if (used[s]) continue;
+      const ring = [];
+      let i = s;
+      for (let guard = 0; guard <= open.length; guard++) {
+        used[i] = true;
+        const p = open[i];
+        for (const q of p) ring.push(q);
+        const ea = ang(p[p.length - 1]);
+        let best = -1, bestD = Infinity;
+        for (let j = 0; j < open.length; j++) {
+          if (used[j] && j !== s) continue;
+          const d = (((ea - ang(open[j][0])) % TAU) + TAU) % TAU;
+          if (d < bestD) { bestD = d; best = j; }
+        }
+        const steps = Math.ceil(bestD / (5 * Math.PI / 180));
+        for (let k = 1; k < steps; k++) { const a = ea - bestD * k / steps; ring.push([R * Math.cos(a), R * Math.sin(a)]); }
+        if (best === s || best < 0) break;
+        i = best;
+      }
+      if (ring.length >= 3) rings.push(ring);
+    }
+    const ccw = loops.filter((l) => signedArea(l) > 0), cw = loops.filter((l) => signedArea(l) <= 0);
+    if (open.length) {
+      for (const l of loops) rings.push(l);
+    } else if (ccw.length) {
+      const disk = []; for (let k = 0; k < 72; k++) { const a = -TAU * k / 72; disk.push([R * Math.cos(a), R * Math.sin(a)]); }
+      rings.push(disk); for (const l of ccw) rings.push(l);
+    } else {
+      for (const l of cw) rings.push(l);
+    }
+    return rings;
+  }
+
+  // Lakes and reservoirs: closed ways, or multipolygon relations whose member ways are
+  // joined end to end into rings. Points outside the downloaded box are skipped (the
+  // device clips the fill to the radar disc anyway).
+  const isWater = (t) => t && (t.natural === 'water' || t.landuse === 'reservoir');
+  function waterRings(elements, toKm) {
+    const rings = [];
+    const geomPts = (geom) => geom.filter((g) => g).map(toKm);
+    const joinRings = (segs) => {
+      const out = [], used = new Array(segs.length).fill(false);
+      const same = (a, b) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+      for (let s = 0; s < segs.length; s++) {
+        if (used[s] || segs[s].length < 2) continue;
+        used[s] = true;
+        let ring = segs[s].slice();
+        for (let guard = 0; guard < segs.length && !same(ring[0], ring[ring.length - 1]); guard++) {
+          const end = ring[ring.length - 1];
+          let found = false;
+          for (let j = 0; j < segs.length; j++) {
+            if (used[j] || segs[j].length < 2) continue;
+            const sj = segs[j];
+            if (same(sj[0], end)) { ring = ring.concat(sj.slice(1)); }
+            else if (same(sj[sj.length - 1], end)) { ring = ring.concat(sj.slice(0, -1).reverse()); }
+            else continue;
+            used[j] = true; found = true; break;
+          }
+          if (!found) break;   // open (cut by the download box): close it straight
+        }
+        out.push(ring);
+      }
+      return out;
+    };
+    for (const el of elements) {
+      if (!isWater(el.tags)) continue;
+      if (el.type === 'way' && Array.isArray(el.geometry)) {
+        const pts = geomPts(el.geometry);
+        if (pts.length >= 4) rings.push(pts);
+      } else if (el.type === 'relation' && Array.isArray(el.members)) {
+        const segs = el.members.filter((m) => m.type === 'way' && Array.isArray(m.geometry))
+          .map((m) => geomPts(m.geometry));
+        for (const r of joinRings(segs)) if (r.length >= 4) rings.push(r);
+      }
+    }
+    return rings;
+  }
+
+  function buildMapBlob(elements, lat, lon, withWater, radiusKm) {
+    const cosL = Math.cos(lat * Math.PI / 180), R = Math.min(radiusKm, MAP_MAX_KM);
+    const roads = [];                    // {type:1, pts}
+    const coastParts = [];               // raw ways split at points outside the downloaded box
+    for (const el of elements) {
+      if (el.type !== 'way' || !Array.isArray(el.geometry) || isWater(el.tags)) continue;
+      const coastline = el.tags && el.tags.natural === 'coastline';
+      let cur = [], keys = [];
+      const flush = () => {
+        if (cur.length >= 2) {
+          if (coastline) coastParts.push({ pts: cur, k0: keys[0], k1: keys[keys.length - 1] });
+          else for (const c of clipCircle(cur, R)) if (c.pts.length >= 2) roads.push({ type: 1, hw: el.tags && el.tags.highway, pts: c.pts });
+        }
+        cur = []; keys = [];
+      };
+      for (const g of el.geometry) {
+        if (!g) { flush(); continue; }   // point outside the requested box
+        cur.push([(g.lon - lon) * KM_PER_DEG * cosL, (g.lat - lat) * KM_PER_DEG]);
+        keys.push(g.lat.toFixed(7) + ',' + g.lon.toFixed(7));
+      }
+      flush();
+    }
+
+    // Coast: stitch, clip to the circle, separate open pieces from closed islands.
+    const openPieces = [], loops = [], coastLines = [];
+    for (const chain of stitchCoast(coastParts)) {
+      const closed = chain.length > 3 && Math.hypot(chain[0][0] - chain[chain.length - 1][0], chain[0][1] - chain[chain.length - 1][1]) < 1e-6;
+      const pieces = clipCircle(chain, R);
+      if (closed && pieces.length > 1 && !pieces[0].entry && !pieces[pieces.length - 1].exit) {
+        const last = pieces.pop(), first = pieces.shift();
+        pieces.push({ pts: last.pts.concat(first.pts.slice(1)), entry: last.entry, exit: first.exit });
+      }
+      for (const c of pieces) {
+        if (c.pts.length < 2) continue;
+        if (closed && pieces.length === 1 && !c.entry && !c.exit) loops.push(c.pts);
+        else if (c.entry && c.exit) openPieces.push(c.pts);
+        else coastLines.push(c.pts);     // data ends inside the circle: outline only
+      }
+    }
+
+    const COAST_PTS = 1800;              // share of the line budget reserved for the coast
+    const roadPrio = (r) => r.hw === 'motorway' ? 1 : 2;
+
+    // 1) Coast + sea: simplify just enough that the outline and the sea polygons fit.
+    let tol = 0.03, coast = null;
+    for (let iter = 0; iter < 10; iter++, tol *= 1.4) {
+      const lines = [], simpleOpen = [], simpleLoops = [];
+      let pts = 0;
+      const add = (s) => { lines.push({ type: 0, pts: s }); pts += s.length; };
+      for (const c of openPieces) { const s = simplify(c, tol); if (s.length >= 2) simpleOpen.push(s); if (polyLen(s) >= 0.15) add(s); }
+      for (const c of loops) { const s = simplify(c, tol); if (s.length >= 4 && polyLen(s) >= 0.6) { simpleLoops.push(s.slice(0, -1)); add(s); } }
+      for (const c of coastLines) { const s = simplify(c, tol); if (s.length >= 2 && polyLen(s) >= 0.15) add(s); }
+      simpleLoops.sort((x, y) => Math.abs(signedArea(y)) - Math.abs(signedArea(x)));
+      const rings = withWater ? buildSeaRings(simpleOpen, simpleLoops.slice(0, 50), R) : [];
+      const ringPts = rings.reduce((n, r) => n + r.length, 0);
+      coast = { lines, pts, rings, ringPts };
+      if (pts <= COAST_PTS && ringPts <= MAP_MAX_RING_POINTS) break;
+    }
+    if (coast.ringPts > MAP_MAX_RING_POINTS) { coast.rings = []; coast.ringPts = 0; }   // sea fill does not fit: outline only
+    while (coast.pts > MAP_MAX_POINTS && coast.lines.length) {                             // extreme coastline: drop the shortest pieces
+      coast.lines.sort((x, y) => polyLen(y.pts) - polyLen(x.pts));
+      coast.pts -= coast.lines.pop().pts.length;
+    }
+
+    // 2) Lakes: largest first, as many as fit in their share of the budget.
+    const LAKE_PTS = 900;
+    const lakes = [];
+    let lakePts = 0;
+    if (withWater) {
+      const toKm = (g) => [(g.lon - lon) * KM_PER_DEG * cosL, (g.lat - lat) * KM_PER_DEG];
+      const cand = [];
+      for (const r of waterRings(elements, toKm)) {
+        const area = Math.abs(signedArea(r));
+        if (area < 0.03) continue;                                        // smaller than ~170 x 170 m
+        if (!r.some((p) => Math.hypot(p[0], p[1]) <= R * 1.05)) continue;  // not on the disc
+        cand.push({ area, pts: r });
+      }
+      cand.sort((a, b) => b.area - a.area);
+      for (const c of cand) {
+        let s = simplify(c.pts.concat([c.pts[0]]), Math.max(tol, 0.03)).slice(0, -1);
+        if (s.length < 3) continue;
+        if (lakePts + s.length > LAKE_PTS) continue;
+        lakes.push(s); lakePts += s.length;
+      }
+    }
+
+    // 3) Roads: motorways first, then trunk roads, longest first, as many as fit.
+    const roadLines = [];
+    for (const r of roads) {
+      const s = simplify(r.pts, Math.max(tol, 0.05));
+      if (s.length >= 2 && polyLen(s) >= 0.4) roadLines.push({ type: 1, p: roadPrio(r), len: polyLen(s), pts: s });
+    }
+    roadLines.sort((x, y) => x.p - y.p || y.len - x.len);
+    const lines = coast.lines.slice();
+    let linePts = coast.pts;
+    const bytesFor = (nl, lp) => 14 + (nl + coast.rings.length + lakes.length) * 3 + (lp + coast.ringPts + lakePts) * 4;
+    for (const l of roadLines) {
+      if (linePts + l.pts.length > MAP_MAX_POINTS || bytesFor(lines.length + 1, linePts + l.pts.length) > MAP_MAX_BYTES) continue;
+      lines.push(l); linePts += l.pts.length;
+    }
+    const built = { lines, rings: coast.rings, linePts, ringPts: coast.ringPts };
+    if (!built.lines.length && !lakes.length) return null;    // nothing to draw here
+    // Draw order on the device: roads, then coast lines (on top of the sea fill), rings are masked separately.
+    built.lines.sort((a, b) => b.type - a.type);
+    const all = built.lines.map((l) => ({ type: l.type, pts: l.pts }))
+      .concat(built.rings.map((r) => ({ type: 2, pts: r })))
+      .concat(lakes.map((r) => ({ type: 3, pts: r })));   // type 3: lake (filled + outlined, older firmware ignores it)
+    const bytes = 14 + all.length * 3 + (built.linePts + built.ringPts + lakePts) * 4;
+    const buf = new ArrayBuffer(bytes), dv = new DataView(buf);
+    dv.setUint8(0, 0x50); dv.setUint8(1, 0x4D); dv.setUint8(2, built.rings.length ? 2 : 1); dv.setUint8(3, 0);
+    dv.setInt32(4, Math.round(lat * 1e7), true); dv.setInt32(8, Math.round(lon * 1e7), true);
+    dv.setUint16(12, all.length, true);
+    let o = 14;
+    const q = (v) => Math.max(-32767, Math.min(32767, Math.round(v * 100)));   // 10 m units
+    for (const l of all) {
+      dv.setUint8(o, l.type); dv.setUint16(o + 1, l.pts.length, true); o += 3;
+      for (const [x, y] of l.pts) { dv.setInt16(o, q(x), true); dv.setInt16(o + 2, q(y), true); o += 4; }
+    }
+    const out = new Uint8Array(buf);
+    out.lakes = lakes.length;
+    return out;
+  }
+
+  async function uploadMap(blob, onProgress) {
+    await ensureSetupUsb(null);
+    const ack = async (cmd, timeout) => {
+      const r = await request(cmd, ['MAPACK', 'ERR'], timeout);
+      if (r.tag === 'ERR') throw new Error(r.data.msg || 'map-error');
+      return r;
+    };
+    await ack('PR:MAPBEGIN ' + JSON.stringify({ len: blob.length, crc: crc32(blob) }), 5000);
+    const CH = 270;
+    for (let off = 0, seq = 1; off < blob.length; off += CH, seq++) {
+      const part = blob.subarray(off, Math.min(off + CH, blob.length));
+      let bin = ''; for (let i = 0; i < part.length; i++) bin += String.fromCharCode(part[i]);
+      const r = await ack('PR:MAP ' + seq + ' ' + btoa(bin), 5000);
+      if (r.data.seq !== seq) throw new Error('map-seq');
+      if (onProgress) onProgress(Math.min(100, Math.round(((off + part.length) / blob.length) * 100)));
+    }
+    const done = await request('PR:MAPEND', ['OK', 'ERR'], 10000);
+    if (done.tag === 'ERR') throw new Error(done.data.msg || 'map-error');
+  }
+
+  // Returns a short note for the save message ('' when the map step was skipped).
+  function updateMapNote() {
+    const label = parseInt($('#opt-map').value, 10) || 0, r = mapRadiusFor(label);
+    $('#map-note').textContent = (label
+      ? 'Cihazda en çok ' + label + ' km menzile (ekran kenarı ' + (MAP_RANGES[label]).toFixed(1).replace('.', ',') + ' km) geçecekseniz bu seçim yeter: harita, ekranın kenarını da dolduracak şekilde konumunuzun etrafında ' + String(r).replace('.', ',') + ' km yarıçapla indirilir ve daha küçük menzillerde de çizilir. '
+      : '"Haritasız" seçerseniz hiçbir harita verisi indirilmez ve cihazdaki eski harita silinir. ') +
+      'Cihazdaki en geniş menzil (ekranda 25 km, kenarı yaklaşık 33 km) her zaman haritasız çalışır. Konumu ya da bu seçimi değiştirdiğinizde harita yeniden indirilir.';
+  }
+
+  async function syncMap(lat, lon, msg) {
+    const label = parseInt($('#opt-map').value, 10) || 0, radius = mapRadiusFor(label), want = radius > 0;
+    try { localStorage.setItem('mapRange', String(label)); } catch (_) { /* optional */ }
+    const dev = state.device || {};
+    if (dev.map === undefined) return want ? ' Harita için önce 3. adımdan yazılımı güncelleyin.' : '';
+    if (!want) {
+      if (dev.map > 0) { try { await request('PR:MAPCLEAR', ['OK', 'ERR'], 5000); dev.map = 0; } catch (_) { /* optional */ } }
+      return '';
+    }
+    try {
+      setMsg(msg, 'info', 'Harita indiriliyor… (birkaç saniye sürebilir)');
+      // 5" board: places are fetched at the same time as the map.
+      const wantPlaces = dev.hw === 'ws5' || dev.hw === 'ws5b';
+      let placesMissing = false;
+      const placesP = wantPlaces ? fetchPlaces(lat, lon, radius) : Promise.resolve(null);
+      const elements = await fetchOverpass(lat, lon, radius, (t) => setMsg(msg, 'info', t));
+      // After the map, so no more than two requests run at once.
+      const coverP = wantPlaces ? fetchCover(lat, lon, radius) : Promise.resolve(null);
+      const water = (dev.mapv || 1) >= 2;
+      let blob = buildMapBlob(elements, lat, lon, water, radius);
+      if (!blob) return ' Bu konumda çizilecek kıyı ya da ana yol bulunamadı, harita eklenmedi.';
+      // 5" board: airports, landmarks and town names on the map too.
+      if (wantPlaces) {
+        setMsg(msg, 'info', 'Önemli yerler, yerleşim ve ormanlar ekleniyor…');
+        const [places, cover] = await Promise.all([placesP, coverP]);
+        const urban = cover && cover.urban, forest = cover && cover.forest;
+        placesMissing = !places;
+        const extra = places ? buildPlaceEntries(places, lat, lon, radius) : [];
+        const town = urban ? buildUrbanEntry(urban, lat, lon, radius) : null;
+        if (town) extra.unshift(town);
+        let woods = null;
+        try { woods = forest ? buildForestEntry(forest, lat, lon, radius) : null; } catch (_) { /* optional */ }
+        if (woods) extra.unshift(woods);
+        if (extra.length) blob = appendEntries(blob, extra);
+      }
+      await uploadMap(blob, (p) => setMsg(msg, 'info', 'Harita cihaza yazılıyor… %' + p));
+      dev.map = blob.length;
+      const lakeNote = !water ? '' : (blob.lakes ? ', ' + blob.lakes + ' göl' : ', bu alanda göl yok');
+      const placeNote = blob.places ? ', ' + blob.places + ' önemli yer' : '';
+      const missNote = placesMissing ? ' Önemli yerler ve havalimanları bu sefer alınamadı (harita sunucuları yoğun); birkaç dakika sonra tekrar "Cihaza kaydet" deyin.' : '';
+      return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB' + lakeNote + placeNote + ').' +
+        (water ? '' : ' Deniz dolgusu için önce 3. adımdan yazılımı güncelleyin.') + missNote;
+    } catch (e) {
+      const m = e && e.message ? e.message : '';
+      const why = ERRORS[m] || (m === 'too-big' ? 'çok ayrıntılı' : 'harita sunucuları şu an yanıt vermiyor' + (e && e.reasons ? ' — ' + e.reasons.slice(-2).join('; ') : ''));
+      return ' Harita eklenemedi (' + why + '); diğer ayarlar kaydedildi. Birkaç dakika sonra tekrar "Cihaza kaydet" deyin; harita sunucuları yoğun olabiliyor.';
+    }
+  }
+
+  // Ground heights from the AWS Open Data terrain tiles (Terrarium PNG, no rate limit):
+  // height = R*256 + G + B/256 - 32768 metres. Zoom 10 is ~115 m per pixel.
+  async function elevationFromTiles(pts, onProgress) {
+    const Z = 10, n = 2 ** Z;
+    const px = (lat, lon) => {
+      const s = Math.sin(lat * Math.PI / 180);
+      return [((lon + 180) / 360) * n * 256, (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n * 256];
+    };
+    const need = new Map();
+    for (const [la, lo] of pts) {
+      const [x, y] = px(la, lo);
+      const key = Math.floor(x / 256) + '/' + Math.floor(y / 256);
+      need.set(key, null);
+    }
+    if (need.size > 16) throw new Error('alan çok geniş');
+    let done = 0;
+    await Promise.all([...need.keys()].map(async (key) => {
+      const [tx, ty] = key.split('/');
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/' + Z + '/' + tx + '/' + ty + '.png';
+      await img.decode();
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 256;
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      g.drawImage(img, 0, 0);
+      need.set(key, g.getImageData(0, 0, 256, 256).data);
+      onProgress('Arazi yükseklikleri indiriliyor… %' + Math.round((++done / need.size) * 100));
+    }));
+    return pts.map(([la, lo]) => {
+      const [x, y] = px(la, lo);
+      const tx = Math.floor(x / 256), ty = Math.floor(y / 256);
+      const d = need.get(tx + '/' + ty);
+      const ix = Math.min(255, Math.floor(x - tx * 256)), iy = Math.min(255, Math.floor(y - ty * 256));
+      const i = (iy * 256 + ix) * 4;
+      return Math.round(d[i] * 256 + d[i + 1] + d[i + 2] / 256 - 32768);
+    });
+  }
+
+  // Fallback: Open-Meteo elevation API. Its free tier counts every coordinate, so ask
+  // slowly in small batches and wait when it answers 429 (too many requests).
+  async function elevationFromOpenMeteo(pts, onProgress) {
+    const out = [];
+    const BATCH = 50;
+    for (let i = 0; i < pts.length; i += BATCH) {
+      const part = pts.slice(i, i + BATCH);
+      const url = 'https://api.open-meteo.com/v1/elevation?latitude=' + part.map((p) => p[0].toFixed(5)).join(',') +
+        '&longitude=' + part.map((p) => p[1].toFixed(5)).join(',');
+      let j = null;
+      for (let attempt = 0; attempt < 6 && !j; attempt++) {
+        const r = await fetch(url);
+        if (r.status === 429) {
+          onProgress('Arazi sunucusu yoğun, bekleniyor… (%' + Math.round((out.length / pts.length) * 100) + ')');
+          await sleep(10000 * (attempt + 1));
+          continue;
+        }
+        if (!r.ok) throw new Error('sunucu ' + r.status);
+        j = await r.json();
+      }
+      if (!j) throw new Error('sunucu çok yoğun (429), birkaç dakika sonra tekrar deneyin');
+      for (const v of j.elevation || []) out.push(Math.round(Number.isFinite(v) ? v : 0));
+      onProgress('Arazi yükseklikleri indiriliyor… %' + Math.round((out.length / pts.length) * 100));
+      await sleep(1500);
+    }
+    return out;
+  }
+
+  // 3D terrain: an N x N grid of ground heights (terrain tiles, else Open-Meteo) over
+  // the same square as the map, sent row by row (firmware terrain.h).
+  async function syncElevation(lat, lon, msg) {
+    const dev = state.device || {};
+    if (!dev.elevv) return '';
+    const label = parseInt($('#opt-map').value, 10) || 0;
+    const half = mapRadiusFor(label);
+    if (!(half > 0)) {
+      if (dev.elev) { try { await request('PR:ELEVCLEAR', ['OK', 'ERR'], 5000); dev.elev = false; } catch (_) { /* optional */ } }
+      return '';
+    }
+    const N = 25;
+    try {
+      setMsg(msg, 'info', 'Arazi yükseklikleri indiriliyor…');
+      const cosl = Math.cos(lat * Math.PI / 180);
+      const pts = [];
+      for (let r = 0; r < N; r++) {
+        for (let c = 0; c < N; c++) {
+          const y = -half + (2 * half * r) / (N - 1), x = -half + (2 * half * c) / (N - 1);
+          pts.push([lat + y / 111, lon + x / (111 * cosl)]);
+        }
+      }
+      let h;
+      try {
+        h = await elevationFromTiles(pts, (t) => setMsg(msg, 'info', t));
+      } catch (tileErr) {
+        note('Arazi resimleri alınamadı (' + (tileErr && tileErr.message) + '), Open-Meteo deneniyor');
+        h = await elevationFromOpenMeteo(pts, (t) => setMsg(msg, 'info', t));
+      }
+      if (h.length !== N * N) throw new Error('eksik veri');
+      const ack = async (cmd) => {
+        const r = await request(cmd, ['ELEVACK', 'ERR'], 5000);
+        if (r.tag === 'ERR') throw new Error(r.data.msg || 'elev');
+        return r;
+      };
+      await ensureSetupUsb(null);
+      await ack('PR:ELEVBEGIN ' + JSON.stringify({ n: N, half: Math.round(half * 100) / 100, lat, lon }));
+      for (let r = 0; r < N; r++) await ack('PR:ELEVROW ' + r + ' ' + h.slice(r * N, (r + 1) * N).join(','));
+      const done = await request('PR:ELEVEND', ['OK', 'ERR'], 5000);
+      if (done.tag === 'ERR') throw new Error(done.data.msg || 'elev');
+      dev.elev = true;
+      return ' Arazi yükseklikleri de yüklendi (en yüksek nokta ' + Math.max(...h) + ' m).';
+    } catch (e) {
+      return ' Arazi yükseklikleri eklenemedi (' + (e && e.message ? e.message : e) + ').';
+    }
+  }
+
+  async function save(ev) {
+    ev.preventDefault();
+    const msg = $('#msg-save'), btn = $('#btn-save');
+    const lat = parseFloat($('#lat').value), lon = parseFloat($('#lon').value);
+    if (!isFinite(lat) || !isFinite(lon)) { setMsg(msg, 'err', 'Konumu seçin: şehir arayın, “Konumumu kullan”a basın ya da enlem/boylam girin.'); return; }
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) { setMsg(msg, 'err', ERRORS.bad_location); return; }
+
+    const ssid = $('#ssid').value;
+    const pass = $('#pass').value;
+    // WiFi is optional here: without it the device runs on the USB bridge (step 4).
+    if (ssid.trim() && pass && pass.length < 8) { setMsg(msg, 'err', ERRORS.bad_wifi_password); return; }
+
+    const payload = {
+      lat, lon,
+      tz: state.zones[$('#tz').value],
+      clock: $('#opt-clock').checked,
+      miles: $('#opt-miles').checked,
+      runways: $('#opt-runways').checked,
+    };
+    if (!$('#opt-weather').disabled) payload.weather = $('#opt-weather').checked;
+    if (!$('#opt-rings').disabled) payload.rings = $('#opt-rings').checked;
+    // Unchanged network and no new password: leave WiFi alone (the field only shows the current name).
+    const sameNet = state.device && state.device.wifi && ssid === state.device.ssid && !pass;
+    if (ssid.trim() && !sameNet) { payload.ssid = ssid; payload.pass = pass; }
+
+    btn.disabled = true;
+    let mapNote = '';
+    try { mapNote = await syncMap(lat, lon, msg); } catch (_) { mapNote = ' Harita eklenemedi.'; }
+    try { mapNote += await syncElevation(lat, lon, msg); } catch (_) { /* optional */ }
+    setMsg(msg, 'info', payload.ssid ? 'Kaydediliyor ve WiFi’ye bağlanılıyor… (en fazla 20 saniye)' : 'Kaydediliyor…');
+    try {
+      if (payload.ssid) state.expectingDrop = true;
+      const r = await request('PR:SET ' + JSON.stringify(payload), ['OK', 'ERR'], 45000);
+      if (r.tag === 'ERR') {
+        state.expectingDrop = false;
+        setMsg(msg, 'err', ERRORS[r.data.msg] || ('Cihaz hata verdi: ' + r.data.msg));
+      } else if (r.data.reboot) {
+        setMsg(msg, 'ok', 'Kaydedildi. Cihaz WiFi’ye bağlandı (' + (r.data.ip || '') + ') ve yeniden başlıyor. Birkaç saniye içinde radar açılır; bu sayfayı kapatabilirsiniz.' + mapNote);
+      } else {
+        state.expectingDrop = false;
+        setMsg(msg, 'ok', 'Ayarlar cihaza kaydedildi.' + mapNote);
+      }
+    } catch (e) {
+      state.expectingDrop = false;
+      setMsg(msg, 'err', 'Cihazdan yanıt gelmedi. Bağlantıyı kesip tekrar bağlanmayı deneyin.');
+    }
+    btn.disabled = false;
+  }
+
+  // ---------------------------------------------------------------- update
+  async function loadLatest() {
+    try {
+      const r = await fetch('version.json', { cache: 'no-store' });
+      state.versions = await r.json();
+    } catch (_) { state.versions = {}; }
+    applyLatest();
+  }
+
+  // Latest version for the chosen model; refresh the installers' manifest URLs.
+  function applyLatest() {
+    const v = state.versions || {};
+    state.latest = (state.model === '5' ? v.version_ws5 : v.version) || null;
+    // The installer fetches its manifest with normal caching (up to ~10 min on GitHub Pages), which
+    // could offer the previous version. A unique query string always fetches the current one.
+    for (const id of INSTALLERS) {
+      const el = $('#' + id), base = el && (el.getAttribute('manifest') || '').split('?')[0];
+      if (el && base) el.setAttribute('manifest', base + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now());
+    }
+    renderVersion();
+  }
+
+  function renderVersion() {
+    const el = $('#msg-version');
+    const cur = state.connected && state.device ? state.device.fw : null;
+    if (!state.latest) { setMsg(el, '', ''); return; }
+    if (!cur) { setMsg(el, 'info', 'En yeni yazılım sürümü: ' + state.latest + '. Cihaza bağlanırsanız sürümünü de gösteririm.'); return; }
+    if (cur === state.latest) setMsg(el, 'ok', 'Cihazınız güncel (sürüm ' + cur + ').');
+    else setMsg(el, 'warn', 'Cihazdaki sürüm ' + cur + ', en yeni sürüm ' + state.latest + '. Aşağıdan güncelleyebilirsiniz.');
+  }
+
+  // ------------------------------------------------- 5" installer (esp-web-tools)
+  // In keyboard mode the 5" board's USB port is TinyUSB, where the installer cannot put the
+  // chip into download mode ("reset the device / hold BOOT"). "Disconnect" in step 1 also
+  // sends it back to keyboard mode. So the first press switches the connected board to the
+  // USB-Serial/JTAG setup mode and releases the port; the second press opens the installer.
+  async function prepFlash5(ev) {
+    if (!(state.port && state.connected)) return; // not connected (blank board, or prepared): installer opens
+    ev.preventDefault();
+    ev.stopPropagation();
+    const msg = $('#msg-flash5');
+    try {
+      if (modelMismatch()) throw new Error('model');
+      if (state.device && state.device.usb === 'kb') await ensureSetupUsb(msg);
+      state.expectingDrop = true;
+      await closePort(); // not disconnect(): that would return the board to keyboard mode
+      state.expectingDrop = false;
+      renderConnection();
+      setMsg($('#msg-connect'), 'info', 'Kart kurulum modunda bekliyor; bağlantıyı yükleyici için bıraktım.');
+      setMsg(msg, 'ok', 'Kart hazır. Şimdi aynı düğmeye bir kez daha basın ve açılan listede kartı seçin (3 dakika içinde; sonra kart kendiliğinden normal moda döner).');
+    } catch (e) {
+      state.expectingDrop = false;
+      const m = String(e && e.message ? e.message : e);
+      setMsg(msg, 'err', m === 'model'
+        ? 'Bağlı cihaz seçili modelle uyuşmuyor.'
+        : ERRORS[m] || ('Kart kurulum moduna alınamadı (' + m + '). Bağlantıyı yenileyip tekrar deneyin.'));
+    }
+  }
+
+  // ------------------------------------------------------------------ model
+  const INSTALLERS = ['install-update', 'install-full', 'install-update-ws5', 'install-full-ws5', 'install-full-ws5b'];
+  const MODEL_NAMES = { '4': '4" Radar (ESP32-WROOM + 4.0" ekran)', '5': '5" Radar (Waveshare ESP32-S3-Touch-LCD-5)' };
+
+  function setModel(m, remember) {
+    if (m !== '4' && m !== '5') return;
+    state.model = m;
+    document.body.dataset.model = m;
+    $('#model-pick').hidden = true;
+    $('#model-chosen').hidden = false;
+    $('#model-name').textContent = MODEL_NAMES[m];
+    if (remember) { try { localStorage.setItem('pr3d-model', m); } catch (_) {} }
+    applyLatest();
+    renderModelCheck();
+  }
+
+  function changeModel() {
+    $('#model-pick').hidden = false;
+    $('#model-chosen').hidden = true;
+  }
+
+  // Firmware reports hw: "wroom" (4"), "ws5" / "ws5b" (5"); older 4" firmware reports none.
+  function deviceModel() {
+    const hw = state.device && state.device.hw;
+    if (!state.connected || !state.device) return null;
+    return hw === 'ws5' || hw === 'ws5b' ? '5' : '4';
+  }
+  function modelMismatch() {
+    const d = deviceModel();
+    return d !== null && state.model && d !== state.model;
+  }
+  function renderModelCheck() {
+    const el = $('#msg-model');
+    if (!el) return;
+    if (!modelMismatch()) { setMsg(el, '', ''); return; }
+    const d = deviceModel();
+    el.textContent = '';
+    el.className = 'msg warn';
+    el.hidden = false;
+    el.append('Bağlı cihaz ' + (d === '5' ? '5"' : '4"') + ' model, ama sayfada ' + (state.model === '5' ? '5"' : '4"') + ' seçili. ');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn';
+    b.textContent = (d === '5' ? '5"' : '4"') + ' sayfasına geç';
+    b.addEventListener('click', () => setModel(d, true));
+    el.append(b);
+  }
+
+  async function resetDevice() {
+    if (!confirm('Cihazdaki WiFi, konum ve birim ayarları silinecek ve cihaz yeniden başlayacak. Devam edilsin mi?')) return;
+    try {
+      state.expectingDrop = true;
+      await request('PR:RESET', ['OK'], 8000);
+      setMsg($('#msg-save'), 'ok', 'Ayarlar sıfırlandı, cihaz yeniden başlıyor.');
+    } catch (_) {
+      state.expectingDrop = false;
+      setMsg($('#msg-save'), 'err', 'Cihazdan yanıt gelmedi.');
+    }
+  }
+
+  // ---------------------------------------------------------- deck keys
+  // Stream deck keys on the 5" board. Blob format: firmware include/services/deck_store.h.
+  // Media codes = services::hid::Media (0 vol+, 1 vol-, 2 mute, 3 play/pause, 4 next, 5 prev),
+  // key codes = Arduino keyboard codes (F13 = 0xF0 ... F24 = 0xFB, letters as lowercase ASCII).
+  const DECK_SLOTS = 12, DECK_KEY_BG = [36, 40, 73]; // a key on the card's new background
+  const DECK_ACTIONS = [['none', 'Boş (bir şey yapmaz)'], ['m3', 'Oynat / Duraklat'], ['m5', 'Önceki parça'],
+    ['m4', 'Sonraki parça'], ['m0', 'Ses +'], ['m1', 'Ses -'], ['m2', 'Sessiz']];
+  for (let i = 0; i < 12; i++) DECK_ACTIONS.push(['k' + (0xF0 + i), 'F' + (13 + i) + ' tuşu']);
+  DECK_ACTIONS.push(['combo', 'Özel kısayol (Ctrl / Alt / Shift / Win + tuş)']);
+  const MEDIA_GLYPH = { m0: '🔊+', m1: '🔉−', m2: '🔇', m3: '⏯', m4: '⏭', m5: '⏮' };
+  const deckDefaults = () => {
+    // Previous / play / next are always under the knob (firmware 0.34+): not among the keys.
+    const d = [];
+    for (let i = 0; i < 8; i++) d.push({ label: 'F' + (13 + i), action: 'k' + (0xF0 + i) });
+    d.push({ label: 'Kısayol P', action: 'combo', mods: 7, key: 'p' });
+    while (d.length < DECK_SLOTS) d.push({ label: '', action: 'none' });
+    return d.map((x) => Object.assign({ mods: 0, key: '', img: '' }, x));
+  };
+  const deck = { slots: deckDefaults(), sel: 0 };
+
+  function deckLoad() {
+    try {
+      const v = JSON.parse(localStorage.getItem('pr3d-deck') || 'null');
+      if (Array.isArray(v) && v.length === DECK_SLOTS) deck.slots = v.map((x) => Object.assign({ label: '', action: 'none', mods: 0, key: '', img: '' }, x));
+    } catch (_) { /* defaults */ }
+  }
+  function deckSave() {
+    try { localStorage.setItem('pr3d-deck', JSON.stringify(deck.slots)); } catch (_) {
+      setMsg($('#msg-deck'), 'warn', 'Tarayıcı tuşları saklayamadı (yer yok); gönderebilirsiniz ama sayfayı kapatınca düzenlemeler kaybolur.');
+    }
+  }
+
+  function renderDeck() {
+    const grid = $('#deck-grid');
+    grid.textContent = '';
+    deck.slots.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'deck-key';
+      b.setAttribute('aria-pressed', String(i === deck.sel));
+      b.setAttribute('aria-label', 'Tuş ' + (i + 1) + (s.label ? ': ' + s.label : ''));
+      if (s.img) {
+        const im = document.createElement('img');
+        im.src = s.img; im.alt = '';
+        b.appendChild(im);
+      } else if (MEDIA_GLYPH[s.action]) {
+        const g = document.createElement('span');
+        g.textContent = MEDIA_GLYPH[s.action]; g.style.fontSize = '1.3rem';
+        b.appendChild(g);
+      }
+      if (s.label) { const t = document.createElement('span'); t.textContent = s.label; b.appendChild(t); }
+      b.addEventListener('click', () => { deck.sel = i; renderDeck(); renderDeckEditor(); });
+      grid.appendChild(b);
+    });
+  }
+
+  function renderDeckEditor() {
+    const s = deck.slots[deck.sel];
+    $('#deck-legend').textContent = 'Tuş ' + (deck.sel + 1);
+    $('#deck-label').value = s.label || '';
+    $('#deck-action').value = s.action || 'none';
+    $('#deck-combo').hidden = s.action !== 'combo';
+    $('#deck-ctrl').checked = !!(s.mods & 1);
+    $('#deck-shift').checked = !!(s.mods & 2);
+    $('#deck-alt').checked = !!(s.mods & 4);
+    $('#deck-gui').checked = !!(s.mods & 8);
+    $('#deck-key-char').value = s.key || '';
+    $('#btn-deck-noimg').disabled = !s.img;
+    $('#deck-file').value = '';
+  }
+
+  function deckEdited() {
+    const s = deck.slots[deck.sel];
+    s.label = $('#deck-label').value;
+    s.action = $('#deck-action').value;
+    s.mods = ($('#deck-ctrl').checked ? 1 : 0) | ($('#deck-shift').checked ? 2 : 0) | ($('#deck-alt').checked ? 4 : 0) | ($('#deck-gui').checked ? 8 : 0);
+    s.key = ($('#deck-key-char').value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    $('#deck-key-char').value = s.key;
+    $('#deck-combo').hidden = s.action !== 'combo';
+    deckSave();
+    renderDeck();
+  }
+
+  // The picture is kept as a PNG of at most 256 px in its own shape (a photo fills the
+  // key, a see-through icon is fitted into it when the keys are sent).
+  async function deckPicked(ev) {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    try {
+      const url = URL.createObjectURL(f);
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      const W = img.naturalWidth || 256, H = img.naturalHeight || 256, k = Math.min(1, 256 / Math.max(W, H));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(W * k)); c.height = Math.max(1, Math.round(H * k));
+      const g = c.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      deck.slots[deck.sel].img = c.toDataURL('image/png');
+      setMsg($('#msg-deck'), '', '');
+    } catch (_) {
+      setMsg($('#msg-deck'), 'err', 'Bu resim açılamadı. PNG, JPG ya da SVG deneyin.');
+    }
+    deckSave();
+    renderDeck();
+    renderDeckEditor();
+  }
+
+  /** px x px RGB565 (little endian); transparent pixels = magenta 0xF81F, the key colour on the device. */
+  async function deckIconPixels(dataUrl, px) {
+    const img = new Image();
+    img.src = dataUrl;
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = c.height = px;
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, px, px);
+    const d = g.getImageData(0, 0, px, px).data, out = new Uint8Array(px * px * 2);
+    for (let p = 0; p < px * px; p++) {
+      const a = d[p * 4 + 3];
+      let v = 0xF81F;
+      if (a >= 64) {
+        const mix = (ch, i) => Math.round((ch * a + DECK_KEY_BG[i] * (255 - a)) / 255);
+        const r = mix(d[p * 4], 0), gg = mix(d[p * 4 + 1], 1), b = mix(d[p * 4 + 2], 2);
+        v = ((r >> 3) << 11) | ((gg >> 2) << 5) | (b >> 3);
+        if (v === 0xF81F) v = 0xF81E;
+      }
+      out[p * 2] = v & 255; out[p * 2 + 1] = v >> 8;
+    }
+    return out;
+  }
+
+  // Firmware 0.32+: the picture is the whole key (as the Windows helper makes it): a photo
+  // fills it, a see-through icon sits large in it with room for the label.
+  async function deckKeyPixels(dataUrl, kw, kh, radius, hasLabel) {
+    const img = new Image();
+    img.src = dataUrl;
+    await img.decode();
+    const probe = document.createElement('canvas'); probe.width = probe.height = 48;
+    const pg = probe.getContext('2d'); pg.drawImage(img, 0, 0, 48, 48);
+    const pd = pg.getImageData(0, 0, 48, 48).data;
+    let clear = 0; for (let i = 3; i < pd.length; i += 4) if (pd[i] < 250) clear++;
+    const icon = clear > 0.03 * 48 * 48;
+    const c = document.createElement('canvas'); c.width = kw; c.height = kh;
+    const g = c.getContext('2d');
+    g.imageSmoothingQuality = 'high';
+    g.beginPath(); g.roundRect(0, 0, kw, kh, radius); g.clip();
+    const W = img.naturalWidth, H = img.naturalHeight;
+    if (icon) {
+      const m = Math.max(2, Math.round(kw * 0.08)), band = hasLabel ? Math.round(kh * 0.2) : 0;
+      const aw = kw - 2 * m, ah = kh - 2 * m - band, k = Math.min(aw / W, ah / H);
+      g.drawImage(img, (kw - W * k) / 2, m + (ah - H * k) / 2, W * k, H * k);
+    } else {
+      const k = Math.max(kw / W, kh / H);
+      g.drawImage(img, (kw - W * k) / 2, (kh - H * k) / 2, W * k, H * k);
+      if (hasLabel) {
+        const gr = g.createLinearGradient(0, kh * 0.55, 0, kh);
+        gr.addColorStop(0, 'rgba(4,5,14,0)'); gr.addColorStop(1, 'rgba(4,5,14,0.72)');
+        g.fillStyle = gr; g.fillRect(0, kh * 0.55, kw, kh * 0.45);
+      }
+    }
+    const d = g.getImageData(0, 0, kw, kh).data, out = new Uint8Array(kw * kh * 2);
+    for (let p = 0; p < kw * kh; p++) {
+      const a = d[p * 4 + 3];
+      let v = 0xF81F;
+      if (a >= 64) {
+        const mix = (ch, i) => Math.round((ch * a + DECK_KEY_BG[i] * (255 - a)) / 255);
+        const r = mix(d[p * 4], 0), gg = mix(d[p * 4 + 1], 1), b = mix(d[p * 4 + 2], 2);
+        v = ((r >> 3) << 11) | ((gg >> 2) << 5) | (b >> 3);
+        if (v === 0xF81F) v = 0xF81E;
+      }
+      out[p * 2] = v & 255; out[p * 2 + 1] = v >> 8;
+    }
+    return out;
+  }
+
+  async function buildDeckBlob(dev) {
+    const enc = new TextEncoder();
+    const px = dev.deckicon || 72, full = dev.deckkw > 0 && dev.deckkh > 0;
+    const hb = full ? 8 : 6, steps = parseInt($('#deck-os').value, 10) || 16;
+    const head = new Uint8Array(hb + 28 * DECK_SLOTS);
+    head.set(full ? [0x44, 0x4B, 2, DECK_SLOTS, dev.deckkw, dev.deckkh, steps, 0] : [0x44, 0x4B, 1, DECK_SLOTS, px, steps]);
+    const radius = Math.round(18 * (dev.w || 800) / 800);
+    const icons = [];
+    for (let i = 0; i < DECK_SLOTS; i++) {
+      const s = deck.slots[i], o = hb + 28 * i, a = s.action || 'none';
+      let kind = 0, code = 0, mods = 0;
+      if (a[0] === 'm') { kind = 1; code = parseInt(a.slice(1), 10); }
+      else if (a[0] === 'k') { kind = 2; code = parseInt(a.slice(1), 10); }
+      else if (a === 'combo' && s.key) { kind = 2; code = s.key.charCodeAt(0); mods = s.mods & 15; }
+      head[o] = kind; head[o + 1] = code; head[o + 2] = mods;
+      if (s.img) {
+        icons.push(full ? await deckKeyPixels(s.img, dev.deckkw, dev.deckkh, radius, !!s.label) : await deckIconPixels(s.img, px));
+        head[o + 3] = 1;
+      }
+      let lb = enc.encode(s.label || '');
+      if (lb.length > 23) { let n = 23; while (n > 0 && (lb[n] & 0xC0) === 0x80) n--; lb = lb.slice(0, n); }
+      head.set(lb, o + 4);
+    }
+    const total = head.length + icons.reduce((t, x) => t + x.length, 0);
+    const out = new Uint8Array(total);
+    out.set(head, 0);
+    let off = head.length;
+    for (const x of icons) { out.set(x, off); off += x.length; }
+    return out;
+  }
+
+  async function sendDeck() {
+    const msg = $('#msg-deck'), bar = $('#deck-progress'), btn = $('#btn-deck-send');
+    if (!state.port || !state.connected) { setMsg(msg, 'warn', 'Önce 1. adımdan cihaza bağlanın.'); return; }
+    const dev = state.device || {};
+    if (!dev.deckv) { setMsg(msg, 'warn', 'Cihazdaki yazılım kontrol tuşlarını bilmiyor. Önce 3. adımdan yazılımı güncelleyin.'); return; }
+    if (deck.slots.some((s) => s.action === 'combo' && !s.key)) {
+      setMsg(msg, 'warn', 'Özel kısayol seçilen bir tuşa harf ya da rakam girilmemiş; o tuş bir şey yapmaz.');
+    }
+    btn.disabled = true;
+    bar.hidden = false; bar.value = 0;
+    try {
+      setMsg(msg, 'info', 'Resimler hazırlanıyor…');
+      const blob = await buildDeckBlob(dev);
+      await ensureSetupUsb(msg);
+      setMsg(msg, 'info', 'Tuşlar cihaza gönderiliyor…');
+      const ack = async (cmd, timeout) => {
+        const r = await request(cmd, ['DECKACK', 'ERR'], timeout);
+        if (r.tag === 'ERR') throw new Error(r.data.msg || 'deck');
+        return r;
+      };
+      await ack('PR:DECKBEGIN ' + JSON.stringify({ len: blob.length, crc: crc32(blob) }), 5000);
+      const CH = 360;
+      for (let off = 0, seq = 1; off < blob.length; off += CH, seq++) {
+        const part = blob.subarray(off, Math.min(off + CH, blob.length));
+        let bin = ''; for (let i = 0; i < part.length; i++) bin += String.fromCharCode(part[i]);
+        const r = await ack('PR:DECK ' + seq + ' ' + btoa(bin), 5000);
+        if (r.data.seq !== seq) throw new Error('deck-seq');
+        bar.value = Math.round(((off + part.length) / blob.length) * 100);
+      }
+      const done = await request('PR:DECKEND', ['OK', 'ERR'], 10000);
+      if (done.tag === 'ERR') throw new Error(done.data.msg || 'deck');
+      const back = await backToKeyboard();
+      setMsg(msg, 'ok', 'Tuşlar kaydedildi.' + (back ? ' Kart klavye moduna dönüyor; birkaç saniye sonra kontrol ekranında görünür. Yeniden değişiklik yapmak için 1. adımdan tekrar bağlanın.' : ''));
+    } catch (e) {
+      const m = String(e && e.message ? e.message : e);
+      setMsg(msg, 'err', ERRORS[m] || ('Tuşlar gönderilemedi (' + m + '). Tekrar deneyin.'));
+    }
+    bar.hidden = true;
+    btn.disabled = !state.connected;
+  }
+
+  async function deckToDefaults() {
+    if (!confirm('Tuşlar varsayılana dönsün mü? Bu tarayıcıdaki düzenlemeler ve resimler silinir.')) return;
+    deck.slots = deckDefaults();
+    deck.sel = 0;
+    deckSave();
+    renderDeck();
+    renderDeckEditor();
+    const msg = $('#msg-deck');
+    if (state.port && state.connected && state.device && state.device.deckv) {
+      try {
+        await request('PR:DECKCLEAR', ['OK', 'ERR'], 5000);
+        setMsg(msg, 'ok', 'Cihazdaki tuşlar da varsayılana döndü.');
+      } catch (_) { setMsg(msg, 'warn', 'Sayfadaki tuşlar sıfırlandı, cihaza ulaşılamadı.'); }
+    } else {
+      setMsg(msg, 'info', 'Sayfadaki tuşlar sıfırlandı. Cihazdakini de sıfırlamak için bağlanıp tekrar basın ya da “Cihaza gönder”i kullanın.');
+    }
+  }
+
+  function initDeck() {
+    const sel = $('#deck-action');
+    for (const [v, t] of DECK_ACTIONS) { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); }
+    deckLoad();
+    renderDeck();
+    renderDeckEditor();
+    for (const id of ['#deck-label', '#deck-key-char']) $(id).addEventListener('input', deckEdited);
+    for (const id of ['#deck-action', '#deck-ctrl', '#deck-alt', '#deck-shift', '#deck-gui']) $(id).addEventListener('change', deckEdited);
+    $('#deck-file').addEventListener('change', deckPicked);
+    try { const os = localStorage.getItem('pr3d-deck-os'); if (os === '16' || os === '50') $('#deck-os').value = os; } catch (_) { /* default Mac */ }
+    $('#deck-os').addEventListener('change', () => { try { localStorage.setItem('pr3d-deck-os', $('#deck-os').value); } catch (_) { /* optional */ } });
+    $('#btn-deck-noimg').addEventListener('click', () => { deck.slots[deck.sel].img = ''; deckSave(); renderDeck(); renderDeckEditor(); });
+    $('#btn-deck-send').addEventListener('click', sendDeck);
+    $('#btn-deck-defaults').addEventListener('click', deckToDefaults);
+  }
+
+  // ------------------------------------------------------------------ init
+  function init() {
+    if (!('serial' in navigator)) {
+      $('#unsupported').hidden = false;
+      $('#btn-connect').disabled = true;
+    } else {
+      navigator.serial.addEventListener('disconnect', (ev) => { if (ev.target === state.port) onPortLost(); });
+    }
+    $('#btn-connect').addEventListener('click', () => connect(false));
+    $('#btn-connect-all').addEventListener('click', () => connect(true));
+    $('#btn-disconnect').addEventListener('click', disconnect);
+    $('#btn-copylog').addEventListener('click', async (e) => {
+      try { await navigator.clipboard.writeText(diag.lines.join('\n')); e.currentTarget.textContent = 'Kopyalandı'; }
+      catch (_) { $('#diag-log').focus(); e.currentTarget.textContent = 'Metni elle seçip kopyalayın'; }
+    });
+    $('#btn-scan').addEventListener('click', scanNetworks);
+    $('#btn-search').addEventListener('click', searchCity);
+    $('#city').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchCity(); } });
+    $('#btn-geo').addEventListener('click', useMyLocation);
+    $('#btn-reset').addEventListener('click', resetDevice);
+    $('#settings').addEventListener('submit', save);
+    $('#tz').addEventListener('change', showPosix);
+    $('#opt-map').addEventListener('change', updateMapNote);
+    updateMapNote();
+    $('#lat').addEventListener('input', updateMapLink);
+    $('#lon').addEventListener('input', updateMapLink);
+    $('#btn-showpass').addEventListener('click', (e) => {
+      const p = $('#pass');
+      const show = p.type === 'password';
+      p.type = show ? 'text' : 'password';
+      e.currentTarget.textContent = show ? 'Gizle' : 'Göster';
+      e.currentTarget.setAttribute('aria-pressed', String(show));
+    });
+    $('#btn-usb-update').addEventListener('click', usbUpdate);
+    initDeck();
+    // The update tool needs the USB port to itself.
+    for (const id of INSTALLERS) {
+      $('#' + id).addEventListener('click', () => { if (state.port) { state.expectingDrop = false; disconnect(); } }, true);
+    }
+    for (const b of document.querySelectorAll('[data-pick]')) {
+      b.addEventListener('click', () => setModel(b.dataset.pick, true));
+    }
+    $('#btn-model-change').addEventListener('click', changeModel);
+    // Capture on the row: runs before the installer's own click handler.
+    for (const id of ['install-update-ws5', 'install-full-ws5', 'install-full-ws5b']) {
+      const el = document.getElementById(id);
+      if (el && el.parentElement) el.parentElement.addEventListener('click', prepFlash5, true);
+    }
+    {
+      // ?model=4 / ?model=5 in the address, else the last choice on this computer.
+      let m = new URLSearchParams(location.search).get('model');
+      if (m !== '4' && m !== '5') { try { m = localStorage.getItem('pr3d-model'); } catch (_) { m = null; } }
+      if (m === '4' || m === '5') setModel(m, false);
+    }
+    renderConnection();
+    loadZones();
+    loadLatest();
+    // The update buttons come from a script on a CDN; say so if it did not load.
+    window.addEventListener('load', () => setTimeout(() => {
+      if (!customElements.get('esp-web-install-button')) {
+        const el = document.createElement('div');
+        el.className = 'msg warn';
+        el.textContent = 'Güncelleme bileşeni yüklenemedi. İnternet bağlantınızı kontrol edin ya da reklam/güvenlik engelleyicisini bu sayfa için kapatıp sayfayı yenileyin.';
+        $('#steps').prepend(el);
+      }
+    }, 3000));
+  }
+  init();
+})();
+</script>
+</body>
+</html>

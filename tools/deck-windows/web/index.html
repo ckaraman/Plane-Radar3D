@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plane Radar Deck</title>
+<style>
+  :root {
+    --text: #f3f4fb; --text-2: #d9dcef; --muted: #aeb4cc; --line: rgba(255,255,255,0.10);
+    --glass: rgba(255,255,255,0.05); --glass-2: rgba(255,255,255,0.08); --field: rgba(8,10,28,0.45);
+    --sel-bg: rgba(185,166,255,0.24); --sel-line: rgba(214,202,255,0.80); --ok: #7fe3b0; --warn: #ffcf8a; --err: #ff9b9b;
+    --grad: linear-gradient(90deg, #ffbf9a 0%, #f2b1c4 50%, #c4b3ff 100%);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; }
+  body {
+    font: 15px/1.45 "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, sans-serif; color: var(--text);
+    background:
+      radial-gradient(900px 600px at 92% 0%, rgba(126,110,236,0.30) 0%, rgba(126,110,236,0) 70%),
+      radial-gradient(800px 600px at 0% 100%, rgba(236,150,128,0.16) 0%, rgba(236,150,128,0) 70%),
+      linear-gradient(160deg, #111634 0%, #151a3c 45%, #17163a 75%, #0f1730 100%) fixed;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  option { background: #1a1e42; color: var(--text); }
+  input::placeholder, textarea::placeholder { color: #8f96b3; }
+  :focus-visible { outline: 2px solid #c4b3ff; outline-offset: 2px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 28px; }
+  .brand { display: flex; align-items: center; gap: 12px; flex: 1 1 260px; font-weight: 700; font-size: 17px; }
+  .logo { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, #ffb48c, #d7a4e6 50%, #9aa2ff); display: grid; place-items: center; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+  .pill { display: flex; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 999px; background: rgba(255,255,255,0.07); border: 1px solid var(--line); color: var(--text-2); max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
+  .layout { display: flex; flex-wrap: wrap; }
+  nav { flex: 1 1 200px; max-width: 236px; padding: 8px 14px 24px 18px; display: flex; flex-direction: column; gap: 4px; }
+  nav button { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 14px; border-radius: 12px; border: 0; background: transparent; color: #c3c8de; cursor: pointer; text-align: left; }
+  nav button[aria-current="page"] { background: rgba(255,255,255,0.10); color: #fff; font-weight: 600; }
+  main { flex: 999 1 560px; min-width: 0; padding: 8px 28px 36px 10px; }
+  .row { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; max-width: 1120px; }
+  .card { background: var(--glass); border: 1px solid rgba(255,255,255,0.09); border-radius: 20px; padding: 22px; }
+  h2 { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
+  .hint { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  .small { font-size: 13px; color: var(--muted); }
+  label.f { display: block; margin: 16px 0 6px; font-weight: 600; font-size: 13px; color: var(--text-2); }
+  .in { width: 100%; min-height: 44px; padding: 0 14px; border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; background: var(--field); }
+  textarea.in { padding: 10px 14px; min-height: 84px; resize: vertical; }
+  .btn { min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.06); cursor: pointer; font-weight: 600; }
+  .btn:hover { background: rgba(255,255,255,0.10); }
+  .btn.primary { border: 0; background: var(--grad); color: #17183a; font-weight: 700; padding: 0 22px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+  .deck { border-radius: 16px; padding: 14px; display: flex; gap: 14px; align-items: center; border: 1px solid rgba(255,255,255,0.08);
+    background: radial-gradient(420px 300px at 100% 0%, rgba(126,110,236,0.30), rgba(126,110,236,0) 70%), linear-gradient(160deg, #121737, #181a40 60%, #121a36); }
+  .grid { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .key { aspect-ratio: 1.05; border-radius: 12px; background: rgba(255,255,255,0.06); border: 1px solid var(--line); cursor: pointer; padding: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12px; line-height: 1.15; overflow: hidden; text-align: center; }
+  .key img { width: 52%; height: 52%; object-fit: contain; pointer-events: none; }
+  /* As on the card: a picture is the whole key, the label on top at the bottom. */
+  .key.pic { position: relative; padding: 0; justify-content: flex-end; }
+  .key.pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .key.pic.icon img { inset: 8% 8% 22% 8%; width: 84%; height: 70%; object-fit: contain; }
+  .key.pic.icon.nolabel img { inset: 8%; height: 84%; }
+  .key.pic span { position: relative; width: 100%; padding: 14px 4px 6px; color: #fff; background: linear-gradient(rgba(4,5,14,0), rgba(4,5,14,0.7)); }
+  .key.pic.icon span { background: none; }
+  .key svg { width: 40%; height: 40%; pointer-events: none; }
+  .key[aria-pressed="true"] { background: var(--sel-bg); border: 1.5px solid var(--sel-line); font-weight: 600; }
+  .key.empty { border-style: dashed; color: var(--muted); background: transparent; }
+  .key.drop { outline: 2px dashed #c4b3ff; }
+  /* Preview of the card's keys page (positions from the program, as the card draws them). */
+  .pv { position: relative; width: 100%; aspect-ratio: 800 / 480; border-radius: 14px; overflow: hidden; border: 1px solid var(--line);
+        background: radial-gradient(60% 70% at 90% 8%, rgba(126,110,236,0.38), rgba(126,110,236,0) 70%), radial-gradient(50% 60% at 4% 100%, rgba(236,150,128,0.22), rgba(236,150,128,0) 70%), linear-gradient(160deg, #111634, #161a3d 40%, #1a1739 70%, #0f1730); }
+  .pv .pk { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); color: #f3f4fb; font-size: 10px; text-align: center; line-height: 1.1; }
+  .pv .pk.sel { outline: 2px solid #c4b3ff; }
+  .pv .pk img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .pv .pk.icon img { inset: 8% 8% 22% 8%; width: 84%; height: 70%; object-fit: contain; }
+  .pv .pk.icon.nolabel img { inset: 8%; height: 84%; }
+  .pv .pk span { position: relative; padding: 2px 4px; }
+  .pv .pk.pic span { position: absolute; bottom: 6%; left: 0; right: 0; }
+  .pv .pk svg { width: 30%; height: 30%; }
+  .pv .pknob { position: absolute; border-radius: 50%; border: 6px solid rgba(255,255,255,0.10); background: radial-gradient(circle at 40% 30%, #262b57, #151938); }
+  .pv .pbtn { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.10); transform: translate(-50%, -50%); }
+  .pv .pbtn.play { background: #fff; }
+  .pv .ptab { position: absolute; left: 39%; top: 3.1%; width: 22%; height: 7.1%; border-radius: 999px; background: rgba(255,255,255,0.09); display: flex; font-size: 9px; font-weight: 700; color: #e2e5f5; }
+  .pv .ptab b { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .pv .ptab b + b { margin: 3px; border-radius: 999px; background: #fff; color: #15183a; }
+  .knob { width: 32%; aspect-ratio: 1; border-radius: 50%; flex: none; position: relative; }
+  .knob i { position: absolute; inset: 7%; border-radius: 50%; background: radial-gradient(circle at 40% 32%, #262b57, #1b1f45 55%, #151938); display: grid; place-items: center; }
+  .acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .act { min-height: 44px; padding: 0 14px; border-radius: 12px; text-align: left; cursor: pointer; font-size: 14px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); }
+  .act[aria-checked="true"] { background: var(--sel-bg); border: 1.5px solid var(--sel-line); font-weight: 600; }
+  .panel { margin-top: 16px; padding: 16px; border-radius: 16px; background: rgba(8,10,28,0.35); border: 1px solid rgba(255,255,255,0.08); }
+  .panel label.f:first-child { margin-top: 0; }
+  .pic { width: 88px; height: 88px; border-radius: 18px; background: rgba(255,255,255,0.06); border: 1px dashed rgba(255,255,255,0.22); display: grid; place-items: center; flex: none; overflow: hidden; }
+  .pic img { width: 72%; height: 72%; object-fit: contain; }
+  .pic.drop { border-color: #c4b3ff; background: var(--sel-bg); }
+  .line { display: flex; gap: 8px; } .line .in { flex: 1; min-width: 0; }
+  .steps { margin: 16px 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; font-size: 14px; }
+  .steps code { background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 6px; }
+  .opt { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .opt:last-child { border-bottom: 0; }
+  .opt input[type="checkbox"] { width: 22px; height: 22px; accent-color: #b9a6ff; }
+  .msg { margin-top: 12px; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
+  .msg.ok { background: rgba(127,227,176,0.12); color: #c9f4dd; } .msg.err { background: rgba(255,120,120,0.14); color: #ffd0d0; } .msg.info { background: rgba(185,166,255,0.14); color: #e5ddff; }
+  progress { width: 100%; height: 6px; margin-top: 12px; accent-color: #c4b3ff; }
+  .np { display: flex; gap: 18px; align-items: center; }
+  .np img, .np .ph { width: 140px; height: 140px; border-radius: 16px; object-fit: cover; background: rgba(255,255,255,0.06); flex: none; }
+  dialog { border: 1px solid rgba(255,255,255,0.12); border-radius: 22px; padding: 0; width: min(520px, 92vw); color: var(--text);
+    background: radial-gradient(520px 420px at 100% 0%, rgba(126,110,236,0.34), rgba(126,110,236,0) 72%), linear-gradient(165deg, #171c44, #151938 60%, #121734); }
+  dialog::backdrop { background: rgba(5,6,18,0.6); }
+  .plist { max-height: 46vh; overflow: auto; margin: 12px 0 0; padding: 6px; border-radius: 16px; background: rgba(8,10,28,0.30); border: 1px solid rgba(255,255,255,0.08); }
+  .plist button { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; border-radius: 10px; border: 1px solid transparent; background: transparent; cursor: pointer; text-align: left; }
+  .plist button:hover { background: rgba(255,255,255,0.06); }
+  .plist button[aria-selected="true"] { background: var(--sel-bg); border-color: rgba(214,202,255,0.55); font-weight: 600; }
+  .plist img, .plist .pi { width: 28px; height: 28px; border-radius: 7px; background: rgba(255,255,255,0.10); flex: none; object-fit: contain; }
+  [hidden] { display: none !important; }
+  @media (max-width: 760px) { header, main { padding-left: 16px; padding-right: 16px; } nav { max-width: none; flex-direction: row; flex-wrap: wrap; padding: 0 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#151938" stroke-width="2.2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.8"/><rect x="14" y="3" width="7" height="7" rx="1.8"/><rect x="3" y="14" width="7" height="7" rx="1.8"/><circle cx="17.5" cy="17.5" r="3.5"/></svg></div>
+    Plane Radar Deck
+  </div>
+  <div class="pills" aria-live="polite">
+    <div class="pill"><span class="dot" id="p-dot"></span><span id="p-card">Kart bekleniyor</span></div>
+    <div class="pill" id="p-vol">Ses %–</div>
+    <div class="pill" id="p-now" hidden></div>
+  </div>
+</header>
+
+<div class="layout">
+  <nav aria-label="Bölümler">
+    <button type="button" data-page="keys" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.8"/><rect x="14" y="3" width="7" height="7" rx="1.8"/><rect x="3" y="14" width="7" height="7" rx="1.8"/><rect x="14" y="14" width="7" height="7" rx="1.8"/></svg>Tuşlar</button>
+    <button type="button" data-page="music"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>Müzik ekranı</button>
+    <button type="button" data-page="settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Ayarlar</button>
+  </nav>
+
+  <main>
+    <!-- Keys -->
+    <section id="page-keys" class="row">
+      <div class="card" style="flex: 1 1 440px">
+        <h2>Kartın tuşları</h2>
+        <p class="hint">Düzenlemek istediğin tuşa tıkla. Yerini değiştirmek için tuşu başka bir tuşun üstüne sürükle. Yuvarlak düğme her zaman ses.</p>
+        <div class="deck">
+          <div class="grid" id="grid" role="group" aria-label="Kartın tuşları"></div>
+          <div class="knob" id="knob" aria-hidden="true"><i><svg width="40" height="33" viewBox="0 0 86 70" fill="none"><path d="M8 25h14l19-16v52L22 45H8z" fill="#f3f4fb"/><path d="M54 23c6 6 6 18 0 24M64 13c11 11 11 33 0 44" stroke="#f3f4fb" stroke-width="5" stroke-linecap="round"/></svg></i></div>
+        </div>
+        <p class="small" style="margin: 14px 0 0">Değişiklikler bu bilgisayarda hemen saklanır; kartta görünmeleri için “Kaydet ve karta gönder”e bas.</p>
+        <h2 style="margin-top: 22px">Kartta böyle görünecek</h2>
+        <p class="hint" id="pv-hint">Boş bıraktığın tuşlar kartta yer kaplamaz; kalan tuşlar ekranı doldurur.</p>
+        <div class="pv" id="pv" aria-label="Kart ekranının önizlemesi"></div>
+      </div>
+
+      <div class="card" style="flex: 1 1 380px">
+        <h2 id="ed-title" style="margin-bottom: 16px">Tuş 1</h2>
+        <div style="display: flex; gap: 16px; align-items: center">
+          <div class="pic" id="pic" aria-label="Tuşun resmi"></div>
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; flex-wrap: wrap; gap: 8px">
+              <button type="button" class="btn" id="b-img">Resim seç</button>
+              <button type="button" class="btn" id="b-appicon" hidden>Programın simgesini kullan</button>
+              <button type="button" class="btn" id="b-noimg">Kaldır</button>
+            </div>
+            <div class="small">Resmi kutuya sürükleyip bırakabilirsin. Şeffaf alanlar tuş renginde görünür.</div>
+          </div>
+        </div>
+        <label class="f" for="k-label">Tuşta görünen yazı</label>
+        <input class="in" id="k-label" type="text" maxlength="22" autocomplete="off">
+        <div class="f" style="margin: 18px 0 8px; font-weight: 600; font-size: 13px; color: var(--text-2)">Bu tuş ne yapsın?</div>
+        <div class="acts" id="acts" role="radiogroup" aria-label="Tuşun işlevi"></div>
+        <div class="panel" id="panel"></div>
+        <div class="btns">
+          <button type="button" class="btn" id="b-test">Dene</button>
+          <button type="button" class="btn primary" id="b-send">Kaydet ve karta gönder</button>
+        </div>
+        <progress id="up-bar" max="100" value="0" hidden></progress>
+        <div class="msg" id="up-msg" hidden></div>
+      </div>
+    </section>
+
+    <!-- Music -->
+    <section id="page-music" class="row" hidden>
+      <div class="card" style="flex: 1 1 520px; max-width: 760px">
+        <h2>Şimdi çalan</h2>
+        <p class="hint" id="t-music">Windows'ta çalan müziğin adı, süresi ve kapağı karta gider; müzik başlayınca kart Müzik ekranına geçer.</p>
+        <div class="np">
+          <div class="ph" id="np-cover"></div>
+          <div style="min-width: 0">
+            <div id="np-title" style="font-size: 20px; font-weight: 700">Şu an bir şey çalmıyor</div>
+            <div id="np-artist" class="small" style="font-size: 15px; margin-top: 4px"></div>
+            <div id="np-app" class="small" style="margin-top: 8px"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="flex: 1 1 520px; max-width: 760px; padding-top: 6px; padding-bottom: 6px">
+        <div class="opt"><label for="s-music">Müzik çalınca kartta Müzik ekranını aç</label><input type="checkbox" id="s-music"></div>
+        <div class="opt"><label for="s-queue">Sıradaki şarkıları kartta göster (YouTube Music)<br><span class="small" id="q-state">Tarayıcı eklentisi gerekir: Ayarlar › YouTube Music sırası.</span></label><input type="checkbox" id="s-queue"></div>
+        <div class="opt"><label for="s-back">Müzik durunca tuşlar ekranına dön</label>
+          <select class="in" id="s-back" style="width: auto; min-height: 40px">
+            <option value="0">Hemen</option><option value="60">1 dakika sonra</option><option value="300">5 dakika sonra</option><option value="-1">Dönme</option>
+          </select></div>
+      </div>
+    </section>
+
+    <!-- Settings -->
+    <section id="page-settings" class="row" hidden>
+      <div style="flex: 1 1 560px; max-width: 760px; display: flex; flex-direction: column; gap: 16px">
+        <div class="card" style="padding-top: 6px; padding-bottom: 6px">
+          <h2 style="margin-top: 16px">Genel</h2>
+          <div class="opt"><label for="s-auto" id="t-auto">Windows açılınca kendiliğinden başlat (görev çubuğunda)</label><input type="checkbox" id="s-auto"></div>
+          <div class="opt"><label for="s-vol">Gerçek ses seviyesini kartta göster</label><input type="checkbox" id="s-vol"></div>
+          <div class="opt"><label for="s-close">Pencereyi kapatınca programdan tamamen çık<br><span class="small" id="t-close">Kapalıyken program görev çubuğunda çalışmaya devam eder; tuşlar ve müzik ekranı çalışır.</span></label><input type="checkbox" id="s-close"></div>
+          <div class="btns" style="margin: 8px 0 16px"><button type="button" class="btn" id="b-exit">Programı kapat</button></div>
+        </div>
+        <div class="card">
+          <h2>YouTube Music sırası ve açık sekmeler</h2>
+          <p class="hint" style="margin-bottom: 10px">Tarayıcıya bir kez eklenen küçük bir eklentiyle kart, YouTube Music'te sıradaki şarkıları gösterir ve dokunduğun şarkıya geçer. Müzik sitesi açan tuşlar da yeni sekme açmak yerine açık sekmeye geçer. Chrome, Edge ve Brave ile çalışır.</p>
+          <div style="display: flex; align-items: center; gap: 10px; min-height: 40px"><span class="dot" id="x-dot"></span><span id="x-state">Eklenti bağlı değil</span></div>
+          <div class="msg info" id="x-updated" hidden>Eklenti güncellendi: yeni hâli için tarayıcıyı kapatıp yeniden aç.</div>
+          <div class="btns"><button type="button" class="btn primary" id="b-ext">Eklentiyi kur…</button></div>
+        </div>
+        <div class="card">
+          <h2>Kart</h2>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; font-size: 14px; margin-top: 10px">
+            <div class="small">Bağlantı</div><div id="c-port">–</div>
+            <div class="small">Kart yazılımı</div><div id="c-fw">–</div>
+            <div class="small">Bu program</div><div id="c-app">–</div>
+          </div>
+          <div class="btns"><button type="button" class="btn" id="b-release">Kurulum sayfası için bağlantıyı bırak</button></div>
+          <p class="small" style="margin: 8px 0 0">Kurulum sayfasıyla güncelleme ya da harita göndermeden önce bas. İşin bitince tekrar basarak bağlantıyı geri al.</p>
+        </div>
+        <details class="card"><summary style="cursor: pointer; font-weight: 600">Tanılama kaydı</summary>
+          <div class="btns" style="margin: 10px 0"><button type="button" class="btn" id="b-logcopy">Kaydı kopyala</button><button type="button" class="btn" id="b-logsave">Masaüstüne kaydet</button><button type="button" class="btn" id="b-logrefresh">Yenile</button></div>
+          <p class="small" id="log-msg" style="margin: 0 0 8px"></p>
+          <pre id="logs" style="white-space: pre-wrap; font-size: 12px; color: var(--muted); max-height: 260px; overflow: auto; user-select: text; -webkit-user-select: text"></pre></details>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="dlg" aria-labelledby="dlg-h">
+  <form method="dialog" style="padding: 22px 24px">
+    <h2 id="dlg-h">Program seç</h2>
+    <div class="small">Tuşa basınca açılacak program</div>
+    <label for="dlg-q" style="position: absolute; left: -9999px">Programlarda ara</label>
+    <input class="in" id="dlg-q" type="search" placeholder="Programlarda ara" style="margin-top: 14px" autocomplete="off">
+    <div class="plist" id="dlg-list" role="listbox" aria-label="Programlar"></div>
+    <div class="btns" style="justify-content: space-between">
+      <button type="button" class="btn" id="dlg-exe">Listede yok, dosya seç…</button>
+      <div style="display: flex; gap: 10px"><button value="cancel" class="btn">Vazgeç</button><button type="button" class="btn primary" id="dlg-ok">Seç</button></div>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-ext" aria-labelledby="dx-h">
+  <form method="dialog" style="padding: 22px 24px">
+    <h2 id="dx-h">Tarayıcı eklentisini kur</h2>
+    <div class="small">Bir kez yapılır, bir dakika sürer. Tarayıcı güncellense de eklenti kalır.</div>
+    <ol class="steps">
+      <li><strong>Tarayıcını seç ve eklentiler sayfasını aç.</strong>
+        <div class="line" id="dx-browsers" style="margin-top: 8px; flex-wrap: wrap"></div>
+        <div class="small" style="margin-top: 6px">Açılmazsa adres çubuğuna <code>chrome://extensions</code> yaz (Edge'de <code>edge://extensions</code>).</div></li>
+      <li><strong>“Geliştirici modu” düğmesini aç.</strong>
+        <div class="small">Chrome ve Brave'de sağ üstte, Edge'de solda.</div></li>
+      <li><strong>“Paketlenmemiş öğe yükle”ye bas, eklenti klasörünü seç.</strong>
+        <div class="small" id="dx-pick"></div>
+        <div class="line" style="margin-top: 8px"><input class="in" id="dx-folder" readonly aria-label="Eklenti klasörü"><button type="button" class="btn" id="dx-copy">Kopyala</button></div>
+        <div class="small" id="dx-copied" style="margin-top: 4px"></div></li>
+      <li><strong>YouTube Music sekmesini yenile.</strong>
+        <div class="small">Bağlanınca aşağıda yeşil işaret çıkar.</div></li>
+    </ol>
+    <div style="display: flex; align-items: center; gap: 10px; min-height: 40px"><span class="dot" id="dx-dot"></span><span id="dx-state">Eklenti bekleniyor…</span></div>
+    <div class="btns" style="justify-content: space-between">
+      <button type="button" class="btn" id="dx-show">Klasörü göster</button>
+      <button value="cancel" class="btn primary">Tamam</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const api = () => window.pywebview.api;
+  const ACTS = [['site', 'Web sitesi aç'], ['app', 'Program aç'], ['media', 'Medya tuşu'], ['keys', 'Klavye kısayolu'], ['text', 'Metin yaz'], ['folder', 'Klasör / dosya aç'], ['none', 'Boş']];
+  const MEDIA = [[3, 'Oynat / Duraklat'], [4, 'Sonraki parça'], [5, 'Önceki parça'], [0, 'Ses +'], [1, 'Ses -'], [2, 'Sessiz']];
+  const ICONS = {
+    site: '<svg viewBox="0 0 24 24" fill="none" stroke="#e9eaff" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/></svg>',
+    app: '<svg viewBox="0 0 24 24" fill="none" stroke="#e9eaff" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/></svg>',
+    folder: '<svg viewBox="0 0 24 24" fill="none" stroke="#e9eaff" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>',
+    keys: '<svg viewBox="0 0 24 24" fill="none" stroke="#e9eaff" stroke-width="1.7" stroke-linecap="round"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7 14h10"/></svg>',
+    text: '<svg viewBox="0 0 24 24" fill="none" stroke="#e9eaff" stroke-width="1.7" stroke-linecap="round"><path d="M5 6h14M12 6v12M9 18h6"/></svg>',
+    m0: '<svg viewBox="0 0 24 24" fill="#e9eaff"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 12h5M18.5 9.5v5" stroke="#e9eaff" stroke-width="1.8"/></svg>',
+    m1: '<svg viewBox="0 0 24 24" fill="#e9eaff"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 12h5" stroke="#e9eaff" stroke-width="1.8"/></svg>',
+    m2: '<svg viewBox="0 0 24 24" fill="#e9eaff"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5" stroke="#e9eaff" stroke-width="1.8"/></svg>',
+    m3: '<svg viewBox="0 0 24 24" fill="#e9eaff"><path d="M3 5.5v13a.8.8 0 0 0 1.2.7l9.3-6.5a.8.8 0 0 0 0-1.4L4.2 4.8A.8.8 0 0 0 3 5.5z"/><rect x="15" y="5" width="2.6" height="14" rx="1"/><rect x="19.4" y="5" width="2.6" height="14" rx="1"/></svg>',
+    m4: '<svg viewBox="0 0 24 24" fill="#e9eaff"><rect x="17.5" y="5" width="2.5" height="14" rx="1"/><path d="M5 5.5v13a.8.8 0 0 0 1.2.7l9.8-6.5a.8.8 0 0 0 0-1.4L6.2 4.8A.8.8 0 0 0 5 5.5z"/></svg>',
+    m5: '<svg viewBox="0 0 24 24" fill="#e9eaff"><rect x="4" y="5" width="2.5" height="14" rx="1"/><path d="M19 5.5v13a.8.8 0 0 1-1.2.7L8 12.7a.8.8 0 0 1 0-1.4l9.8-6.5a.8.8 0 0 1 1.2.7z"/></svg>',
+  };
+  const S = { slots: [], settings: {}, browsers: [], sel: 0, device: {}, saveTimer: 0 };
+
+  // ------------------------------------------------------------ helpers
+  const el = (tag, attrs = {}, kids = []) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === 'text') e.textContent = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== undefined && v !== null) e.setAttribute(k, v);
+    }
+    for (const k of [].concat(kids)) if (k) e.append(k);
+    return e;
+  };
+  const iconFor = (a) => a.type === 'media' ? ICONS['m' + a.code] : ICONS[a.type];
+  function setMsg(kind, text) { const m = $('#up-msg'); m.className = 'msg ' + kind; m.textContent = text; m.hidden = !text; }
+  function saveSoon() { clearTimeout(S.saveTimer); S.saveTimer = setTimeout(() => api().save_slots(S.slots), 400); }
+
+  // A picture file / drop -> PNG data URL of at most 320 px, its own shape (the program
+  // fills or fits the card's key with it).
+  function toDataUrl(file) {
+    return new Promise((res) => {
+      const url = URL.createObjectURL(file), img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 320 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+        const g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url); res(c.toDataURL('image/png'));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); res(''); };
+      img.src = url;
+    });
+  }
+
+  // A see-through picture (program icon, logo) sits inside the key; a photo fills it
+  // (deck/blob.py is_icon decides the same way for the card).
+  const iconCache = new Map();
+  function isIcon(url) {
+    if (iconCache.has(url)) return iconCache.get(url);
+    const p = new Promise((res) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas'); c.width = c.height = 48;
+        const g = c.getContext('2d'); g.drawImage(img, 0, 0, 48, 48);
+        const d = g.getImageData(0, 0, 48, 48).data;
+        let clear = 0; for (let i = 3; i < d.length; i += 4) if (d[i] < 250) clear++;
+        res(clear > 0.03 * 48 * 48);
+      };
+      img.onerror = () => res(true);
+      img.src = url;
+    });
+    iconCache.set(url, p);
+    return p;
+  }
+
+  // ------------------------------------------------------------ keys grid
+  function renderGrid() {
+    const g = $('#grid'); g.textContent = '';
+    S.slots.forEach((s, i) => {
+      const a = s.action || { type: 'none' };
+      const empty = a.type === 'none' && !s.label && !s.img;
+      const b = el('button', { type: 'button', class: 'key' + (empty ? ' empty' : ''), 'aria-pressed': String(i === S.sel), draggable: 'true',
+        'aria-label': 'Tuş ' + (i + 1) + (s.label ? ': ' + s.label : ''),
+        onclick: () => { S.sel = i; renderGrid(); renderEditor(); },
+        ondragstart: (e) => { e.dataTransfer.setData('text/x-key', String(i)); },
+        ondragover: (e) => { if ([...e.dataTransfer.types].includes('text/x-key')) { e.preventDefault(); b.classList.add('drop'); } },
+        ondragleave: () => b.classList.remove('drop'),
+        ondrop: (e) => {
+          b.classList.remove('drop');
+          const from = parseInt(e.dataTransfer.getData('text/x-key'), 10);
+          if (isNaN(from) || from === i) return;
+          e.preventDefault();
+          [S.slots[from], S.slots[i]] = [S.slots[i], S.slots[from]];
+          S.sel = i; saveSoon(); renderGrid(); renderEditor();
+        } });
+      if (s.img) {
+        b.classList.add('pic');
+        if (!s.label) b.classList.add('nolabel');
+        isIcon(s.img).then((icon) => b.classList.toggle('icon', icon));
+        b.append(el('img', { src: s.img, alt: '' }));
+      }
+      else if (iconFor(a)) { const d = el('span'); d.innerHTML = iconFor(a); b.append(d.firstChild); }
+      if (s.label) b.append(el('span', { text: s.label }));
+      else if (empty) b.append(el('span', { text: 'Boş' }));
+      g.append(b);
+    });
+    renderPreview();
+  }
+
+  function isMusicUrl(u) {
+    let h = '';
+    try { h = new URL(/^[a-z]+:\/\//i.test(u || '') ? u : 'https://' + u).hostname.toLowerCase().replace(/^www\./, ''); } catch (_) { return false; }
+    return (S.musicHosts || []).some((m) => h === m || h.endsWith('.' + m));
+  }
+
+  // ------------------------------------------------------------ browser extension
+  function applyLink(L) {
+    S.link = L || {};
+    const ok = !!S.link.connected;
+    const txt = ok ? 'Eklenti bağlı: ' + S.link.browsers.join(', ') + (S.link.queue ? ' · sırada ' + S.link.queue + ' şarkı' : '')
+                   : (S.link.error ? 'Eklenti bağlantısı açılamadı: ' + S.link.error : 'Eklenti bağlı değil');
+    for (const [d, t] of [['#x-dot', '#x-state'], ['#dx-dot', '#dx-state']]) {
+      $(d).className = 'dot' + (ok ? ' ok' : '');
+      $(t).textContent = t === '#dx-state' && !ok ? 'Eklenti bekleniyor… (kurduktan sonra YouTube Music sekmesini yenile)' : txt;
+    }
+    $('#x-updated').hidden = !S.link.updated;
+    $('#q-state').textContent = ok ? (S.link.queue ? 'YouTube Music sırası geliyor (' + S.link.queue + ' şarkı).' : 'Eklenti bağlı; YouTube Music açılınca sıra gelir.')
+                                   : 'Tarayıcı eklentisi gerekir: Ayarlar › YouTube Music sırası.';
+  }
+  $('#b-ext').addEventListener('click', async () => {
+    const dlg = $('#dlg-ext');
+    $('#dx-folder').value = (S.link && S.link.folder) || '';
+    $('#dx-pick').textContent = S.mac
+      ? 'Açılan pencerede Cmd+Shift+G’ye bas, Cmd+V ile klasör yolunu yapıştır, Enter’a ve “Seç”e bas.'
+      : 'Açılan pencerede üstteki adres çubuğuna tıkla, Ctrl+V ile klasör yolunu yapıştır, Enter’a ve “Klasör seç”e bas.';
+    $('#dx-copied').textContent = '';
+    const box = $('#dx-browsers'); box.textContent = '';
+    const list = await api().ext_browsers();
+    if (!list.length) box.append(el('div', { class: 'small', text: 'Chrome, Edge ya da Brave bulunamadı.' }));
+    for (const b of list) {
+      box.append(el('button', { type: 'button', class: 'btn', text: b.name, onclick: async () => {
+        const ok = await api().ext_open(b.id);
+        $('#dx-copied').textContent = ok ? 'Eklentiler sayfası açıldı, klasör yolu da kopyalandı.' : 'Açılamadı: tarayıcıyı açıp adres çubuğuna yaz. Klasör yolu kopyalandı.';
+      } }));
+    }
+    dlg.showModal();
+  });
+  $('#dx-copy').addEventListener('click', async () => { const ok = await api().copy_text($('#dx-folder').value); $('#dx-copied').textContent = ok ? 'Kopyalandı.' : 'Kopyalanamadı.'; });
+  $('#dx-show').addEventListener('click', () => api().ext_folder_show());
+
+  // ------------------------------------------------------------ preview of the card
+  let pvTimer = null;
+  function renderPreview() {
+    clearTimeout(pvTimer);
+    pvTimer = setTimeout(async () => {
+      let L;
+      try { L = await api().preview(S.slots); } catch (_) { return; }
+      const pv = $('#pv'); pv.textContent = '';
+      const W = L.screen[0], H = L.screen[1], pc = (v, t) => (100 * v / t) + '%';
+      pv.style.aspectRatio = W + ' / ' + H;
+      pv.append(el('div', { class: 'ptab' }, [el('b', { text: 'MÜZİK' }), el('b', { text: 'TUŞLAR' })]));
+      const k = L.knob;
+      pv.append(el('div', { class: 'pknob', style: 'left:' + pc(k[0], W) + ';top:' + pc(k[1], H) + ';width:' + pc(k[2], W) + ';height:' + pc(k[2], H) }));
+      // Previous / play / next under the knob (always on the card, whatever the keys are).
+      const kcx = k[0] + k[2] / 2, by = 410 * W / 800;
+      for (const [dx, r, cls] of [[-78, 24, 'pbtn'], [0, 30, 'pbtn play'], [78, 24, 'pbtn']]) {
+        const R = r * W / 800;
+        pv.append(el('div', { class: cls, style: 'left:' + pc(kcx + dx * W / 800, W) + ';top:' + pc(by, H) + ';width:' + pc(2 * R, W) + ';height:' + pc(2 * R, H) }));
+      }
+      for (const b of L.keys) {
+        const s = S.slots[b.i], a = s.action || { type: 'none' };
+        const d = el('div', { class: 'pk' + (b.i === S.sel ? ' sel' : ''),
+          style: 'left:' + pc(b.x, W) + ';top:' + pc(b.y, H) + ';width:' + pc(b.w, W) + ';height:' + pc(b.h, H) + ';border-radius:' + (100 * L.radius / b.w) + '% / ' + (100 * L.radius / b.h) + '%' });
+        if (s.img) {
+          d.classList.add('pic'); if (!s.label) d.classList.add('nolabel');
+          isIcon(s.img).then((icon) => d.classList.toggle('icon', icon));
+          d.append(el('img', { src: s.img, alt: '' }));
+        } else if (iconFor(a)) { const t = el('span'); t.innerHTML = iconFor(a); d.append(t.firstChild); }
+        if (s.label) d.append(el('span', { text: s.label }));
+        d.addEventListener('click', () => { S.sel = b.i; renderGrid(); renderEditor(); });
+        pv.append(d);
+      }
+      $('#pv-hint').textContent = L.compact
+        ? 'Boş bıraktığın tuşlar kartta yer kaplamaz; kalan tuşlar ekranı doldurur.'
+        : 'Karttaki yazılım eski: tuşlar sabit 4 × 3 düzende. Kurulum sayfasından güncelleyince kalan tuşlar ekranı doldurur.';
+    }, 120);
+  }
+
+  // ------------------------------------------------------------ editor
+  function field(label, input) { return [el('label', { class: 'f', for: input.id, text: label }), input]; }
+  function input(id, value, onin, type = 'text') { return el('input', { class: 'in', id, type, value: value || '', autocomplete: 'off', oninput: (e) => onin(e.target.value) }); }
+
+  function renderEditor() {
+    const s = S.slots[S.sel], a = s.action;
+    $('#ed-title').textContent = 'Tuş ' + (S.sel + 1) + (s.label ? ' · ' + s.label : '');
+    $('#k-label').value = s.label || '';
+    const pic = $('#pic'); pic.textContent = '';
+    if (s.img) pic.append(el('img', { src: s.img, alt: '' })); else { const d = el('span', { class: 'small', text: 'Resim yok' }); pic.append(d); }
+    $('#b-noimg').disabled = !s.img;
+    $('#b-appicon').hidden = a.type !== 'app' || !a.path;
+    const acts = $('#acts'); acts.textContent = '';
+    for (const [id, label] of ACTS) {
+      acts.append(el('button', { type: 'button', class: 'act', role: 'radio', 'aria-checked': String(a.type === id), text: label,
+        onclick: () => { setType(id); } }));
+    }
+    renderPanel();
+  }
+
+  function setType(t) {
+    const s = S.slots[S.sel];
+    if (s.action.type === t) return;
+    const base = { none: {}, site: { url: 'https://', browser: '' }, app: { path: '', name: '', front: true }, media: { code: 3 }, keys: { combo: '' }, text: { text: '' }, folder: { path: '' } }[t];
+    s.action = Object.assign({ type: t }, base);
+    saveSoon(); renderGrid(); renderEditor();
+  }
+
+  function renderPanel() {
+    const s = S.slots[S.sel], a = s.action, p = $('#panel');
+    p.textContent = '';
+    p.hidden = a.type === 'none';
+    const set = (k) => (v) => { a[k] = v; saveSoon(); renderGrid(); };
+    if (a.type === 'site') {
+      p.append(...field('Adres', input('k-url', a.url, set('url'), 'url')));
+      const sel = el('select', { class: 'in', id: 'k-browser', onchange: (e) => set('browser')(e.target.value) });
+      sel.append(el('option', { value: '', text: 'Varsayılan tarayıcı' }));
+      for (const b of S.browsers) sel.append(el('option', { value: b.id, text: b.name }));
+      sel.value = a.browser || '';
+      p.append(...field('Hangi tarayıcıda?', sel), el('div', { class: 'small', style: 'margin-top:8px', text: 'Liste bu bilgisayarda kurulu tarayıcılardan oluşur.' }));
+      // Already open: that tab to the front (needs the browser extension).
+      const rb = el('input', { type: 'checkbox', id: 'k-reuse', onchange: (e) => { a.reuse = e.target.checked; saveSoon(); } });
+      rb.checked = a.reuse !== undefined ? !!a.reuse : isMusicUrl(a.url);
+      p.append(el('label', { style: 'display:flex;align-items:center;gap:10px;margin-top:12px' }, [rb, 'Açıksa aynı sekmeye geç, yeni sekme açma']),
+        el('div', { class: 'small', style: 'margin-top:4px', text: (S.link && S.link.connected) ? 'Tarayıcı eklentisi bağlı.' : 'Tarayıcı eklentisi gerekir (Ayarlar › YouTube Music sırası). Yoksa her basışta yeni sekme açılır.' }));
+    } else if (a.type === 'app') {
+      const show = el('input', { class: 'in', id: 'k-app', type: 'text', value: a.name || a.path || '', readonly: 'readonly' });
+      p.append(el('label', { class: 'f', for: 'k-app', text: 'Program' }),
+        el('div', { class: 'line' }, [show, el('button', { type: 'button', class: 'btn', text: 'Listeden seç', onclick: openPicker })]));
+      const cb = el('input', { type: 'checkbox', id: 'k-front', onchange: (e) => set('front')(e.target.checked) });
+      cb.checked = a.front !== false;
+      if (!S.mac) p.append(el('label', { style: 'display:flex;align-items:center;gap:10px;margin-top:12px' }, [cb, 'Zaten açıksa yenisini açma, öne getir']));
+    } else if (a.type === 'media') {
+      const sel = el('select', { class: 'in', id: 'k-media', onchange: (e) => { a.code = parseInt(e.target.value, 10); saveSoon(); renderGrid(); } });
+      for (const [v, t] of MEDIA) sel.append(el('option', { value: String(v), text: t }));
+      sel.value = String(a.code);
+      p.append(...field('Medya tuşu', sel));
+    } else if (a.type === 'keys') {
+      const inp = el('input', { class: 'in', id: 'k-keys', type: 'text', value: a.combo || '', placeholder: 'Kutuya tıklayıp kısayola bas', readonly: 'readonly' });
+      inp.addEventListener('keydown', (e) => {
+        e.preventDefault();
+        const k = e.key;
+        if (['Control', 'Shift', 'Alt', 'Meta'].includes(k)) return;
+        const parts = [];
+        if (e.ctrlKey) parts.push('Ctrl'); if (e.altKey) parts.push('Alt'); if (e.shiftKey) parts.push('Shift'); if (e.metaKey) parts.push(S.mac ? 'Cmd' : 'Win');
+        const named = { ' ': 'Space', ArrowLeft: 'Left', ArrowRight: 'Right', ArrowUp: 'Up', ArrowDown: 'Down', Escape: 'Esc', Delete: 'Delete', Backspace: 'Backspace', Enter: 'Enter', Tab: 'Tab', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown', Insert: 'Insert', PrintScreen: 'PrintScreen' };
+        let key = named[k] || (/^F\d{1,2}$/.test(k) ? k : (e.code.startsWith('Key') ? e.code.slice(3) : (e.code.startsWith('Digit') ? e.code.slice(5) : k.toUpperCase())));
+        parts.push(key);
+        a.combo = parts.join('+'); inp.value = a.combo; saveSoon();
+      });
+      p.append(...field('Klavye kısayolu', inp), el('div', { class: 'small', style: 'margin-top:8px', text: S.mac ? 'Kısayolu kutuya elle de yazabilirsin (ör. Cmd+Shift+4): kutuya çift tıkla. Kartın kendisi gönderemediği kısayollar için Mac bir kez "Erişilebilirlik" izni ister.' : 'Win tuşlu kısayollar için kutuya elle de yazabilirsin (ör. Win+Shift+S): kutuya çift tıkla.' }));
+      inp.addEventListener('dblclick', () => { inp.readOnly = false; inp.addEventListener('input', () => { a.combo = inp.value; saveSoon(); }, { once: false }); });
+    } else if (a.type === 'text') {
+      const ta = el('textarea', { class: 'in', id: 'k-text', oninput: (e) => { a.text = e.target.value; saveSoon(); } });
+      ta.value = a.text || '';
+      p.append(...field('Yazılacak metin', ta), el('div', { class: 'small', style: 'margin-top:8px', text: 'Türkçe karakterler dahil, imlecin olduğu yere yazılır.' }));
+    } else if (a.type === 'folder') {
+      const inp = input('k-folder', a.path, set('path'));
+      p.append(el('label', { class: 'f', for: 'k-folder', text: 'Klasör ya da dosya' }),
+        el('div', { class: 'line' }, [inp, el('button', { type: 'button', class: 'btn', text: 'Gözat', onclick: async () => { const f = await api().pick_folder(); if (f) { a.path = f; inp.value = f; saveSoon(); } } })]));
+    }
+  }
+
+  // ------------------------------------------------------------ program picker
+  let programs = null, picked = null;
+  async function openPicker() {
+    const dlg = $('#dlg'), list = $('#dlg-list');
+    picked = null;
+    dlg.showModal();
+    $('#dlg-q').value = '';
+    if (!programs) { list.textContent = 'Programlar listeleniyor…'; programs = await api().programs(); }
+    renderPrograms('');
+    $('#dlg-q').focus();
+  }
+  function renderPrograms(q) {
+    const list = $('#dlg-list'); list.textContent = '';
+    const low = q.toLocaleLowerCase('tr');
+    for (const p of programs.filter((x) => !low || x.name.toLocaleLowerCase('tr').includes(low)).slice(0, 200)) {
+      list.append(el('button', { type: 'button', role: 'option', 'aria-selected': String(picked === p), onclick: () => { picked = p; renderPrograms($('#dlg-q').value); } },
+        [el('span', { class: 'pi' }), p.name]));
+    }
+    if (!list.childElementCount) list.append(el('div', { class: 'small', style: 'padding:12px', text: 'Bulunamadı.' }));
+  }
+  async function choose(p) {
+    const s = S.slots[S.sel];
+    s.action.path = p.path; s.action.name = p.name;
+    if (!s.label) s.label = p.name.slice(0, 22);
+    if (!s.img) { const icon = await api().program_icon(p.path); if (icon) s.img = icon; }
+    saveSoon(); renderGrid(); renderEditor();
+  }
+  $('#dlg-q').addEventListener('input', (e) => renderPrograms(e.target.value));
+  $('#dlg-ok').addEventListener('click', async () => { if (picked) { $('#dlg').close(); await choose(picked); } });
+  $('#dlg-exe').addEventListener('click', async () => {
+    const path = await api().pick_program();
+    if (path) { $('#dlg').close(); await choose({ path, name: path.split('\\').pop().replace(/\.(exe|lnk)$/i, '') }); }
+  });
+
+  // ------------------------------------------------------------ editor buttons
+  $('#k-label').addEventListener('input', (e) => { S.slots[S.sel].label = e.target.value; $('#ed-title').textContent = 'Tuş ' + (S.sel + 1) + (e.target.value ? ' · ' + e.target.value : ''); saveSoon(); renderGrid(); });
+  $('#b-img').addEventListener('click', async () => { const u = await api().pick_image(); if (u) { S.slots[S.sel].img = u; saveSoon(); renderGrid(); renderEditor(); } });
+  $('#b-noimg').addEventListener('click', () => { S.slots[S.sel].img = ''; saveSoon(); renderGrid(); renderEditor(); });
+  $('#b-appicon').addEventListener('click', async () => { const a = S.slots[S.sel].action; const u = await api().program_icon(a.path); if (u) { S.slots[S.sel].img = u; saveSoon(); renderGrid(); renderEditor(); } else setMsg('info', 'Bu programın simgesi alınamadı; bir resim seçebilirsin.'); });
+  const pic = $('#pic');
+  pic.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); pic.classList.add('drop'); } });
+  pic.addEventListener('dragleave', () => pic.classList.remove('drop'));
+  pic.addEventListener('drop', async (e) => {
+    e.preventDefault(); pic.classList.remove('drop');
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) { const u = await toDataUrl(f); if (u) { S.slots[S.sel].img = u; saveSoon(); renderGrid(); renderEditor(); } }
+  });
+  $('#b-test').addEventListener('click', () => api().test(S.slots[S.sel].action));
+  $('#b-send').addEventListener('click', async () => {
+    clearTimeout(S.saveTimer);
+    $('#b-send').disabled = true; setMsg('info', 'Kart aranıyor…');
+    let ok = false;
+    try { ok = await api().send_to_card(S.slots); } catch (e) { ok = false; }
+    if (!ok) { const st = await api().live(); $('#b-send').disabled = false; setMsg('err', 'Gönderilemedi: ' + ((st.upload && st.upload.error) || 'kart bağlı değil.') + ' Ayrıntı: Ayarlar › Tanılama kaydı.'); return; }
+    $('#up-bar').hidden = false; setMsg('info', 'Hazırlanıyor…');
+  });
+
+  // ------------------------------------------------------------ pages and settings
+  for (const b of document.querySelectorAll('nav button')) {
+    b.addEventListener('click', () => {
+      for (const x of document.querySelectorAll('nav button')) x.removeAttribute('aria-current');
+      b.setAttribute('aria-current', 'page');
+      for (const id of ['keys', 'music', 'settings']) $('#page-' + id).hidden = id !== b.dataset.page;
+      if (b.dataset.page === 'settings') api().logs().then((t) => { $('#logs').textContent = t; });
+    });
+  }
+  $('#b-logrefresh').addEventListener('click', () => api().logs().then((t) => { $('#logs').textContent = t; }));
+  $('#b-logcopy').addEventListener('click', async () => { const ok = await api().copy_logs(); $('#log-msg').textContent = ok ? 'Kopyalandı: sohbete yapıştırabilirsin (Ctrl+V).' : 'Kopyalanamadı; "Masaüstüne kaydet"i dene.'; });
+  $('#b-logsave').addEventListener('click', async () => { const p = await api().save_logs(); $('#log-msg').textContent = p ? 'Kaydedildi: ' + p : 'Kaydedilemedi.'; });
+  function saveSettings() {
+    S.settings.autostart = $('#s-auto').checked;
+    S.settings.send_volume = $('#s-vol').checked;
+    S.settings.music_screen = $('#s-music').checked;
+    S.settings.back_seconds = parseInt($('#s-back').value, 10);
+    S.settings.close_quits = $('#s-close').checked;
+    S.settings.queue = $('#s-queue').checked;
+    api().save_settings(S.settings);
+  }
+  for (const id of ['#s-auto', '#s-vol', '#s-music', '#s-back', '#s-close', '#s-queue']) $(id).addEventListener('change', saveSettings);
+  $('#b-exit').addEventListener('click', () => { if (confirm('Program tamamen kapansın mı? Kartın tuşlarından site ve program açma, gerçek ses ve müzik ekranı program yeniden açılana kadar çalışmaz.')) api().exit(); });
+  $('#b-release').addEventListener('click', async () => { const st = await api().release(!S.device.released); applyDevice(st); });
+
+  function applyDevice(d) {
+    S.device = d;
+    const dot = $('#p-dot');
+    dot.className = 'dot' + (d.connected ? ' ok' : (d.released ? ' warn' : ''));
+    $('#p-card').textContent = d.released ? 'Bağlantı bırakıldı' : (d.connected ? 'Kart bağlı' : 'Kart bekleniyor');
+    $('#c-port').textContent = d.connected ? (d.port + (d.usb === 'kb' ? ', klavye modu' : ', kurulum modu')) : (d.released ? 'Bırakıldı (kurulum sayfası için)' : 'Bağlı değil');
+    $('#c-fw').textContent = d.fw || '–';
+    $('#b-release').textContent = d.released ? 'Bağlantıyı geri al' : 'Kurulum sayfası için bağlantıyı bırak';
+    $('#b-send').disabled = !!(S.upload && S.upload.running) || !(d.connected || d.released);
+  }
+  function applyLive(st) {
+    applyDevice(st.device);
+    if (st.link) applyLink(st.link);
+    const v = st.volume || {};
+    $('#p-vol').textContent = v.m ? 'Ses kapalı' : 'Ses %' + (v.v ?? '–');
+    const pct = v.m ? 0 : (v.v || 0);
+    $('#knob').style.background = 'conic-gradient(from 0deg, #ffb48c 0deg, #f6a9ad ' + (pct * 1.4) + 'deg, #b9a6ff ' + (pct * 3.6) + 'deg, rgba(255,255,255,0.10) ' + (pct * 3.6) + 'deg, rgba(255,255,255,0.10) 360deg)';
+    const n = st.now || {};
+    const playing = !n.none && n.t;
+    $('#p-now').hidden = !playing;
+    if (playing) $('#p-now').textContent = 'Çalan: ' + n.t;
+    $('#np-title').textContent = playing ? n.t : 'Şu an bir şey çalmıyor';
+    $('#np-artist').textContent = playing ? [n.a, n.al].filter(Boolean).join(' · ') : '';
+    $('#np-app').textContent = playing ? (n.play ? 'Çalıyor' : 'Duraklatıldı') + (n.app ? ' · ' + n.app : '') : '';
+    const u = st.upload || {};
+    S.upload = u;
+    if (u.running) { $('#up-bar').hidden = false; $('#up-bar').value = u.pct; setMsg('info', u.text); }
+    else if (!$('#up-bar').hidden) { $('#up-bar').hidden = true; setMsg(u.error ? 'err' : 'ok', u.error ? 'Gönderilemedi: ' + u.error : (u.text || 'Tuşlar karta gönderildi.')); }
+  }
+
+  async function start() {
+    const st = await api().state();
+    S.slots = st.slots; S.settings = st.settings; S.browsers = st.browsers;
+    $('#s-auto').checked = !!S.settings.autostart;
+    $('#s-vol').checked = !!S.settings.send_volume;
+    $('#s-music').checked = !!S.settings.music_screen;
+    $('#s-back').value = String(S.settings.back_seconds);
+    $('#s-close').checked = !!S.settings.close_quits;
+    $('#s-queue').checked = S.settings.queue !== false;
+    S.musicHosts = st.music_hosts || [];
+    applyLink(st.link);
+    $('#c-app').textContent = 'Plane Radar Deck ' + st.version;
+    S.mac = st.platform === 'mac';
+    if (S.mac) {
+      $('#t-music').textContent = "Mac'te çalan müziğin (Müzik, Spotify, tarayıcıda YouTube Music…) adı, süresi ve kapağı karta gider; müzik başlayınca kart Müzik ekranına geçer.";
+      $('#t-auto').textContent = 'Mac açılınca kendiliğinden başlat (menü çubuğunda)';
+      $('#t-close').textContent = 'Kapalıyken program menü çubuğunda çalışmaya devam eder; tuşlar ve müzik ekranı çalışır.';
+    }
+    renderGrid(); renderEditor(); applyLive(st);
+    setInterval(async () => { try { applyLive(await api().live()); } catch (_) { /* window closing */ } }, 1000);
+  }
+  if (window.pywebview && window.pywebview.api) start(); else window.addEventListener('pywebviewready', start);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+pyserial==3.5
+pillow>=10
+pywebview>=5.1
+pyobjc-core>=10
+pyobjc-framework-Cocoa>=10
+pyobjc-framework-Quartz>=10
+pyobjc-framework-WebKit>=10
+pyobjc-framework-ApplicationServices>=10
+websockets>=13
