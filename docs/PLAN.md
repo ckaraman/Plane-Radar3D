@@ -47,10 +47,11 @@ derlenmiyor; Aşama 10'da temizlenecek.
 
 | Ortam | Ne | Sürüm |
 |---|---|---|
-| `ws5` | Bugünkü firmware: radar + deck (`-DWITH_DECK`). Aşama 6'da 2. sistem olacak. | `5in-…` |
-| `radar` | 1. sistem: `src/deck` derlenmez, USB hep kurulum (USB-Serial/JTAG) modunda | `radar-…` |
+| `ws5` | 2. sistem: radar + deck (`-DWITH_DECK`), Wi-Fi yok, `src/net` derlenmez; veri USB'den | `5in-…` (0.40.0'dan itibaren Wi-Fi'siz) |
+| `radar` | 1. sistem: `-DWITH_WIFI`, `src/deck` derlenmez, USB hep kurulum (USB-Serial/JTAG) modunda | `radar-…` |
 
-Deck'e ait her satır `#if defined(WITH_DECK)` içinde. Sürümler `include/config.h` içinde.
+Deck'e ait her satır `#if defined(WITH_DECK)`, Wi-Fi'ye ait her satır `#if defined(WITH_WIFI)`
+içinde. Sürümler `include/config.h` içinde.
 
 ## Aşamalar
 
@@ -61,8 +62,8 @@ Deck'e ait her satır `#if defined(WITH_DECK)` içinde. Sürümler `include/conf
 | 2 | Tek dal, `core/net/deck/app` klasörleri, sadece 800×480 derlemesi (davranış aynı) | Tamam |
 | 3 | 1. sistem firmware'i: deck / USB klavye çıkar | Tamam (kartta denendi) |
 | 4 | 1. sistem kurulum sayfası + kurtarma rehberi | Tamam (kartta denendi) |
-| 5 | 2. sistem USB protokolünün yazılı tasarımı ([PROTOCOL.md](PROTOCOL.md)) | Bu adım (onay bekliyor) |
-| 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den | |
+| 5 | 2. sistem USB protokolünün yazılı tasarımı ([PROTOCOL.md](PROTOCOL.md)) | Tamam |
+| 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den (6a indirme kodu `src/net`'e, 6b ws5'ten Wi-Fi çıkar, 6c PREFS / sys / PC yok → saat, 6d sayfa) | Bu adım (6a tamam) |
 | 7 | PC programı: veri motoru (uçuş, rota, hava, saat) | |
 | 8 | PC programı: ayarlar, harita, firmware yükleme ve kurtarma | |
 | 9 | 2. sistem kurulum sayfası + SignPath (imzalı exe) başvurusu | |

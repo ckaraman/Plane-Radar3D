@@ -9,7 +9,9 @@
 #include <Arduino.h>
 #include "hardware/console.h"
 #include <esp_heap_caps.h>
+#if defined(WITH_WIFI)
 #include <WiFi.h>
+#endif
 
 #include <cmath>
 
@@ -32,7 +34,10 @@
 #include "services/usb_feed.h"
 #include "services/weather_service.h"
 #include "services/water_store.h"
+#include "services/serial_setup.h"
+#if defined(WITH_WIFI)
 #include "services/wifi_setup.h"
+#endif
 #include "ui/clock_display.h"
 #if defined(WITH_DECK)
 #include "ui/deck_screen.h"
@@ -70,7 +75,11 @@ int g_touch_first_x = 0;
 int g_touch_first_y = 0;
 
 /** Data source available: Wi-Fi, or aircraft arriving from the PC over USB. */
+#if defined(WITH_WIFI)
 bool online() { return WiFi.status() == WL_CONNECTED || services::usb_feed::active(); }
+#else
+bool online() { return services::usb_feed::active(); }
+#endif
 
 void showRadarIfConnected() {
 #if defined(BOARD_WS5)
@@ -234,10 +243,12 @@ void onBootTap() {
 }
 
 void handleBootButton() {
+#if defined(WITH_WIFI)  // shortcut: the button code lives in wifi_setup; the 5" board has none (GPIO 0 drives the LCD)
   bootButtonPollLongPress();
   if (bootButtonConsumeTap()) {
     onBootTap();
   }
+#endif
 }
 
 void openWeather() {
@@ -465,6 +476,7 @@ void pollTouch() {
 }
 #endif
 
+#if defined(WITH_WIFI)
 // ADS-B and weather fetches block for ~1-2 s each (HTTPS), so they run on their
 // own task on core 0; the render loop keeps dead-reckoning on core 1.
 void adsbFetchTask(void*) {
@@ -501,6 +513,7 @@ void adsbFetchTask(void*) {
     vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
   }
 }
+#endif  // WITH_WIFI
 
 }  // namespace
 
@@ -514,7 +527,9 @@ void setup() {
                  console::keyboardMode() ? "keyboard" : "setup");
 
   services::display_prefs::init();
+#if defined(WITH_WIFI)
   bootButtonInit();
+#endif
   displayInit();
   // The 76.8 KB frame sprite needs one contiguous block: take it before Wi-Fi.
   if (!ui::radar3d::init()) {
@@ -533,9 +548,11 @@ void setup() {
   }
 #endif
 
+#if defined(WITH_WIFI)
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }
+#endif
   services::location::init();
   services::map::init();
   services::terrain::init();
@@ -549,27 +566,32 @@ void setup() {
   services::deck::init();
 #endif
 
+#if defined(WITH_WIFI)
   if (wifiSetupConnect()) {
     showRadarIfConnected();
   }
 
   xTaskCreatePinnedToCore(adsbFetchTask, "adsb", 16384, nullptr, 1, nullptr, 0);
+#else
+  showRadarIfConnected();  // 5": the screens run at once, the data follows from the PC
+#endif
 }
 
 void loop() {
   if (services::serial_ota::active()) {
     // Firmware update over USB: only read the cable, as fast as possible.
-    wifiLoop();
+    services::serial_setup::poll();
     services::serial_ota::tick();
     return;
   }
   handleBootButton();
-  wifiLoop();
+  services::serial_setup::poll();
   console::tick();
   services::sht30::tick();
 
 #if defined(BOARD_WS5)
   {
+#if defined(WITH_WIFI)
     // Wi-Fi away: retried in the background, the screens keep working (the stream deck
     // needs only the USB cable).
     static unsigned long last_try_ms = 0;
@@ -585,6 +607,7 @@ void loop() {
       services::clock::startSync();
     }
     was_online = on;
+#endif
     if (!g_radar_visible) showRadarIfConnected();
     pollTouch();
     unsigned long interval = g_screen == Screen::Radar ? config::kRadarFrameIntervalMs
@@ -603,7 +626,7 @@ void loop() {
     delay(5);
     return;
   }
-#endif
+#else  // the old 4" board (not built in this repo; removed in stage 10)
 
   if (!online()) {
     if (g_radar_visible) {
@@ -648,4 +671,5 @@ void loop() {
   }
 
   delay(5);
+#endif
 }

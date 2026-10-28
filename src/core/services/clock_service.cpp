@@ -66,10 +66,15 @@ void startSync() {
     return;
   }
   s_started = true;
+#if defined(WITH_WIFI)
   // SNTP keeps retrying in the background, so this is fine to call as soon as
   // WiFi is up; the time simply appears once the first reply arrives.
   configTzTime(s_tz, config::kNtpServer1, config::kNtpServer2);
   Console.printf("Clock: NTP started, TZ=%s\n", s_tz);
+#else
+  // System 2: the PC sets the time (PR:AEND); no SNTP, so the network stack never starts.
+  applyTimezone();
+#endif
 }
 
 bool now(tm* out) {

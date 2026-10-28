@@ -1,7 +1,9 @@
 #include "ui/settings_menu.h"
 
 #include <Arduino.h>
+#if defined(WITH_WIFI)
 #include <WiFi.h>
+#endif
 #include <lgfx/v1/lgfx_fonts.hpp>
 
 #include <cmath>
@@ -11,8 +13,8 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/display_prefs.h"
+#include "services/serial_setup.h"
 #include "services/sht30.h"
-#include "services/wifi_setup.h"
 #include "ui/radar_range.h"
 #include "ui/fonts_tr.h"
 #include "ui/ui_scale.h"
@@ -150,12 +152,16 @@ void drawAll() {
   tft.setTextSize(1);
   tft.setTextColor(c(125, 139, 150), c(11, 22, 32));
   char info[64];
+#if defined(WITH_WIFI)
   if (WiFi.status() == WL_CONNECTED) {
     snprintf(info, sizeof(info), "v%s  %s", config::kFirmwareVersion,
              WiFi.localIP().toString().c_str());
   } else {
     snprintf(info, sizeof(info), "v%s  Wi-Fi yok", config::kFirmwareVersion);
   }
+#else
+  snprintf(info, sizeof(info), "v%s  USB", config::kFirmwareVersion);
+#endif
   tft.drawString(info, S(112), kTitleH / 2 - S(7));
   if (services::sht30::valid()) {
     snprintf(info, sizeof(info), "SHT30 %.1f°C  %%%d", services::sht30::temperatureC(),
@@ -184,11 +190,11 @@ bool waitTap(int* x, int* y) {
   lgfx::touch_point_t tp;
   // Let go of the long press that opened the menu (or the previous tap).
   while (tft.getTouch(&tp) > 0) {
-    wifiLoop();
+    services::serial_setup::poll();
     delay(15);
   }
   while (millis() - start < kIdleCloseMs) {
-    wifiLoop();
+    services::serial_setup::poll();
     if (tft.getTouch(&tp) > 0) {
       *x = tp.x;
       *y = tp.y;

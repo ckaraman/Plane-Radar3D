@@ -2308,16 +2308,22 @@ void drawTopBar(size_t in_range, unsigned long fetched_ms) {
   s_spr.setTextColor(kText);
   s_spr.drawString("RADAR 3B", S(19), ty);
   const int src_x = S(19) + s_spr.textWidth("RADAR 3B") + S(10);
-#if !defined(RADAR3D_HOST_TEST)
-  const bool wifi_away = !services::usb_feed::active() && WiFi.status() != WL_CONNECTED;
-#else
+#if defined(RADAR3D_HOST_TEST)
   const bool wifi_away = false;
+#elif defined(WITH_WIFI)
+  const bool wifi_away = !services::usb_feed::active() && WiFi.status() != WL_CONNECTED;
+#else  // system 2: the data comes only from the PC
+  const bool wifi_away = !services::usb_feed::active();
 #endif
   s_spr.setTextColor(wifi_away ? kOrange : kTextDim);
+#if defined(WITH_WIFI) || defined(RADAR3D_HOST_TEST)
   s_spr.drawString(services::usb_feed::active() ? "USB"
                    : wifi_away                  ? "Wi-Fi yok, yeniden bağlanıyor"
                                                 : services::adsb::sourceName(),
                    src_x, ty);
+#else
+  s_spr.drawString(wifi_away ? "PC programı bekleniyor" : "USB", src_x, ty);
+#endif
 
   char buf[40];
   char range[12];
@@ -2483,6 +2489,7 @@ void drawEmptyNote(unsigned long fetched_ms) {
   s_spr.setTextColor(kTextDim);
   s_spr.drawString(fetched_ms == 0 ? "Uçak verisi bekleniyor..." : "Menzilde uçak yok", kW / 2,
                    kTopBarH + kStripH + S(24));
+#if defined(WITH_WIFI) || defined(RADAR3D_HOST_TEST)
   const char* err = services::adsb::lastError();
   if (fetched_ms == 0 && err[0] != '\0' && !services::usb_feed::active()) {
     char line[64];
@@ -2490,6 +2497,7 @@ void drawEmptyNote(unsigned long fetched_ms) {
     setFont(&ui::font::Sans8);
     s_spr.drawString(line, kW / 2, kTopBarH + kStripH + S(44));
   }
+#endif
 }
 
 uint16_t s_lut565[256];  // palette as the panel's frame buffer stores it (byte-swapped RGB565)

@@ -6,11 +6,14 @@
 #endif
 
 #include <Arduino.h>
+#if defined(WITH_WIFI)
 #include <WiFi.h>
+#include <esp_wifi.h>
+#endif
 
 #include <ArduinoJson.h>
+#include <esp_mac.h>
 #include <esp_system.h>
-#include <esp_wifi.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -24,7 +27,9 @@
 #include "services/usb_feed.h"
 #include "services/serial_ota.h"
 #include "services/terrain.h"
+#if defined(WITH_WIFI)
 #include "services/wifi_setup.h"
+#endif
 #include "ui/radar_range.h"
 
 namespace services::serial_setup {
@@ -91,12 +96,13 @@ void sendHello() {
 #endif
 
   uint8_t mac[6] = {};
-  WiFi.macAddress(mac);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);  // the same id with or without Wi-Fi
   char mac_text[13];
   snprintf(mac_text, sizeof(mac_text), "%02X%02X%02X%02X%02X%02X", mac[0], mac[1],
            mac[2], mac[3], mac[4], mac[5]);
   doc["mac"] = mac_text;
 
+#if defined(WITH_WIFI)
   const bool connected = WiFi.status() == WL_CONNECTED;
   doc["wifi"] = connected;
   char ssid[33] = {};
@@ -107,6 +113,7 @@ void sendHello() {
   }
   doc["ssid"] = ssid;
   doc["ip"] = ip;
+#endif
 
   doc["lat"] = services::location::lat();
   doc["lon"] = services::location::lon();
@@ -150,6 +157,7 @@ void sendHello() {
   sendReply("HELLO", doc);
 }
 
+#if defined(WITH_WIFI)
 void ensureStaEnabled() {
   const wifi_mode_t mode = WiFi.getMode();
   if ((mode & WIFI_MODE_STA) == 0) {
@@ -280,6 +288,7 @@ JoinResult tryJoin(const char* ssid, const char* pass) {
   }
   return {false, "timeout"};
 }
+#endif  // WITH_WIFI
 
 bool optionalBool(const JsonDocument& doc, const char* key, bool fallback) {
   return doc[key].is<bool>() ? doc[key].as<bool>() : fallback;
@@ -316,6 +325,7 @@ void handleSet(const char* json) {
     return;
   }
 
+#if defined(WITH_WIFI)
   const char* ssid =
       doc["ssid"].is<const char*>() ? doc["ssid"].as<const char*>() : "";
   const char* pass =
@@ -328,6 +338,7 @@ void handleSet(const char* json) {
     sendError("bad_wifi_password");  // WPA passwords are 8..63 characters
     return;
   }
+#endif
 
   // Settings that do not depend on the network.
   if (has_lat) {
@@ -357,6 +368,10 @@ void handleSet(const char* json) {
     ui::radar::saveRingsFromPortal(doc["rings"].as<bool>() ? "T" : "");
   }
 
+#if !defined(WITH_WIFI)
+  sendOk(false);  // no Wi-Fi: "ssid" / "pass" are ignored
+}
+#else
   if (ssid[0] == '\0') {
     sendOk(false);
     return;
@@ -392,6 +407,7 @@ void handleSet(const char* json) {
   delay(700);
   esp_restart();  // clean start on the saved network
 }
+#endif  // WITH_WIFI
 
 int b64Value(char c) {
   if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -554,7 +570,18 @@ void handleReset() {
   sendOk(true);
   Console.flush();
   delay(200);
+#if defined(WITH_WIFI)
   wifiResetCredentialsAndReboot();
+#else
+  // Same settings as the Wi-Fi reset clears (wifi_setup.cpp), without the network.
+  services::location::clear();
+  services::clock::clear();
+  services::weather::clear();
+  services::map::clear();
+  services::terrain::clear();
+  ui::radar::unitsReset();
+  esp_restart();
+#endif
 }
 
 void handleLine(char* line) {
@@ -611,8 +638,10 @@ void handleLine(char* line) {
     services::deck::clear();
     sendOk(false);
 #endif
+#if defined(WITH_WIFI)
   } else if (strcmp(command, "SCAN") == 0) {
     sendScan();
+#endif
   } else if (strcmp(command, "SET") == 0) {
     handleSet(args);
   } else if (strcmp(command, "MAPBEGIN") == 0) {
