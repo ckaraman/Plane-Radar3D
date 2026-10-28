@@ -108,8 +108,8 @@
 </head>
 <body>
 <main>
-  <h1>Plane Radar 3D kurulum<span class="or"> <span class="sub">(1. sistem: Wi-Fi radar)</span></span></h1>
-  <p class="lead">Cihazı USB ile bilgisayara bağlayın, WiFi ve konumunuzu girin. Yazılım güncellemek için de aynı sayfayı kullanın.</p>
+  <h1>Plane Radar 3D kurulum<span class="or"> <span class="sub">(1. sistem: Wi-Fi radar)</span></span><span class="nr"> <span class="sub">(2. sistem: PC destekli radar + deck)</span></span></h1>
+  <p class="lead">Cihazı USB ile bilgisayara bağlayın, <span class="or">WiFi ve </span>konumunuzu girin. Yazılım güncellemek için de aynı sayfayı kullanın.</p>
 
   <noscript><div class="msg err">Bu sayfa JavaScript gerektirir.</div></noscript>
   <div id="unsupported" class="msg warn" hidden>
@@ -168,6 +168,7 @@
     <fieldset id="settings-fields" disabled>
       <p class="hint" id="settings-hint">Önce 1. adımda cihaza bağlanın.</p>
 
+      <div class="or">  <!-- system 2 has no Wi-Fi -->
       <label for="ssid">WiFi ağı <span class="sub">(yalnızca 2,4 GHz ağlar)</span></label>
       <div class="row">
         <input type="text" id="ssid" autocomplete="off" spellcheck="false" style="flex:1 1 220px" placeholder="Ağ adı">
@@ -182,6 +183,7 @@
         <button type="button" class="btn" id="btn-showpass" aria-pressed="false">Göster</button>
       </div>
       <small id="wifi-keep" hidden>Cihaz şu an bir ağa bağlı. Ağ adını boş bırakırsanız mevcut bağlantı korunur.</small>
+      </div>
 
       <label for="city">Konum <span class="sub">(radarın merkezi; şehir merkezi yeterlidir, tam adres gerekmez)</span></label>
       <div class="row">
@@ -235,7 +237,7 @@
 
   <section class="card" aria-labelledby="h-update">
     <h2 id="h-update"><span class="step">3</span>Yazılımı güncelle</h2>
-    <p class="hint">Güncelleme yalnızca yazılımı yeniler; WiFi, konum ve diğer ayarlarınız silinmez.</p>
+    <p class="hint">Güncelleme yalnızca yazılımı yeniler; <span class="or">WiFi, </span>konum ve diğer ayarlarınız silinmez.</p>
     <div class="msg info" id="msg-version" hidden role="status" aria-live="polite"></div>
     <div class="row" style="margin-top:12px">
       <button type="button" class="btn primary" id="btn-usb-update" disabled>Yazılımı güncelle</button>
@@ -288,7 +290,7 @@
       <div class="row" style="margin-top:12px">
         <button type="button" class="btn danger" id="btn-reset" disabled>Ayarları sıfırla</button>
       </div>
-      <p class="small">“Ayarları sıfırla” bağlı cihazdaki WiFi, konum ve birim ayarlarını siler ve cihazı yeniden başlatır.</p>
+      <p class="small">“Ayarları sıfırla” bağlı cihazdaki <span class="or">WiFi, </span>konum, harita ve birim ayarlarını siler ve cihazı yeniden başlatır.</p>
     </details>
   </section>
 
@@ -809,7 +811,7 @@
       const items = [
         'Bağlı',
         'Yazılım ' + d.fw,
-        d.wifi ? 'WiFi: ' + d.ssid + ' (' + d.ip + ')' : 'WiFi: bağlı değil',
+        d.sys === 2 ? 'Veri: PC (USB)' : d.wifi ? 'WiFi: ' + d.ssid + ' (' + d.ip + ')' : 'WiFi: bağlı değil',
         'Kimlik ' + d.mac,
       ];
       if (d.map > 0) items.push('Harita: ' + Math.round(d.map / 1024) + ' KB');
@@ -1989,7 +1991,7 @@
   }
 
   async function resetDevice() {
-    if (!confirm('Cihazdaki WiFi, konum ve birim ayarları silinecek ve cihaz yeniden başlayacak. Devam edilsin mi?')) return;
+    if (!confirm('Cihazdaki ' + (SYS === 'radar' ? 'WiFi, ' : '') + 'konum, harita ve birim ayarları silinecek ve cihaz yeniden başlayacak. Devam edilsin mi?')) return;
     try {
       state.expectingDrop = true;
       await request('PR:RESET', ['OK'], 8000);
