@@ -60,8 +60,8 @@ Deck'e ait her satır `#if defined(WITH_DECK)` içinde. Sürümler `include/conf
 | 1 | Mevcut kod yeni repoda derleniyor ve yayında | Tamam |
 | 2 | Tek dal, `core/net/deck/app` klasörleri, sadece 800×480 derlemesi (davranış aynı) | Tamam |
 | 3 | 1. sistem firmware'i: deck / USB klavye çıkar | Tamam (kartta denendi) |
-| 4 | 1. sistem kurulum sayfası + kurtarma rehberi | Bu adım |
-| 5 | 2. sistem USB protokolünün yazılı tasarımı | |
+| 4 | 1. sistem kurulum sayfası + kurtarma rehberi | Tamam (kartta denendi) |
+| 5 | 2. sistem USB protokolünün yazılı tasarımı ([PROTOCOL.md](PROTOCOL.md)) | Bu adım (onay bekliyor) |
 | 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den | |
 | 7 | PC programı: veri motoru (uçuş, rota, hava, saat) | |
 | 8 | PC programı: ayarlar, harita, firmware yükleme ve kurtarma | |
