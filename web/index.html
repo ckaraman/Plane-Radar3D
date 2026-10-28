@@ -280,10 +280,10 @@
             <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
           </esp-web-install-button>
         </div>
-        <p class="small">Kartınızın ekranı 1024×600 ise (ESP32-S3-Touch-LCD-5<strong>B</strong>, kutuda SKU 28151) bunun yerine:</p>
+        <p class="small"><strong>Deneme: 1. sistem (yalnız WiFi radar, deck yok).</strong> Ayarlar ve harita kalır. Geri dönmek için 3. adımdaki “Yazılımı güncelle” yeter. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
         <div class="row">
-          <esp-web-install-button id="install-full-ws5b" manifest="manifest-full-ws5b.json">
-            <button slot="activate" class="btn" type="button">5B (1024×600) tam kurulum</button>
+          <esp-web-install-button id="install-update-radar" manifest="manifest-update-radar.json">
+            <button slot="activate" class="btn" type="button">1. sistemi yükle (deneme)</button>
             <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
             <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
           </esp-web-install-button>
@@ -1910,7 +1910,7 @@
   }
 
   // ------------------------------------------------------------------ model
-  const INSTALLERS = ['install-update', 'install-full', 'install-update-ws5', 'install-full-ws5', 'install-full-ws5b'];
+  const INSTALLERS = ['install-update', 'install-full', 'install-update-ws5', 'install-full-ws5', 'install-update-radar'];
   const MODEL_NAMES = { '4': '4" Radar (ESP32-WROOM + 4.0" ekran)', '5': '5" Radar (Waveshare ESP32-S3-Touch-LCD-5)' };
 
   function setModel(m, remember) {
@@ -2298,7 +2298,7 @@
     }
     $('#btn-model-change').addEventListener('click', changeModel);
     // Capture on the row: runs before the installer's own click handler.
-    for (const id of ['install-update-ws5', 'install-full-ws5', 'install-full-ws5b']) {
+    for (const id of ['install-update-ws5', 'install-full-ws5', 'install-update-radar']) {
       const el = document.getElementById(id);
       if (el && el.parentElement) el.parentElement.addEventListener('click', prepFlash5, true);
     }

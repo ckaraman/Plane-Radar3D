@@ -18,9 +18,11 @@
 #include "services/adsb_client.h"
 #include "services/clock_service.h"
 #include "services/display_prefs.h"
+#if defined(WITH_DECK)
 #include "services/deck_store.h"
 #include "services/host_link.h"
 #include "services/hid_keys.h"
+#endif
 #include "services/map_store.h"
 #include "services/radar_location.h"
 #include "services/route_service.h"
@@ -32,7 +34,9 @@
 #include "services/water_store.h"
 #include "services/wifi_setup.h"
 #include "ui/clock_display.h"
+#if defined(WITH_DECK)
 #include "ui/deck_screen.h"
+#endif
 #include "ui/radar3d.h"
 #include "ui/radar_range.h"
 #include "ui/screen_switch.h"
@@ -153,7 +157,7 @@ void updateScreen() {
     g_last_aircraft_ms = now;
   }
 
-#if defined(BOARD_WS5)
+#if defined(WITH_DECK)
   // Stream deck: stays until its RADAR button is tapped. The water reminder waits.
   if (g_screen == Screen::Deck) {
     if (!ui::deck::tick()) wakeRadar();
@@ -201,7 +205,7 @@ void repaintScreen() {
     case Screen::Weather: ui::weatherDisplayEnter(); break;
     case Screen::Water: ui::water::enter(); break;
     case Screen::Deck:
-#if defined(BOARD_WS5)
+#if defined(WITH_DECK)
       ui::deck::enter();
 #endif
       break;
@@ -246,7 +250,7 @@ void openWater() {
   ui::water::enter();
 }
 
-#if defined(BOARD_WS5)
+#if defined(WITH_DECK)
 void openDeck() {
   g_screen = Screen::Deck;
   ui::deck::enter();
@@ -298,10 +302,12 @@ void onTouchTap(int x, int y) {
     return;
   }
 #if defined(BOARD_WS5)
+#if defined(WITH_DECK)
   if (ui::deckButtonHit(x, y)) {
     openDeck();
     return;
   }
+#endif
   if (ui::radarWaterButtonHit(x, y)) {
 #else
   if (ui::waterButtonHit(x, y)) {
@@ -327,6 +333,7 @@ void pollTouch() {
   lgfx::touch_point_t tps[2];
   const int n = tft.getTouch(tps, 2);
   const unsigned long now = millis();
+#if defined(WITH_DECK)
   // Stream deck: it handles presses, knob turns and releases itself.
   if (g_screen == Screen::Deck && !ui::water::overlayActive()) {
     g_touch_down = false;
@@ -335,6 +342,7 @@ void pollTouch() {
     }
     return;
   }
+#endif
   const bool on_radar = g_screen == Screen::Radar && !ui::water::overlayActive();
   if (n > 0) {
     if (!g_touch_down) {
@@ -537,7 +545,9 @@ void setup() {
   ui::radar::rangeInit();
   services::adsb::init();
   services::route::init();
+#if defined(WITH_DECK)
   services::deck::init();
+#endif
 
   if (wifiSetupConnect()) {
     showRadarIfConnected();
@@ -580,9 +590,11 @@ void loop() {
     unsigned long interval = g_screen == Screen::Radar ? config::kRadarFrameIntervalMs
                              : g_screen == Screen::Deck ? 33UL  // knob and music page move smoothly
                                                         : config::kRadarRedrawIntervalMs;
+#if defined(WITH_DECK)
     // An album cover on its way from the Windows helper: one small chunk per answer, so
     // fewer frames for those few seconds let it arrive many times faster.
     if (services::host::coverReceiving() && interval < 250UL) interval = 250UL;
+#endif
     if (millis() - g_last_redraw_ms >= interval) {
       g_last_redraw_ms = millis();
       updateScreen();
@@ -622,9 +634,11 @@ void loop() {
           g_screen == Screen::Radar ? config::kRadarFrameIntervalMs
           : g_screen == Screen::Deck ? 33UL  // knob and music page move smoothly
                                      : config::kRadarRedrawIntervalMs;
+#if defined(WITH_DECK)
       // An album cover on its way from the Windows helper: one small chunk per answer, so
       // fewer frames for those few seconds let it arrive many times faster.
       if (services::host::coverReceiving() && interval < 250UL) interval = 250UL;
+#endif
       if (millis() - g_last_redraw_ms >= interval) {
         g_last_redraw_ms = millis();
         updateScreen();

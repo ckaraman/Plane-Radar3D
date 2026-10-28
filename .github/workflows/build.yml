@@ -128,19 +128,24 @@ jobs:
           python -m venv "$HOME/pio-s3"
           "$HOME/pio-s3/bin/pip" install "platformio==6.1.18" "click<8.2" uv
 
+      # ws5 = radar + stream deck (today's firmware), radar = system 1 (Wi-Fi radar alone).
       - name: Build + merge
         run: |
           export PATH="$HOME/pio-s3/bin:$PATH"
-          # Errors as annotations: readable without downloading the log.
           set -o pipefail
-          PLATFORMIO_CORE_DIR="$HOME/.pio-core-ws5" pio run -e ws5 -t merge 2>&1 | tee pio.log || {
-            grep -nE "error|Error|undefined reference|overflow|too big" pio.log | head -40 | while IFS= read -r l; do echo "::error::${l:0:900}"; done
-            tail -12 pio.log | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
-            exit 1
-          }
-          # Guard: the board has octal PSRAM; a quad-PSRAM build boot-loops on it.
-          grep -q "CONFIG_SPIRAM_MODE_OCT 1" .pio/build/ws5/config/sdkconfig.h || { echo "::error::built without octal PSRAM"; exit 1; }
-          ls -l .pio/build/ws5/*.bin
+          for ENV in ws5 radar; do
+            # Errors as annotations: readable without downloading the log.
+            PLATFORMIO_CORE_DIR="$HOME/.pio-core-$ENV" pio run -e $ENV -t merge 2>&1 | tee pio.log || {
+              grep -nE "error|Error|undefined reference|overflow|too big" pio.log | head -40 | while IFS= read -r l; do echo "::error::$ENV: ${l:0:900}"; done
+              tail -12 pio.log | while IFS= read -r l; do echo "::warning::${l:0:900}"; done
+              exit 1
+            }
+            # Guard: the board has octal PSRAM; a quad-PSRAM build boot-loops on it.
+            grep -q "CONFIG_SPIRAM_MODE_OCT 1" .pio/build/$ENV/config/sdkconfig.h || { echo "::error::$ENV built without octal PSRAM"; exit 1; }
+            # The library rebuild may wipe .pio/build: copy each env's images out at once.
+            mkdir -p out/$ENV && cp .pio/build/$ENV/*.bin out/$ENV/
+            ls -l out/$ENV
+          done
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
@@ -148,8 +153,10 @@ jobs:
           name: plane-radar-3d-firmware
           if-no-files-found: error
           path: |
-            .pio/build/ws5/firmware-merged.bin
-            .pio/build/ws5/firmware.bin
+            out/ws5/firmware-merged.bin
+            out/ws5/firmware.bin
+            out/radar/firmware-merged.bin
+            out/radar/firmware.bin
 
       - name: Helper protocol tests (fake card)
         run: |
@@ -175,15 +182,19 @@ jobs:
         run: |
           set -x
           trap 'echo "::error title=assemble::failed at line $LINENO: $BASH_COMMAND"' ERR
-          VERSION=$(sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' include/config.h | head -n 1)
-          test -n "$VERSION"
+          ver() { sed -n 's/^constexpr char kFirmwareVersion\[\] = "\([^"]*\)";.*/\1/p' include/config.h | grep "$1" | head -n 1; }
+          VERSION=$(ver '^5in-')
+          VERSION_RADAR=$(ver '^radar-')
+          test -n "$VERSION" && test -n "$VERSION_RADAR"
           mkdir -p site
           cp web/index.html web/tz.json web/tz-LICENSE.txt site/
-          B=.pio/build/ws5
-          cp $B/firmware.bin site/firmware-ws5.bin
-          cp $B/firmware-merged.bin site/firmware-merged-ws5.bin
-          cp $B/bootloader.bin site/bootloader-ws5.bin
-          cp $B/partitions.bin site/partitions-ws5.bin
+          for ENV in ws5 radar; do
+            B=out/$ENV
+            cp $B/firmware.bin site/firmware-$ENV.bin
+            cp $B/firmware-merged.bin site/firmware-merged-$ENV.bin
+            cp $B/bootloader.bin site/bootloader-$ENV.bin
+            cp $B/partitions.bin site/partitions-$ENV.bin
+          done
           (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
           chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
           (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
@@ -191,11 +202,11 @@ jobs:
           for d in PlaneRadarDeck-mac.dmg PlaneRadarDeck-mac-intel.dmg; do
             if [ -f "out/deck/$d" ]; then cp "out/deck/$d" site/; else echo "::warning::$d not built"; fi
           done
-          python3 - "$VERSION" <<'PY'
+          python3 - "$VERSION" "$VERSION_RADAR" <<'PY'
           import json, sys
-          version = sys.argv[1]
+          version, version_radar = sys.argv[1], sys.argv[2]
 
-          def write(path, name, parts):
+          def write(path, name, parts, version=version):
               with open(path, "w", encoding="utf-8") as f:
                   json.dump({"name": name, "version": version, "new_install_prompt_erase": True,
                              "builds": [{"chipFamily": "ESP32-S3", "parts": parts}]}, f, indent=2)
@@ -212,9 +223,17 @@ jobs:
               {"path": "firmware-ws5.bin", "offset": 65536}])
           write("site/manifest-full-ws5.json", "Plane Radar 3D 5in full install",
                 [{"path": "firmware-merged-ws5.bin", "offset": 0}])
+          # System 1 (Wi-Fi radar alone): same layout, so its update keeps the settings too.
+          write("site/manifest-update-radar.json", "Plane Radar 3D system 1 update", [
+              {"path": "bootloader-radar.bin", "offset": 0},
+              {"path": "partitions-radar.bin", "offset": 32768},
+              {"path": "otadata-blank.bin", "offset": 57344},
+              {"path": "firmware-radar.bin", "offset": 65536}], version_radar)
+          write("site/manifest-full-radar.json", "Plane Radar 3D system 1 full install",
+                [{"path": "firmware-merged-radar.bin", "offset": 0}], version_radar)
           # shortcut: "version" (the old 4in key) repeats the 5in one until the page drops the 4in model (stage 4).
           with open("site/version.json", "w", encoding="utf-8") as f:
-              json.dump({"version": version, "version_ws5": version}, f)
+              json.dump({"version": version, "version_ws5": version, "version_radar": version_radar}, f)
           PY
           ls -l site
 

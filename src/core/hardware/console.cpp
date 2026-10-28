@@ -10,7 +10,9 @@
 #include <soc/rtc_cntl_reg.h>
 #include <soc/usb_serial_jtag_reg.h>
 
+#if defined(WITH_DECK)
 #include "services/hid_keys.h"
+#endif
 #include "services/serial_ota.h"
 
 extern "C" bool tud_disconnect(void);  // TinyUSB (tusb.h)
@@ -93,7 +95,11 @@ void phyToJtag() {
 }  // namespace
 
 void begin() {
+#if defined(WITH_DECK)
   s_mode = storedSetup() ? Mode::Setup : Mode::Keyboard;
+#else
+  s_mode = Mode::Setup;  // no stream deck: always the USB-Serial/JTAG port
+#endif
   if (s_mode == Mode::Setup) {
     phyToJtag();  // in case TinyUSB had the PHY before the restart
     s_jtag = new HWCDC();
@@ -107,7 +113,9 @@ void begin() {
     s_cdc->setRxBufferSize(kRxBufferKeyboard);
     s_cdc->begin(115200);
     s_io = s_cdc;
+#if defined(WITH_DECK)
     services::hid::begin();
+#endif
     USB.PID(kKeyboardPid);
     USB.productName("Plane Radar 3D");
     USB.manufacturerName("Plane Radar");
@@ -119,6 +127,9 @@ void begin() {
 Mode mode() { return s_mode; }
 
 void switchTo(Mode m) {
+#if !defined(WITH_DECK)
+  m = Mode::Setup;  // there is no keyboard mode to go to
+#endif
   Console.printf("PR:USBMODE {\"usb\":\"%s\",\"restart\":%s}\n", m == Mode::Setup ? "setup" : "kb",
                  m == s_mode ? "false" : "true");
   if (m == s_mode) return;
@@ -155,11 +166,13 @@ void tick() {
     }
     return;
   }
+#if defined(WITH_DECK)
   if (services::serial_ota::active()) return;
   if (millis() - s_last_activity_ms >= kSetupIdleMs) {
     storeSetup(false);
     restartDetached();
   }
+#endif
 }
 
 }  // namespace console

@@ -34,14 +34,23 @@ ekler, bu yüzden `#include "services/adsb_client.h"` gibi satırlar değişmedi
 | Dosya | Bağ | Ayrılacağı aşama |
 |---|---|---|
 | `app/services/serial_setup` | WiFi, deck tuşları, USB köprüsü komutları bir arada | 3 ve 6 |
-| `core/hardware/console` | USB klavye (deck) modu ile kurulum modu iç içe | 3 |
+| `core/hardware/console` | USB klavye (deck) modu ile kurulum modu iç içe | 3 (tamam: `WITH_DECK` yoksa hep kurulum modu) |
 | `core/services/adsb_client` | Uçak listesi (ortak) + HTTPS indirme (1. sistem) | 6 |
 | `core/services/weather_service` | Hava verisi (ortak) + indirme (1. sistem) | 6 |
 | `core/services/route_service` | Rota verisi (ortak) + indirme (1. sistem) | 6 |
 | `core/ui/settings_menu` | Ayarlar menüsü `wifi_setup`'a bağlı | 6 |
 
-Ayrıca 4" ve 5B (1024×600) kalıntıları (`BOARD_WS5B`, `!BOARD_WS5` blokları, `fonts_tr.cpp`,
-`fonts_tr_ws5b.cpp`, `ui_fonts_ws5b.cpp`) derlenmiyor; Aşama 3'te silinecek.
+4" ve 5B (1024×600) fontları Aşama 3'te silindi. Koddaki `BOARD_WS5B` / `!BOARD_WS5` blokları
+derlenmiyor; Aşama 10'da temizlenecek.
+
+## Derleme ortamları (`platformio.ini`)
+
+| Ortam | Ne | Sürüm |
+|---|---|---|
+| `ws5` | Bugünkü firmware: radar + deck (`-DWITH_DECK`). Aşama 6'da 2. sistem olacak. | `5in-…` |
+| `radar` | 1. sistem: `src/deck` derlenmez, USB hep kurulum (USB-Serial/JTAG) modunda | `radar-…` |
+
+Deck'e ait her satır `#if defined(WITH_DECK)` içinde. Sürümler `include/config.h` içinde.
 
 ## Aşamalar
 
@@ -49,8 +58,8 @@ Ayrıca 4" ve 5B (1024×600) kalıntıları (`BOARD_WS5B`, `!BOARD_WS5` bloklar�
 |---|---|---|
 | 0 | Git, GitHub girişi, yeni repo | Tamam |
 | 1 | Mevcut kod yeni repoda derleniyor ve yayında | Tamam |
-| 2 | Tek dal, `core/net/deck/app` klasörleri, sadece 800×480 derlemesi (davranış aynı) | Bu adım |
-| 3 | 1. sistem firmware'i: deck / USB klavye çıkar | |
+| 2 | Tek dal, `core/net/deck/app` klasörleri, sadece 800×480 derlemesi (davranış aynı) | Tamam |
+| 3 | 1. sistem firmware'i: deck / USB klavye çıkar | Bu adım |
 | 4 | 1. sistem kurulum sayfası + kurtarma rehberi | |
 | 5 | 2. sistem USB protokolünün yazılı tasarımı | |
 | 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den | |

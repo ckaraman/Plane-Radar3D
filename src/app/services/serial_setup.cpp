@@ -1,7 +1,9 @@
 #include "services/serial_setup.h"
 #include "hardware/console.h"
+#if defined(WITH_DECK)
 #include "services/deck_store.h"
 #include "services/host_link.h"
+#endif
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -124,6 +126,7 @@ void sendHello() {
   doc["elev"] = services::terrain::available();
   // USB mode (hardware/console.h): "kb" = keyboard mode, uploads need "PR:USBSETUP" first.
   doc["usb"] = console::keyboardMode() ? "kb" : "setup";
+#if defined(WITH_DECK)  // without "deckv" the page leaves out the deck step
   doc["deckv"] = services::deck::kVersion;
   doc["deckslots"] = services::deck::kSlots;
   doc["deckicon"] = services::deck::iconPx();
@@ -141,6 +144,7 @@ void sendHello() {
   doc["queuev"] = 1;                           // queue panel (PR:QBEGIN ...)
   doc["qthumb"] = services::host::queueThumbPx();  // its small covers, px
   doc["hostv"] = 2;  // Windows helper protocol (services/host_link.h): 2 = windowed cover, "pm"
+#endif
   doc["w"] = config::kDisplayWidth;
   doc["h"] = config::kDisplayHeight;
   sendReply("HELLO", doc);
@@ -475,6 +479,7 @@ void handleMapClear() {
   sendOk(false);
 }
 
+#if defined(WITH_DECK)
 long s_deck_next = 1;  // deck chunk expected next
 
 void handleDeckBegin(const char* json) {
@@ -536,6 +541,7 @@ void handleDeckEnd() {
   doc["deckcustom"] = services::deck::custom();
   sendReply("OK", doc);
 }
+#endif
 
 /** Long uploads only in setup mode: the TinyUSB port of keyboard mode stalls on them. */
 bool uploadAllowed() {
@@ -570,6 +576,7 @@ void handleLine(char* line) {
     console::switchTo(console::Mode::Setup);
   } else if (strcmp(command, "USBNORMAL") == 0) {
     console::switchTo(console::Mode::Keyboard);
+#if defined(WITH_DECK)
   } else if (strcmp(command, "VOL") == 0) {
     services::host::handleVol(args);
   } else if (strcmp(command, "NOW") == 0) {
@@ -603,6 +610,7 @@ void handleLine(char* line) {
   } else if (strcmp(command, "DECKCLEAR") == 0) {
     services::deck::clear();
     sendOk(false);
+#endif
   } else if (strcmp(command, "SCAN") == 0) {
     sendScan();
   } else if (strcmp(command, "SET") == 0) {
