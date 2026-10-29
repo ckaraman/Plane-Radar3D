@@ -2,3 +2,5 @@
 include/setup_url.h
 __pycache__/
 .pio-core-s3/
+helper/web/tz.json
+helper/web/tz-LICENSE.txt

@@ -132,6 +132,7 @@
   <nav aria-label="Bölümler">
     <button type="button" data-page="keys" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.8"/><rect x="14" y="3" width="7" height="7" rx="1.8"/><rect x="3" y="14" width="7" height="7" rx="1.8"/><rect x="14" y="14" width="7" height="7" rx="1.8"/></svg>Tuşlar</button>
     <button type="button" data-page="music"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/></svg>Müzik ekranı</button>
+    <button type="button" data-page="radar"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/></svg>Radar</button>
     <button type="button" data-page="settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Ayarlar</button>
   </nav>
 
@@ -199,6 +200,32 @@
           <select class="in" id="s-back" style="width: auto; min-height: 40px">
             <option value="0">Hemen</option><option value="60">1 dakika sonra</option><option value="300">5 dakika sonra</option><option value="-1">Dönme</option>
           </select></div>
+      </div>
+    </section>
+
+    <!-- Radar: location and screen options of a system 2 card (PR:SET) -->
+    <section id="page-radar" class="row" hidden>
+      <div class="card" style="flex: 1 1 560px; max-width: 760px">
+        <h2>Konum ve radar ekranı</h2>
+        <p class="small" id="r-none">Kart bağlanınca radarın konumunu ve ekran ayarlarını buradan değiştirebilirsin (2. sistem kartı gerekir).</p>
+        <div id="r-form" hidden>
+          <label class="f" for="r-city">Konum <span class="small">(radarın merkezi; şehir ya da ilçe yeterli)</span></label>
+          <div class="line"><input class="in" id="r-city" type="search" placeholder="Şehir ya da ilçe ara, örn. Bakırköy" autocomplete="off"><button type="button" class="btn" id="r-search">Ara</button></div>
+          <div class="plist" id="r-results" hidden></div>
+          <div class="line" style="margin-top: 10px"><input class="in" id="r-lat" type="number" step="0.0001" min="-90" max="90" placeholder="Enlem" aria-label="Enlem"><input class="in" id="r-lon" type="number" step="0.0001" min="-180" max="180" placeholder="Boylam" aria-label="Boylam"></div>
+          <label class="f" for="r-tz">Saat dilimi</label>
+          <select class="in" id="r-tz"></select>
+          <div style="margin-top: 8px">
+            <div class="opt"><label for="r-clock">Gökyüzünde uçak yokken saati göster</label><input type="checkbox" id="r-clock"></div>
+            <div class="opt"><label for="r-weather">Hava durumu (HAVA düğmesiyle açılır)</label><input type="checkbox" id="r-weather"></div>
+            <div class="opt"><label for="r-miles">Mesafeleri mil olarak göster</label><input type="checkbox" id="r-miles"></div>
+            <div class="opt"><label for="r-runways">Havalimanı pistlerini göster</label><input type="checkbox" id="r-runways"></div>
+            <div class="opt"><label for="r-rings">Radar halkalarını ve artı çizgilerini göster</label><input type="checkbox" id="r-rings"></div>
+          </div>
+          <div class="btns"><button type="button" class="btn primary" id="r-save">Karta kaydet</button></div>
+          <div class="msg" id="r-msg" hidden></div>
+          <p class="small" style="margin: 10px 0 0">Zemindeki harita şimdilik eski konumda kalır; yeni konumun haritasını kurulum sayfasından gönder (yakında buradan da olacak).</p>
+        </div>
       </div>
     </section>
 
@@ -608,7 +635,8 @@
     b.addEventListener('click', () => {
       for (const x of document.querySelectorAll('nav button')) x.removeAttribute('aria-current');
       b.setAttribute('aria-current', 'page');
-      for (const id of ['keys', 'music', 'settings']) $('#page-' + id).hidden = id !== b.dataset.page;
+      for (const id of ['keys', 'music', 'radar', 'settings']) $('#page-' + id).hidden = id !== b.dataset.page;
+      if (b.dataset.page === 'radar') loadRadar();
       if (b.dataset.page === 'settings') api().logs().then((t) => { $('#logs').textContent = t; });
     });
   }
@@ -640,6 +668,7 @@
   }
   function applyLive(st) {
     applyDevice(st.device);
+    if (!$('#page-radar').hidden && R.loaded !== !!st.device.connected) loadRadar();  // card came or went
     $('#c-feed').textContent = st.device.connected && st.feed ? st.feed : '–';
     if (st.link) applyLink(st.link);
     const v = st.volume || {};
@@ -658,6 +687,81 @@
     if (u.running) { $('#up-bar').hidden = false; $('#up-bar').value = u.pct; setMsg('info', u.text); }
     else if (!$('#up-bar').hidden) { $('#up-bar').hidden = true; setMsg(u.error ? 'err' : 'ok', u.error ? 'Gönderilemedi: ' + u.error : (u.text || 'Tuşlar karta gönderildi.')); }
   }
+
+  // ------------------------------------------------------------ radar settings (system 2 card)
+  // Same fields, search and time zones as the setup page (web/index.html); the card takes PR:SET.
+  const R = { zones: null, loaded: false, keys: ['clock', 'weather', 'miles', 'runways', 'rings'] };
+  const RADAR_ERRORS = {
+    bad_location: 'Konum geçersiz: enlem -90…90, boylam -180…180 arasında olmalı.',
+    bad_timezone: 'Saat dilimi geçersiz.',
+    no_card: 'Kart bağlı değil.',
+    no_answer: 'Kart cevap vermedi. Birkaç saniye sonra tekrar dene.',
+  };
+  function radarMsg(kind, text) { const m = $('#r-msg'); m.className = 'msg ' + kind; m.textContent = text; m.hidden = !text; }
+  async function loadZones() {
+    if (R.zones) return;
+    try { R.zones = await (await fetch('tz.json')).json(); } catch (_) { R.zones = { 'Europe/Istanbul': '<+03>-3', 'UTC': 'UTC0' }; }
+    for (const name of Object.keys(R.zones).sort()) $('#r-tz').append(el('option', { value: name, text: name.replace(/_/g, ' ') }));
+  }
+  function zoneForPosix(posix) {
+    let mine = 'UTC';
+    try { mine = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) { /* old engine */ }
+    if (R.zones[mine] === posix) return mine;
+    return Object.keys(R.zones).find((k) => R.zones[k] === posix) || (R.zones['Europe/Istanbul'] ? 'Europe/Istanbul' : 'UTC');
+  }
+  async function loadRadar() {
+    await loadZones();
+    const s = await api().radar_settings();
+    $('#r-none').hidden = !!s;
+    $('#r-form').hidden = !s;
+    if (!s) { R.loaded = false; return; }
+    if (R.loaded) return;  // keep what is being typed
+    R.loaded = true;
+    $('#r-lat').value = Number(s.lat).toFixed(4);
+    $('#r-lon').value = Number(s.lon).toFixed(4);
+    $('#r-tz').value = zoneForPosix(s.tz);
+    for (const k of R.keys) $('#r-' + k).checked = !!s[k];
+  }
+  async function searchCity() {
+    const q = $('#r-city').value.trim(), list = $('#r-results');
+    list.textContent = ''; list.hidden = true;
+    if (q.length < 2) { radarMsg('err', 'En az 2 harf yaz.'); return; }
+    radarMsg('info', 'Aranıyor…');
+    try {
+      const r = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=6&language=tr&format=json&name=' + encodeURIComponent(q));
+      if (!r.ok) throw new Error('http ' + r.status);
+      const found = (await r.json()).results || [];
+      if (!found.length) { radarMsg('err', 'Sonuç bulunamadı. Başka bir yazım dene ya da enlem ve boylamı elle gir.'); return; }
+      radarMsg('', '');
+      for (const f of found) {
+        const name = [f.name, f.admin2, f.admin1, f.country].filter(Boolean).join(', ');
+        list.append(el('button', { type: 'button', text: name, onclick: () => {
+          $('#r-lat').value = Number(f.latitude).toFixed(4);
+          $('#r-lon').value = Number(f.longitude).toFixed(4);
+          if (f.timezone && R.zones[f.timezone]) $('#r-tz').value = f.timezone;
+          list.hidden = true;
+          radarMsg('ok', 'Seçildi: ' + name + '. Karta göndermek için “Karta kaydet”e bas.');
+        } }));
+      }
+      list.hidden = false;
+    } catch (_) {
+      radarMsg('err', 'Arama yapılamadı (internet bağlantını kontrol et). Enlem ve boylamı elle de girebilirsin.');
+    }
+  }
+  async function saveRadar() {
+    const s = { lat: parseFloat($('#r-lat').value), lon: parseFloat($('#r-lon').value), tz: R.zones[$('#r-tz').value] };
+    for (const k of R.keys) s[k] = $('#r-' + k).checked;
+    if (!isFinite(s.lat) || !isFinite(s.lon)) { radarMsg('err', RADAR_ERRORS.bad_location); return; }
+    $('#r-save').disabled = true;
+    radarMsg('info', 'Kaydediliyor…');
+    const err = await api().save_radar(s);
+    $('#r-save').disabled = false;
+    radarMsg(err ? 'err' : 'ok', err ? (RADAR_ERRORS[err] || 'Kart hata verdi: ' + err)
+      : 'Kaydedildi. Uçaklar ve hava durumu birkaç saniye içinde yeni ayarlara göre gelir.');
+  }
+  $('#r-search').addEventListener('click', searchCity);
+  $('#r-city').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchCity(); } });
+  $('#r-save').addEventListener('click', saveRadar);
 
   async function start() {
     const st = await api().state();

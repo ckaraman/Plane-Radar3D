@@ -13,7 +13,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 IS_MAC = sys.platform == "darwin"
 
@@ -248,6 +248,12 @@ class Api:
         import webview
 
         return self._dialog(webview.FOLDER_DIALOG) or ""
+
+    def radar_settings(self):
+        return self._core.device.radar_settings()
+
+    def save_radar(self, settings):
+        return self._core.device.save_radar(settings or {})
 
     def release(self, released):
         self._core.device.release(bool(released))

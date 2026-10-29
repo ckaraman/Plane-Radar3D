@@ -105,6 +105,9 @@ class FakeCard:
         elif tag == "USBSETUP":
             self.say('PR:USBMODE {"usb":"setup","restart":true}')
             self.usb = "setup"
+        elif tag == "SET":
+            self.set = json.loads(rest)
+            self.say("PR:OK {}")
         elif tag == "ABEGIN":  # services/usb_feed.cpp
             self.aircraft = []
         elif tag == "A":
@@ -139,6 +142,17 @@ def test_all():
     assert card.aircraft == ["41.0,29.0,0,0,5000,0,THY1,A321"]
     card.say('PR:PREFS {"range_km":30,"fetch_km":40,"miles":false}')  # range changed on the card
     assert wait(lambda: (d.hello.get("prefs") or {}).get("fetch_km") == 40), d.hello
+
+    # Radar settings (system 2 only): PR:SET, and the feed sees the new place at once.
+    assert d.radar_settings() is None and d.save_radar({"lat": 41, "lon": 29, "tz": "UTC0"}) == "no_card"
+    d.hello.update(sys=2, lat=41.0, lon=29.0, tz="<+03>-3", clock=True, weather=True, miles=False,
+                   runways=True, rings=True)
+    assert d.radar_settings()["tz"] == "<+03>-3"
+    assert d.save_radar({"lat": 95, "lon": 29, "tz": "UTC0"}) == "bad_location"
+    assert d.save_radar({"lat": 40.5, "lon": 29.5, "tz": ""}) == "bad_timezone"
+    assert d.save_radar({"lat": 40.1234567, "lon": 29.5, "tz": "UTC0", "miles": 1}) == ""
+    assert card.set == {"lat": 40.123457, "lon": 29.5, "tz": "UTC0", "miles": True}, card.set
+    assert d.hello["lat"] == 40.123457 and d.hello["miles"] is True
 
     # Card -> helper events.
     card.say('PR:KEY {"i":4}')

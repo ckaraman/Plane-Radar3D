@@ -231,6 +231,43 @@ class Device:
         finally:
             self.stream_lock.release()
 
+    # ------------------------------------------------------------------ radar settings
+    RADAR_KEYS = ("lat", "lon", "tz", "clock", "weather", "miles", "runways", "rings")
+
+    def radar_settings(self):
+        """The card's location and screen options (from HELLO), None without a system 2 card."""
+        h = self.hello if self.connected else None
+        if not h or h.get("sys") != 2:
+            return None
+        return {k: h.get(k) for k in self.RADAR_KEYS}
+
+    def save_radar(self, s):
+        """PR:SET without the Wi-Fi fields (docs/PROTOCOL.md). Returns "" or an error code."""
+        try:
+            lat, lon = float(s["lat"]), float(s["lon"])
+        except (KeyError, TypeError, ValueError):
+            return "bad_location"
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            return "bad_location"
+        tz = s.get("tz")
+        if not isinstance(tz, str) or not 0 < len(tz) <= 63:  # kTzMaxLen on the card
+            return "bad_timezone"
+        payload = {"lat": round(lat, 6), "lon": round(lon, 6), "tz": tz}
+        for k in ("clock", "weather", "miles", "runways", "rings"):
+            if k in s:
+                payload[k] = bool(s[k])
+        if not self.radar_settings():
+            return "no_card"
+        r = self.request("PR:SET " + json.dumps(payload, separators=(",", ":")), ["OK", "ERR"], 10)
+        if not r:
+            return "no_answer"
+        if r[0] == "ERR":
+            return r[1].get("msg") or "error"
+        h = self.hello
+        if h is not None:
+            h.update(payload)  # the feed uses the new place at once (aircraft and weather)
+        return ""
+
     def send_json(self, tag, obj):
         return self.send("PR:%s %s" % (tag, json.dumps(obj, ensure_ascii=False, separators=(",", ":"))))
 
