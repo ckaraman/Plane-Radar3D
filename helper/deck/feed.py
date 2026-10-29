@@ -8,8 +8,10 @@ answer in the tests).
 
 import json
 import math
+import time
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 
 INTERVAL_SEC = 5
@@ -43,6 +45,31 @@ def get_json(url, timeout=10):
         raise HttpError("HTTP %d" % e.code, e.code)
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise HttpError(str(getattr(e, "reason", e)) or "bağlantı hatası")
+
+
+_last_search = [0.0]
+
+
+def search_address(q, fetch=get_json, now=time.monotonic):
+    """Street address / place -> [{"name", "lat", "lon"}] from OpenStreetMap Nominatim.
+    Its usage policy: an app User-Agent (get_json sends one), at most 1 request a second,
+    no search-as-you-type (the Radar page searches on a button)."""
+    q = str(q or "").strip()[:200]
+    if len(q) < 2:
+        return []
+    wait = _last_search[0] + 1.0 - now()
+    if wait > 0:
+        time.sleep(wait)
+    _last_search[0] = now()
+    r = fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=tr&q="
+              + urllib.parse.quote(q), 10)
+    out = []
+    for a in r if isinstance(r, list) else []:
+        try:
+            out.append({"name": str(a.get("display_name") or ""), "lat": float(a["lat"]), "lon": float(a["lon"])})
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 def num(v):

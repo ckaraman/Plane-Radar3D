@@ -209,10 +209,10 @@
         <h2>Konum ve radar ekranı</h2>
         <p class="small" id="r-none">Kart bağlanınca radarın konumunu ve ekran ayarlarını buradan değiştirebilirsin (2. sistem kartı gerekir).</p>
         <div id="r-form" hidden>
-          <label class="f" for="r-city">Konum <span class="small">(radarın merkezi; şehir ya da ilçe yeterli)</span></label>
-          <div class="line"><input class="in" id="r-city" type="search" placeholder="Şehir ya da ilçe ara, örn. Bakırköy" autocomplete="off"><button type="button" class="btn" id="r-search">Ara</button></div>
+          <label class="f" for="r-city">Konum <span class="small">(radarın merkezi: sokak ve kapı numarasıyla adres, mahalle ya da şehir)</span></label>
+          <div class="line"><input class="in" id="r-city" type="search" placeholder="Adres ara, örn. Bağdat Caddesi 300, Kadıköy" autocomplete="off"><button type="button" class="btn" id="r-search">Ara</button></div>
           <div class="plist" id="r-results" hidden></div>
-          <div class="line" style="margin-top: 10px"><input class="in" id="r-lat" type="number" step="0.0001" min="-90" max="90" placeholder="Enlem" aria-label="Enlem"><input class="in" id="r-lon" type="number" step="0.0001" min="-180" max="180" placeholder="Boylam" aria-label="Boylam"></div>
+          <div class="line" style="margin-top: 10px"><input class="in" id="r-lat" type="number" step="0.00001" min="-90" max="90" placeholder="Enlem" aria-label="Enlem"><input class="in" id="r-lon" type="number" step="0.00001" min="-180" max="180" placeholder="Boylam" aria-label="Boylam"></div>
           <label class="f" for="r-tz">Saat dilimi</label>
           <select class="in" id="r-tz"></select>
           <div style="margin-top: 8px">
@@ -689,7 +689,7 @@
   }
 
   // ------------------------------------------------------------ radar settings (system 2 card)
-  // Same fields, search and time zones as the setup page (web/index.html); the card takes PR:SET.
+  // Same fields and time zones as the setup page (web/index.html), plus a street address search; the card takes PR:SET.
   const R = { zones: null, loaded: false, keys: ['clock', 'weather', 'miles', 'runways', 'rings'] };
   const RADAR_ERRORS = {
     bad_location: 'Konum geçersiz: enlem -90…90, boylam -180…180 arasında olmalı.',
@@ -717,8 +717,8 @@
     if (!s) { R.loaded = false; return; }
     if (R.loaded) return;  // keep what is being typed
     R.loaded = true;
-    $('#r-lat').value = Number(s.lat).toFixed(4);
-    $('#r-lon').value = Number(s.lon).toFixed(4);
+    $('#r-lat').value = Number(s.lat).toFixed(5);
+    $('#r-lon').value = Number(s.lon).toFixed(5);
     $('#r-tz').value = zoneForPosix(s.tz);
     for (const k of R.keys) $('#r-' + k).checked = !!s[k];
   }
@@ -727,26 +727,19 @@
     list.textContent = ''; list.hidden = true;
     if (q.length < 2) { radarMsg('err', 'En az 2 harf yaz.'); return; }
     radarMsg('info', 'Aranıyor…');
-    try {
-      const r = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=6&language=tr&format=json&name=' + encodeURIComponent(q));
-      if (!r.ok) throw new Error('http ' + r.status);
-      const found = (await r.json()).results || [];
-      if (!found.length) { radarMsg('err', 'Sonuç bulunamadı. Başka bir yazım dene ya da enlem ve boylamı elle gir.'); return; }
-      radarMsg('', '');
-      for (const f of found) {
-        const name = [f.name, f.admin2, f.admin1, f.country].filter(Boolean).join(', ');
-        list.append(el('button', { type: 'button', text: name, onclick: () => {
-          $('#r-lat').value = Number(f.latitude).toFixed(4);
-          $('#r-lon').value = Number(f.longitude).toFixed(4);
-          if (f.timezone && R.zones[f.timezone]) $('#r-tz').value = f.timezone;
-          list.hidden = true;
-          radarMsg('ok', 'Seçildi: ' + name + '. Karta göndermek için “Karta kaydet”e bas.');
-        } }));
-      }
-      list.hidden = false;
-    } catch (_) {
-      radarMsg('err', 'Arama yapılamadı (internet bağlantını kontrol et). Enlem ve boylamı elle de girebilirsin.');
+    const r = await api().search_address(q);  // OpenStreetMap Nominatim, through the program (feed.py)
+    if (r.error) { radarMsg('err', 'Arama yapılamadı (internet bağlantını kontrol et). Enlem ve boylamı elle de girebilirsin.'); return; }
+    if (!r.results.length) { radarMsg('err', 'Sonuç bulunamadı. Daha kısa yaz (ör. sokak ve ilçe) ya da enlem ve boylamı elle gir.'); return; }
+    radarMsg('', '');
+    for (const f of r.results) {
+      list.append(el('button', { type: 'button', text: f.name, onclick: () => {
+        $('#r-lat').value = f.lat.toFixed(5);
+        $('#r-lon').value = f.lon.toFixed(5);
+        list.hidden = true;
+        radarMsg('ok', 'Seçildi: ' + f.name + '. Saat dilimini kontrol et, sonra “Karta kaydet”e bas.');
+      } }));
     }
+    list.hidden = false;
   }
   async function saveRadar() {
     const s = { lat: parseFloat($('#r-lat').value), lon: parseFloat($('#r-lon').value), tz: R.zones[$('#r-tz').value] };

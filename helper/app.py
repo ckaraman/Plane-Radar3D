@@ -252,6 +252,14 @@ class Api:
     def radar_settings(self):
         return self._core.device.radar_settings()
 
+    def search_address(self, q):
+        from deck import feed
+
+        try:
+            return {"results": feed.search_address(q)}
+        except feed.HttpError as e:
+            return {"error": str(e)}
+
     def save_radar(self, settings):
         return self._core.device.save_radar(settings or {})
 

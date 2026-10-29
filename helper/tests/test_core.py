@@ -537,6 +537,27 @@ def test_feed():
     f.tick(3001)
     assert f.state.startswith("kart yazılımı eski") and len(urls) == n
 
+    # Address search (Nominatim): results with numbers, bad rows left out, 1 request a second.
+    asked, clock = [], [100.0]
+
+    def nominatim(url, timeout):
+        asked.append(url)
+        return [{"display_name": "Bağdat Caddesi, Kadıköy, İstanbul", "lat": "40.9631", "lon": "29.0631"},
+                {"display_name": "broken"}]
+
+    feed._last_search[0] = 0.0
+    assert feed.search_address(" Bağdat Caddesi 300 ", nominatim, lambda: clock[0]) == [
+        {"name": "Bağdat Caddesi, Kadıköy, İstanbul", "lat": 40.9631, "lon": 29.0631}]
+    assert "q=Ba%C4%9Fdat%20Caddesi%20300" in asked[0] and "nominatim.openstreetmap.org" in asked[0], asked
+    assert feed.search_address("x", nominatim) == [] and len(asked) == 1  # too short: not sent
+    real_sleep, slept = time.sleep, []
+    feed.time.sleep = slept.append  # feed.time is this time module
+    try:
+        feed.search_address("Kadıköy", nominatim, lambda: clock[0] + 0.25)
+    finally:
+        feed.time.sleep = real_sleep
+    assert slept and abs(slept[0] - 0.75) < 1e-6, slept
+
     link.connected = False
     f.tick(3005)
     assert f.state == "kart yok"
