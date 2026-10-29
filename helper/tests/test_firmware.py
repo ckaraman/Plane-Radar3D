@@ -47,9 +47,23 @@ def test_state():
     assert firmware.state(CARD, "5in-0.41.0", "") == {"offer": False, "skipped": False}
 
 
+def test_skip_survives_window_save():
+    import tempfile
+
+    from deck import config
+
+    c = config.Config(os.path.join(tempfile.mkdtemp(), "config.json"))
+    c.skip_firmware("5in-0.42.0")
+    _, st = c.snapshot()
+    c.set_settings(dict(st, fw_skip=""))  # the window sends what it loaded at start
+    assert c.settings["fw_skip"] == "5in-0.42.0"
+    assert config.Config(c.path).settings["fw_skip"] == "5in-0.42.0"
+
+
 if __name__ == "__main__":
     test_latest_version()
     test_offer()
     test_download()
     test_state()
+    test_skip_survives_window_save()
     print("tests ok")

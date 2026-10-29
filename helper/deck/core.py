@@ -308,17 +308,22 @@ class Core:
         last, card = 0.0, None
         while True:
             time.sleep(5.0)
+            if self.device.busy or self.fw["running"]:
+                continue
             fw = (self.device.hello or {}).get("fw") if self.device.connected else None
-            if self.device.busy or self.fw["running"] or not fw:
+            if not fw:
+                self.fw["offer"] = False  # no card: nothing to offer
                 continue
             if fw != card or time.time() - last > 6 * 3600:
                 card, last = fw, time.time()
-                self.check_firmware()
+                if not self.check_firmware():
+                    last -= 6 * 3600 - 600  # no internet yet (start with Windows): again in 10 minutes
 
     def check_firmware(self, latest_version=firmware.latest_version):
+        """False when the site could not be read."""
         latest = latest_version()
-        if latest is None:  # no internet / site: try again next time
-            return
+        if latest is None:
+            return False
         _, settings = self.config.snapshot()
         st = firmware.state(self.device.hello if self.device.connected else None, latest,
                             settings.get("fw_skip", ""))
@@ -330,30 +335,37 @@ class Core:
                 self.on_fw_offer(latest)
             except Exception as e:  # noqa: BLE001 - a notification is not worth a crash
                 self.log("firmware notice: %s" % e)
+        return True
 
     def skip_firmware(self):
         """"Not now": no more notices for this version (the window keeps a dim strip)."""
-        _, settings = self.config.snapshot()
-        settings["fw_skip"] = self.fw["latest"] or ""
-        self.config.set_settings(settings)
+        self.config.skip_firmware(self.fw["latest"] or "")
         self.fw["skipped"] = self.fw["offer"]
 
     def update_firmware(self):
         """Download and install the offered firmware (in a thread; see self.fw)."""
-        if self.fw["running"] or not self.fw["offer"] or self.device.busy:
-            return False
         version = self.fw["latest"]
+        if self.fw["running"] or self.device.busy or not self._fw_fits(version):
+            return False
         self.fw.update(running=True, pct=0, text="Yazılım indiriliyor…", error="", done="")
 
         def work():
             try:
                 data = firmware.download(version)
+                if not self._fw_fits(version):  # the card may have changed during the download
+                    raise RuntimeError("bağlı kart bu yazılıma uygun değil")
                 done = self.device.upload_firmware(data, lambda pct, text: self.fw.update(pct=pct, text=text))
                 self.log("firmware: card now on %s" % done)
-                self.fw.update(running=False, pct=100, done=done or version, offer=False, text="")
+                if done != version:
+                    raise RuntimeError("kart yeni sürümü bildirmedi (kartta %s)" % (done or "?"))
+                self.fw.update(running=False, pct=100, done=done, offer=False, text="")
             except Exception as e:  # noqa: BLE001 - shown in the window
                 self.log("firmware: %s" % e)
                 self.fw.update(running=False, error=str(e) or "hata", text="")
 
         threading.Thread(target=work, name="firmware-update", daemon=True).start()
         return True
+
+    def _fw_fits(self, version):
+        """The card on the cable now is the one this firmware is for (system 2, ws5)."""
+        return firmware.offer(self.device.hello if self.device.connected else None, version)

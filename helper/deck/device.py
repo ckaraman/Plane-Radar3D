@@ -445,8 +445,26 @@ class Device:
         ch, total = 480, (len(blob) + 479) // 480
         meta = json.dumps({"len": len(blob), "crc": zlib.crc32(blob) & 0xFFFFFFFF})
 
+        new_fw = []
+
         def work():
             progress(8, "Yazılım karta gönderiliyor…")
+            with self.stream_lock:  # no aircraft batch or cover in the middle of the stream
+                send_all()
+            # The card restarts on the new firmware, still in setup mode: reopen it there (its
+            # HELLO tells the new version) so _in_setup_mode sends it back to keyboard mode.
+            progress(95, "Kart yeniden başlıyor…")
+            self._close()
+            end = time.time() + 60
+            while time.time() < end:
+                time.sleep(1.0)
+                port = find_port(PID_SETUP)
+                if port and self._open(port, setup=True):
+                    new_fw.append(self.hello.get("fw") or "")
+                    return
+            raise RuntimeError("Kart yeniden başladıktan sonra görünmedi")
+
+        def send_all():
             for attempt in range(1, 6):  # a busy card can miss the start line
                 r = self.request("PR:OTABEGIN " + meta, ["OTAACK", "ERR"], 20)
                 if r and r[0] == "OTAACK":
@@ -461,13 +479,20 @@ class Device:
                 seq, tries = 1, 0
                 while seq <= total:
                     part = blob[(seq - 1) * ch:seq * ch]
+                    while not q.empty():  # answers that came after their time ran out
+                        q.get_nowait()
                     # One chunk at a time: while the chip writes flash it takes in no more bytes.
                     if not self.send("PR:OTA %d %d %s" % (seq, len(part), base64.b64encode(part).decode("ascii"))):
                         raise RuntimeError("bağlantı koptu")
-                    try:
-                        tag, data = q.get(timeout=4)
-                    except queue.Empty:
-                        tag, data = None, {}
+                    tag, data, wait_end = None, {}, time.time() + 4
+                    while time.time() < wait_end:
+                        try:
+                            tag, data = q.get(timeout=max(0.01, wait_end - time.time()))
+                        except queue.Empty:
+                            tag, data = None, {}
+                            break
+                        if not (tag == "OTAACK" and int(data.get("seq", -1)) < seq):
+                            break  # else a late answer to an earlier chunk: keep waiting
                     if tag == "OTAACK" and int(data.get("seq", -1)) == seq:
                         seq, tries = seq + 1, 0
                         if seq % 8 == 0:
@@ -490,21 +515,9 @@ class Device:
             r = self.request("PR:OTAEND", ["OTADONE", "ERR"], 30)
             if not r or r[0] != "OTADONE":
                 raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
-            # The card restarts on the new firmware, still in setup mode: reopen it there so
-            # _in_setup_mode sends it back to keyboard mode.
-            progress(95, "Kart yeniden başlıyor…")
-            self._close()
-            time.sleep(1.0)
-            for _ in range(30):
-                port = find_port(PID_SETUP)
-                if port and self._open(port, setup=True):
-                    return
-                time.sleep(1.0)
-            raise RuntimeError("Kart yeniden başladıktan sonra görünmedi")
         self._in_setup_mode(work, progress)
-        fw = (self.hello or {}).get("fw") or ""
         progress(100, "Kart güncellendi.")
-        return fw
+        return new_fw[0] if new_fw else ""
 
     def upload_deck(self, blob, progress=lambda pct, text: None):
         """The key set: to setup mode, upload, back to keyboard mode."""

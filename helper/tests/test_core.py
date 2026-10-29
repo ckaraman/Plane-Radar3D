@@ -27,6 +27,7 @@ class FakeCard:
         self.usb = usb
         self.fw = "5in-0.32.0"
         self.fw_written = None
+        self.ota_delay = 0.0
         self.lines = []
         self.cover = None
         self.deck = None
@@ -96,6 +97,7 @@ class FakeCard:
             elif seq != self._next:
                 self.say('PR:OTANAK {"seq":%d}' % self._next)
             else:
+                time.sleep(self.ota_delay)  # writing flash
                 part = base64.b64decode(data)
                 assert len(part) == int(n)
                 self._stage += part
@@ -247,6 +249,19 @@ def test_all():
     steps = []
     assert d.upload_firmware(fw, lambda p, t: steps.append(p)) == "5in-0.42.0"
     assert card.fw_written == fw and steps[-1] == 100 and card.usb == "kb"
+    assert wait(lambda: d.connected)
+
+    # An aircraft batch due during the update waits for it (it would break the stream).
+    card.lines.clear()
+    card.ota_delay = 0.01
+    t = threading.Thread(target=d.upload_firmware, args=(b"\xe9" + bytes(480 * 150),))
+    t.start()
+    assert wait(lambda: any(l.startswith("PR:OTA ") for l in card.lines))
+    d.send_batch(["PR:ABEGIN", "PR:A 41.0,29.0,0,0,5000,0,THY1,A321"], "PR:AEND 1", "AOK", 3)
+    t.join(30)
+    tags = [l.split(" ")[0] for l in card.lines]
+    if "PR:ABEGIN" in tags:
+        assert tags.index("PR:ABEGIN") > tags.index("PR:OTAEND"), tags
     assert wait(lambda: d.connected)
     d.stop()
 

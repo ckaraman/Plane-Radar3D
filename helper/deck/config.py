@@ -136,6 +136,11 @@ class Config:
     def set_settings(self, st):
         with self.lock:
             for k, v in DEFAULT_SETTINGS.items():
-                if isinstance(st.get(k), type(v)):
+                if k != "fw_skip" and isinstance(st.get(k), type(v)):  # fw_skip: skip_firmware only
                     self.settings[k] = st[k]
+            self.save()
+
+    def skip_firmware(self, version):
+        with self.lock:
+            self.settings["fw_skip"] = version
             self.save()
