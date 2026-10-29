@@ -25,6 +25,8 @@ class FakeCard:
         tty.setraw(slave)
         self.path = os.ttyname(slave)
         self.usb = usb
+        self.fw = "5in-0.32.0"
+        self.fw_written = None
         self.lines = []
         self.cover = None
         self.deck = None
@@ -55,7 +57,7 @@ class FakeCard:
     def _handle(self, line):
         tag, _, rest = line[3:].partition(" ")
         if tag == "HELLO":
-            self.say('PR:HELLO ' + json.dumps({"fw": "5in-0.32.0", "usb": self.usb, "hostv": 2, "w": 800, "h": 480,
+            self.say('PR:HELLO ' + json.dumps({"fw": self.fw, "usb": self.usb, "hostv": 2, "w": 800, "h": 480,
                                                "deckicon": 72, "deckv": 2, "deckkw": 110, "deckkh": 120,
                                                "queuev": 1, "qthumb": 40}))
         elif tag in ("COVERBEGIN", "DECKBEGIN", "MAPBEGIN"):
@@ -80,6 +82,31 @@ class FakeCard:
             ok = len(self._stage) == self._meta["len"] and zlib.crc32(self._stage) & 0xFFFFFFFF == self._meta["crc"]
             setattr(self, tag[:-3].lower(), self._stage)  # cover / deck / map
             self.say("PR:OK {}" if ok else 'PR:ERR {"msg":"bad"}')
+        elif tag == "OTABEGIN":  # services/serial_ota.cpp: one chunk at a time
+            self._stage, self._meta, self._next = b"", json.loads(rest), 1
+            self.say('PR:OTAACK {"seq":0}')
+        elif tag == "OTA":
+            seq, n, data = rest.split(" ", 2)
+            seq = int(seq)
+            if self.drop_once and seq == 3:  # a damaged line: the card asks for it again
+                self.drop_once = False
+                self.say('PR:OTANAK {"seq":%d}' % self._next)
+            elif seq + 1 == self._next:
+                self.say('PR:OTAACK {"seq":%d}' % seq)
+            elif seq != self._next:
+                self.say('PR:OTANAK {"seq":%d}' % self._next)
+            else:
+                part = base64.b64decode(data)
+                assert len(part) == int(n)
+                self._stage += part
+                self._next += 1
+                self.say('PR:OTAACK {"seq":%d}' % seq)
+        elif tag == "OTAEND":
+            if len(self._stage) == self._meta["len"] and zlib.crc32(self._stage) & 0xFFFFFFFF == self._meta["crc"]:
+                self.fw_written, self.fw = self._stage, "5in-0.42.0"
+                self.say("PR:OTADONE {}")  # then it restarts, still in setup mode
+            else:
+                self.say('PR:ERR {"msg":"ota_crc"}')
         elif tag == "MAPCLEAR":
             self.map = None
             self.say("PR:OK {}")
@@ -212,6 +239,14 @@ def test_all():
     assert wait(lambda: d.connected)
     d.upload_map(None, None)
     assert card.map is None and card.elev is None
+    assert wait(lambda: d.connected)
+
+    # Firmware over USB (stage 8c): one chunk at a time, a damaged one sent again, restart.
+    fw = b"\xe9" + bytes(range(256)) * 20
+    card.drop_once = True
+    steps = []
+    assert d.upload_firmware(fw, lambda p, t: steps.append(p)) == "5in-0.42.0"
+    assert card.fw_written == fw and steps[-1] == 100 and card.usb == "kb"
     assert wait(lambda: d.connected)
     d.stop()
 
