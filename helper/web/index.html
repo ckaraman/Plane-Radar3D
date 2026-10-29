@@ -224,7 +224,16 @@
           </div>
           <div class="btns"><button type="button" class="btn primary" id="r-save">Karta kaydet</button></div>
           <div class="msg" id="r-msg" hidden></div>
-          <p class="small" style="margin: 10px 0 0">Zemindeki harita şimdilik eski konumda kalır; yeni konumun haritasını kurulum sayfasından gönder (yakında buradan da olacak).</p>
+          <label class="f" for="r-map">Zemindeki harita (deniz, göller, kıyı, ana yollar, önemli yerler) ve 3B arazi</label>
+          <select class="in" id="r-map">
+            <option value="17">Geniş: yaklaşık 26 km çevre (25 km menzil için)</option>
+            <option value="15" selected>Normal: yaklaşık 23 km çevre (15 km menzil için, önerilen)</option>
+            <option value="10">Dar: yaklaşık 15 km çevre</option>
+            <option value="5">Çok dar: yaklaşık 7,5 km çevre</option>
+            <option value="0">Haritasız (karttaki harita silinir)</option>
+          </select>
+          <div class="btns"><button type="button" class="btn" id="r-mapsend">Haritayı gönder</button></div>
+          <p class="small" style="margin: 8px 0 0">Harita, karta kaydedilmiş konum için hazırlanır: konumu değiştirdiysen önce “Karta kaydet”e bas. Hazırlamak bir dakika kadar sürer; yazarken kart kısa süre kurulum moduna geçer, tuşlar ve uçaklar o sırada durur. Harita © OpenStreetMap katkıda bulunanları (ODbL).</p>
         </div>
       </div>
     </section>
@@ -305,6 +314,7 @@
   </form>
 </dialog>
 
+<script src="mapdata.js"></script>
 <script>
 (() => {
   const $ = (s) => document.querySelector(s);
@@ -668,7 +678,7 @@
   }
   function applyLive(st) {
     applyDevice(st.device);
-    if (!$('#page-radar').hidden && R.loaded !== !!st.device.connected) loadRadar();  // card came or went
+    if (!$('#page-radar').hidden && !R.busy && R.loaded !== !!st.device.connected) loadRadar();  // card came or went (not during a map upload)
     $('#c-feed').textContent = st.device.connected && st.feed ? st.feed : '–';
     if (st.link) applyLink(st.link);
     const v = st.volume || {};
@@ -752,6 +762,47 @@
     radarMsg(err ? 'err' : 'ok', err ? (RADAR_ERRORS[err] || 'Kart hata verdi: ' + err)
       : 'Kaydedildi. Uçaklar ve hava durumu birkaç saniye içinde yeni ayarlara göre gelir.');
   }
+  // Map and terrain: built here with web/mapdata.js (as on the setup page), written by the program.
+  async function sendMap() {
+    const s = await api().radar_settings();
+    if (!s) { radarMsg('err', RADAR_ERRORS.no_card); return; }
+    if (typeof buildCardMap !== 'function') { radarMsg('err', 'Harita kodu bu programda eksik (mapdata.js).'); return; }
+    const label = parseInt($('#r-map').value, 10) || 0, lat = Number(s.lat), lon = Number(s.lon);
+    const status = (t) => radarMsg('info', t);
+    R.busy = true;
+    $('#r-mapsend').disabled = true;
+    try {
+      let b64 = '', elev = null, note = '';
+      if (label) {
+        const built = await buildCardMap(lat, lon, label, s, status);
+        if (!built) { radarMsg('err', 'Bu konumda çizilecek kıyı ya da ana yol bulunamadı, harita gönderilmedi.'); return; }
+        const b = built.blob;
+        note = ' (' + Math.round(b.length / 1024) + ' KB' + (b.lakes ? ', ' + b.lakes + ' göl' : '') + (b.places ? ', ' + b.places + ' önemli yer' : '') + ').';
+        if (built.placesMissing) note += ' Önemli yerler ve havalimanları bu sefer alınamadı (harita sunucuları yoğun); birkaç dakika sonra tekrar gönder.';
+        if (s.elevv) {
+          try {
+            elev = await terrainHeights(lat, lon, label, status, () => {});
+            elev.lat = lat; elev.lon = lon;
+            note += ' Arazi: en yüksek nokta ' + Math.max(...elev.h) + ' m.';
+          } catch (e) { note += ' Arazi yükseklikleri alınamadı (' + (e && e.message) + ').'; }
+        }
+        let bin = '';
+        for (let i = 0; i < b.length; i += 0x8000) bin += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+        b64 = btoa(bin);
+      }
+      radarMsg('info', 'Harita karta yazılıyor… Kart kısa süre kurulum moduna geçer, bitince kendiliğinden döner.');
+      const err = await api().send_map(b64, elev);
+      radarMsg(err ? 'err' : 'ok', err ? 'Harita gönderilemedi: ' + err
+        : (label ? 'Harita kartta' + note : 'Karttaki harita silindi.'));
+    } catch (e) {
+      const why = e && e.reasons ? ' (' + e.reasons.slice(-2).join('; ') + ')' : '';
+      radarMsg('err', 'Harita indirilemedi: harita sunucuları şu an yanıt vermiyor' + why + '. Birkaç dakika sonra tekrar dene.');
+    } finally {
+      R.busy = false;
+      $('#r-mapsend').disabled = false;
+    }
+  }
+  $('#r-mapsend').addEventListener('click', sendMap);
   $('#r-search').addEventListener('click', searchCity);
   $('#r-city').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchCity(); } });
   $('#r-save').addEventListener('click', saveRadar);

@@ -32,9 +32,9 @@ jobs:
       - name: Icon
         working-directory: helper
         run: python -c "import app; img = app.tray_image().resize((256, 256)); img.save('icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
-      - name: Time zones from the setup page (the Radar page uses them)
+      - name: Time zones and map code from the setup page (the Radar page uses them)
         working-directory: helper
-        run: Copy-Item ../web/tz.json, ../web/tz-LICENSE.txt web/
+        run: Copy-Item ../web/tz.json, ../web/tz-LICENSE.txt, ../web/mapdata.js web/
       - name: Build
         working-directory: helper
         run: >
@@ -190,7 +190,7 @@ jobs:
           VERSION_RADAR=$(ver '^radar-')
           test -n "$VERSION" && test -n "$VERSION_RADAR"
           mkdir -p site
-          cp web/index.html web/tz.json web/tz-LICENSE.txt site/
+          cp web/index.html web/mapdata.js web/tz.json web/tz-LICENSE.txt site/
           # System 1's page: the same page in its radar mode, reading every file from the site root.
           mkdir -p site/radar
           sed -e 's|^<head>$|<head>\n<base href="../">|' -e 's|^<body>$|<body data-sys="radar">|' web/index.html > site/radar/index.html

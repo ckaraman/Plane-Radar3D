@@ -58,13 +58,13 @@ class FakeCard:
             self.say('PR:HELLO ' + json.dumps({"fw": "5in-0.32.0", "usb": self.usb, "hostv": 2, "w": 800, "h": 480,
                                                "deckicon": 72, "deckv": 2, "deckkw": 110, "deckkh": 120,
                                                "queuev": 1, "qthumb": 40}))
-        elif tag in ("COVERBEGIN", "DECKBEGIN"):
+        elif tag in ("COVERBEGIN", "DECKBEGIN", "MAPBEGIN"):
             self._stage, self._meta, self._next = b"", json.loads(rest), 1
-            self.say("PR:%s {\"seq\":0}" % ("COVERACK" if tag == "COVERBEGIN" else "DECKACK"))
-        elif tag in ("COVER", "DECK"):
+            self.say("PR:%sACK {\"seq\":0}" % tag[:-5])
+        elif tag in ("COVER", "DECK", "MAP"):
             seq, data = rest.split(" ", 1)
             seq = int(seq)
-            ack = "COVERACK" if tag == "COVER" else "DECKACK"
+            ack = tag + "ACK"
             if self.drop_once and seq == 3:  # one line lost on the cable
                 self.drop_once = False
                 return
@@ -76,13 +76,26 @@ class FakeCard:
                 self._stage += base64.b64decode(data)
                 self._next += 1
                 self.say("PR:%s {\"seq\":%d}" % (ack, seq))
-        elif tag in ("COVEREND", "DECKEND"):
+        elif tag in ("COVEREND", "DECKEND", "MAPEND"):
             ok = len(self._stage) == self._meta["len"] and zlib.crc32(self._stage) & 0xFFFFFFFF == self._meta["crc"]
-            if tag == "COVEREND":
-                self.cover = self._stage
-            else:
-                self.deck = self._stage
+            setattr(self, tag[:-3].lower(), self._stage)  # cover / deck / map
             self.say("PR:OK {}" if ok else 'PR:ERR {"msg":"bad"}')
+        elif tag == "MAPCLEAR":
+            self.map = None
+            self.say("PR:OK {}")
+        elif tag == "ELEVBEGIN":  # services/terrain.h
+            self.elev = {"meta": json.loads(rest), "rows": [], "done": False}
+            self.say('PR:ELEVACK {"r":-1}')
+        elif tag == "ELEVROW":
+            r, vals = rest.split(" ", 1)
+            self.elev["rows"].append(vals)
+            self.say('PR:ELEVACK {"r":%d}' % int(r))
+        elif tag == "ELEVEND":
+            self.elev["done"] = True
+            self.say("PR:OK {}")
+        elif tag == "ELEVCLEAR":
+            self.elev = None
+            self.say("PR:OK {}")
         elif tag in ("QBEGIN", "QITEM", "QEND", "QCLEAR"):
             if tag == "QBEGIN":
                 self.queue = {"meta": json.loads(rest), "rows": []}
@@ -186,6 +199,19 @@ def test_all():
     steps = []
     d.upload_deck(data, lambda p, t: steps.append(p))
     assert card.deck == data and steps[-1] == 100
+    assert wait(lambda: d.connected)
+
+    # Map and terrain from the Radar page (web/mapdata.js), the same way; then "no map".
+    mapblob = bytes(range(256)) * 3
+    elev = {"n": 2, "half": 22.6, "lat": 41.0, "lon": 29.0, "h": [1, 2, 3, 394]}
+    steps = []
+    d.upload_map(mapblob, elev, lambda p, t: steps.append(p))
+    assert card.map == mapblob and steps[-1] == 100
+    assert card.elev == {"meta": {"n": 2, "half": 22.6, "lat": 41.0, "lon": 29.0}, "rows": ["1,2", "3,394"],
+                         "done": True}, card.elev
+    assert wait(lambda: d.connected)
+    d.upload_map(None, None)
+    assert card.map is None and card.elev is None
     assert wait(lambda: d.connected)
     d.stop()
 

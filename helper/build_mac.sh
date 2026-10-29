@@ -22,7 +22,7 @@ cp build/mra-src/LICENSE mra/LICENSE-mediaremote-adapter.txt
 
 python3 -c "import app; img = app.tray_image().resize((512, 512)); img.save('icon.icns')" || true
 ICON=(); [ -f icon.icns ] && ICON=(--icon icon.icns)
-cp ../web/tz.json ../web/tz-LICENSE.txt web/  # time zones of the setup page (Radar page)
+cp ../web/tz.json ../web/tz-LICENSE.txt ../web/mapdata.js web/  # time zones and map code of the setup page (Radar page)
 pyinstaller --noconfirm --windowed --name "Plane Radar Deck" "${ICON[@]}" \
   --osx-bundle-identifier com.planeradar.deck \
   --add-data "web:web" --add-data "browser-extension:browser-extension" --collect-all webview \

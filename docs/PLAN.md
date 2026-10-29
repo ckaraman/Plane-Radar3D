@@ -65,7 +65,7 @@ içinde. Sürümler `include/config.h` içinde.
 | 5 | 2. sistem USB protokolünün yazılı tasarımı ([PROTOCOL.md](PROTOCOL.md)) | Tamam |
 | 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den (6a indirme kodu `src/net`'e, 6b ws5'ten Wi-Fi çıkar, 6c PREFS / sys / PC yok → saat, 6d sayfa) | Tamam (kartta ve sayfada denendi) |
 | 7 | PC programı: veri motoru (7a uçak + rota `helper/deck/feed.py`, 7b hava + PREFS, 7c pencere ve bağlama) | Tamam (kartta denendi, Deck 1.5.0; kurulum sayfasından köprü adımı çıktı) |
-| 8 | PC programı: 8a ayarlar (konum, saat dilimi, ekran) `SET`, 8b harita + arazi (sayfayla ortak JS dosyası), 8c yazılım güncelleme (OTA). Tam kurulum / kurtarma sayfada kalır (kullanıcı kararı) | Sıradaki |
+| 8 | PC programı: 8a ayarlar (konum, saat dilimi, ekran) `SET`, 8b harita + arazi (sayfayla ortak JS dosyası), 8c yazılım güncelleme (OTA). Tam kurulum / kurtarma sayfada kalır (kullanıcı kararı) | Bu adım (8a tamam: ayarlar + adres araması, Deck 1.6.0; 8b yazıldı: `web/mapdata.js`, Deck 1.7.0) |
 | 9 | 2. sistem kurulum sayfası + SignPath (imzalı exe) başvurusu. Açık karar: Defender `PlaneRadarDeck.exe`'yi `Trojan:Win32/Sabsik.TE.A!ml` diye engelliyor (PyInstaller tek dosya + imzasız, yanlış alarm); bootloader'ı kaynaktan derleme + zip ile yayınlama burada tekrar konuşulacak | |
 | 10 | Performans karşılaştırması, temizlik | |
 

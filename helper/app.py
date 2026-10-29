@@ -6,6 +6,7 @@ keeps the card's keys working
 playing (title, cover) to the card. The window only opens to edit the keys.
 """
 
+import base64
 import os
 import socket
 import sys
@@ -13,7 +14,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 IS_MAC = sys.platform == "darwin"
 
@@ -262,6 +263,14 @@ class Api:
 
     def save_radar(self, settings):
         return self._core.device.save_radar(settings or {})
+
+    def send_map(self, b64, elev):
+        """Map built by web/mapdata.js on the Radar page ("" = no map: clear it). "" or the error."""
+        try:
+            self._core.device.upload_map(base64.b64decode(b64) if b64 else None, elev)
+            return ""
+        except (RuntimeError, ValueError, KeyError, TypeError) as e:
+            return str(e) or "hata"
 
     def release(self, released):
         self._core.device.release(bool(released))

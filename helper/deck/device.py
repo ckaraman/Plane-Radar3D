@@ -233,13 +233,14 @@ class Device:
 
     # ------------------------------------------------------------------ radar settings
     RADAR_KEYS = ("lat", "lon", "tz", "clock", "weather", "miles", "runways", "rings")
+    MAP_KEYS = ("hw", "map", "mapv", "elevv")  # read only: what the map for this card needs
 
     def radar_settings(self):
         """The card's location and screen options (from HELLO), None without a system 2 card."""
         h = self.hello if self.connected else None
         if not h or h.get("sys") != 2:
             return None
-        return {k: h.get(k) for k in self.RADAR_KEYS}
+        return {k: h.get(k) for k in self.RADAR_KEYS + self.MAP_KEYS}
 
     def save_radar(self, s):
         """PR:SET without the Wi-Fi fields (docs/PROTOCOL.md). Returns "" or an error code."""
@@ -378,8 +379,8 @@ class Device:
                 self.log("queue picture: %s" % e)
             return False
 
-    def upload_deck(self, blob, progress=lambda pct, text: None):
-        """The key set: to setup mode, upload, back to keyboard mode."""
+    def _in_setup_mode(self, work, progress):
+        """Card to setup mode, work(), back to keyboard mode (uploads: key set, map)."""
         if self.busy:
             raise RuntimeError("Başka bir gönderim sürüyor")
         self.busy = True  # the cover transfer stops, the watcher keeps out
@@ -389,7 +390,7 @@ class Device:
                 pass  # a cover on its way has noticed busy and stopped
             progress(2, "Kart kurulum moduna geçiyor…")
             step = "kurulum moduna geçiş"
-            self.log("upload: %d KB, card %s" % (len(blob) // 1024, "connected" if self.connected else "not connected"))
+            self.log("upload: card %s" % ("connected" if self.connected else "not connected"))
             already_setup = self.connected and (self.hello or {}).get("usb") == "setup"
             if self.connected and not already_setup:
                 r = self.request("PR:USBSETUP", ["USBMODE", "ERR"], 3)
@@ -415,12 +416,9 @@ class Device:
                     time.sleep(1.0)
                 if not opened:
                     raise RuntimeError("Kart kurulum modunda yanıt vermedi (%s)" % port)
-            progress(10, "Tuşlar gönderiliyor…")
             step = "gönderim"
-            win = 4 if int((self.hello or {}).get("deckv", 1)) >= 2 else 1
             t0 = time.time()
-            self._transfer("DECK", blob, 360, win,
-                           progress=lambda f: progress(10 + int(85 * f), "Tuşlar gönderiliyor…"))
+            work()
             self.log("upload: sent in %.1f s" % (time.time() - t0))
             progress(97, "Kart klavye moduna dönüyor…")
             step = "klavye moduna dönüş"
@@ -438,4 +436,47 @@ class Device:
             time.sleep(0.5)
             if self.connected:
                 break
+
+    def upload_deck(self, blob, progress=lambda pct, text: None):
+        """The key set: to setup mode, upload, back to keyboard mode."""
+        self.log("upload: key set %d KB" % (len(blob) // 1024))
+
+        def work():
+            progress(10, "Tuşlar gönderiliyor…")
+            win = 4 if int((self.hello or {}).get("deckv", 1)) >= 2 else 1
+            self._transfer("DECK", blob, 360, win,
+                           progress=lambda f: progress(10 + int(85 * f), "Tuşlar gönderiliyor…"))
+        self._in_setup_mode(work, progress)
         progress(100, "Tuşlar kartta.")
+
+    def _ack(self, text, tag, timeout=5):
+        r = self.request(text, [tag, "ERR"], timeout)
+        if not r or r[0] != tag:
+            raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
+        return r[1]
+
+    def upload_map(self, blob, elev, progress=lambda pct, text: None):
+        """Map blob and terrain {n, half, lat, lon, h} from web/mapdata.js, in setup mode as on
+        the setup page (PR:MAP*, PR:ELEV*; firmware map_store.h, terrain.h). blob None clears
+        the map and the terrain; elev None leaves the terrain as it is."""
+        self.log("upload: map %s, terrain %s" % ("%d KB" % (len(blob) // 1024) if blob else "clear",
+                                                 "yes" if elev else "no"))
+
+        def work():
+            if not blob:
+                self._ack("PR:MAPCLEAR", "OK")
+                self._ack("PR:ELEVCLEAR", "OK")
+                return
+            progress(10, "Harita karta yazılıyor…")
+            self._transfer("MAP", blob, 270, 1, progress=lambda f: progress(10 + int(75 * f), "Harita karta yazılıyor…"))
+            if elev:
+                progress(88, "Arazi yükseklikleri yazılıyor…")
+                n, h = int(elev["n"]), [int(v) for v in elev["h"]]
+                if len(h) != n * n:
+                    raise RuntimeError("arazi verisi eksik")
+                self._ack("PR:ELEVBEGIN " + json.dumps({k: elev[k] for k in ("n", "half", "lat", "lon")}), "ELEVACK")
+                for r in range(n):
+                    self._ack("PR:ELEVROW %d %s" % (r, ",".join(map(str, h[r * n:(r + 1) * n]))), "ELEVACK")
+                self._ack("PR:ELEVEND", "OK")
+        self._in_setup_mode(work, progress)
+        progress(100, "Harita kartta.")

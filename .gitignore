@@ -4,3 +4,4 @@ __pycache__/
 .pio-core-s3/
 helper/web/tz.json
 helper/web/tz-LICENSE.txt
+helper/web/mapdata.js
