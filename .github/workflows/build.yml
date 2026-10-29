@@ -168,7 +168,9 @@ jobs:
           python helper/tests/test_firmware.py
 
       - name: Map tile tests (shared map code)
-        run: node web/tests/mapdata.test.js
+        run: |
+          node web/tests/mapdata.test.js
+          node web/tests/deck.test.js
 
       - name: Windows helper from the deckapp job
         continue-on-error: true
@@ -194,8 +196,11 @@ jobs:
           VERSION_RADAR=$(ver '^radar-')
           test -n "$VERSION" && test -n "$VERSION_RADAR"
           mkdir -p site
-          cp web/index.html web/mapdata.js web/tz.json web/tz-LICENSE.txt site/
-          # System 1's page: the same page in its radar mode, reading every file from the site root.
+          cp web/mapdata.js web/tz.json web/tz-LICENSE.txt site/
+          # System 2's page at the root: install the card, download the PC program, recovery.
+          cp web/deck.html site/index.html
+          grep -q 'manifest-full-ws5.json' site/index.html
+          # System 1's page: index.html in its radar mode, reading every file from the site root.
           mkdir -p site/radar
           sed -e 's|^<head>$|<head>\n<base href="../">|' -e 's|^<body>$|<body data-sys="radar">|' web/index.html > site/radar/index.html
           grep -q '<base href="../">' site/radar/index.html && grep -q 'data-sys="radar"' site/radar/index.html

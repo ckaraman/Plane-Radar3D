@@ -8,7 +8,7 @@ Tek kart (Waveshare ESP32-S3-Touch-LCD-5, 800×480), iki ayrı firmware. Biri y�
 | Veri | Kart WiFi'den indirir (adsb.fi, Open-Meteo, adsbdb) | PC programı indirir, ayrıştırır, USB'den hazır gönderir |
 | Kartta WiFi / TLS | Var | Yok (RAM ve işlemci çizime kalır) |
 | Ekranlar | Radar, hava, saat, su | Radar, hava, saat, su, deck |
-| Kurulum | `…/Plane-Radar3D/radar/` (Wi-Fi, konum, harita, güncelleme) | Ana sayfa; 9. aşamada sadece PC programını indirtir, gerisi programdan |
+| Kurulum | `…/Plane-Radar3D/radar/` (Wi-Fi, konum, harita, güncelleme) | Ana sayfa (`web/deck.html`): kartı hazırla, PC programını indir, kurtarma; gerisi programdan |
 | PC kapalıyken | — | Saat ekranı (kart ayrıca besleniyorsa) |
 
 ## Kod düzeni
@@ -66,16 +66,18 @@ içinde. Sürümler `include/config.h` içinde.
 | 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den (6a indirme kodu `src/net`'e, 6b ws5'ten Wi-Fi çıkar, 6c PREFS / sys / PC yok → saat, 6d sayfa) | Tamam (kartta ve sayfada denendi) |
 | 7 | PC programı: veri motoru (7a uçak + rota `helper/deck/feed.py`, 7b hava + PREFS, 7c pencere ve bağlama) | Tamam (kartta denendi, Deck 1.5.0; kurulum sayfasından köprü adımı çıktı) |
 | 8 | PC programı: 8a ayarlar (konum, saat dilimi, ekran) `SET`, 8b harita + arazi (sayfayla ortak JS dosyası), 8c yazılım güncelleme (OTA). Tam kurulum / kurtarma sayfada kalır (kullanıcı kararı) | Tamam (kartta denendi; 8a: ayarlar + adres araması, Deck 1.6.0; 8b: `web/mapdata.js`, Deck 1.7.0; harita verisi OpenFreeMap karolarından, önemli yerler Wikidata'dan, Overpass yalnızca yedek, Deck 1.8.0; 8c: program yeni kart yazılımını kendisi bulur, onayla USB'den yükler, Deck 1.9.0, firmware 5in-0.41.1 ile denendi) |
-| 9 | 9a 2. sistem kurulum sayfası; 9b Defender yanlış alarmı: `PlaneRadarDeck.exe` `Trojan:Win32/Sabsik.TE.A!ml` diye engelleniyor (PyInstaller tek dosya + imzasız, yanlış alarm); bootloader'ı kaynaktan derleme + zip ile yayınlama burada tekrar konuşulacak | Bu adım |
+| 9 | 9a 2. sistem kurulum sayfası (`web/deck.html`, kodlandı); 9b Defender yanlış alarmı: `PlaneRadarDeck.exe` `Trojan:Win32/Sabsik.TE.A!ml` diye engelleniyor (PyInstaller tek dosya + imzasız, yanlış alarm); bootloader'ı kaynaktan derleme + zip ile yayınlama burada tekrar konuşulacak | Bu adım |
 | 10 | Performans karşılaştırması, temizlik | |
 
 ## Kurulum sayfaları
 
-Tek dosya: `web/index.html`. CI onu `site/radar/index.html` olarak da kopyalar; kopyaya
-`<base href="../">` (dosyalar kökten okunur) ve `<body data-sys="radar">` eklenir. Sayfada `.nr`
-sınıflı parçalar 1. sistemde gizlenir, `.or` sınıflılar sadece 1. sistemde görünür; JS'deki `SYS`
-hangi firmware'in (`firmware-ws5.bin` / `firmware-radar.bin`) yükleneceğini seçer. 1. sistem kartı
-ekranda `/radar` adresini gösterir (`include/config.h`).
+- **Kök (2. sistem):** `web/deck.html` → `site/index.html`. Karta bağlanmaz (Web Serial yok):
+  "Kartı hazırla" (esp-web-tools, `manifest-full-ws5.json`), PC programını indir, kurtarma
+  (BOOT + RESET). Konum, harita, tuşlar ve güncelleme programda. Test: `web/tests/deck.test.js`.
+- **`/radar` (1. sistem):** `web/index.html` → `site/radar/index.html`; kopyaya `<base href="../">`
+  (dosyalar kökten okunur) ve `<body data-sys="radar">` eklenir. Sayfada `.or` sınıflı parçalar
+  sadece 1. sistemde görünür; `.nr` parçaları artık hiç yayınlanmıyor (10. aşamada silinecek).
+  1. sistem kartı ekranda `/radar` adresini gösterir (`include/config.h`).
 
 ## Kurtarma (kart açılmıyorsa)
 
