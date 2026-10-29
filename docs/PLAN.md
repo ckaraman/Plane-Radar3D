@@ -66,7 +66,7 @@ içinde. Sürümler `include/config.h` içinde.
 | 6 | 2. sistem firmware'i: WiFi'siz, veri USB'den (6a indirme kodu `src/net`'e, 6b ws5'ten Wi-Fi çıkar, 6c PREFS / sys / PC yok → saat, 6d sayfa) | Tamam (kartta ve sayfada denendi) |
 | 7 | PC programı: veri motoru (7a uçak + rota `helper/deck/feed.py`, 7b hava + PREFS, 7c pencere ve bağlama) | Tamam (kartta denendi, Deck 1.5.0; kurulum sayfasından köprü adımı çıktı) |
 | 8 | PC programı: 8a ayarlar (konum, saat dilimi, ekran) `SET`, 8b harita + arazi (sayfayla ortak JS dosyası), 8c yazılım güncelleme (OTA). Tam kurulum / kurtarma sayfada kalır (kullanıcı kararı) | Tamam (kartta denendi; 8a: ayarlar + adres araması, Deck 1.6.0; 8b: `web/mapdata.js`, Deck 1.7.0; harita verisi OpenFreeMap karolarından, önemli yerler Wikidata'dan, Overpass yalnızca yedek, Deck 1.8.0; 8c: program yeni kart yazılımını kendisi bulur, onayla USB'den yükler, Deck 1.9.0, firmware 5in-0.41.1 ile denendi) |
-| 9 | 9a 2. sistem kurulum sayfası (`web/deck.html`, kodlandı); 9b Defender yanlış alarmı: `PlaneRadarDeck.exe` `Trojan:Win32/Sabsik.TE.A!ml` diye engelleniyor (PyInstaller tek dosya + imzasız, yanlış alarm); bootloader'ı kaynaktan derleme + zip ile yayınlama burada tekrar konuşulacak | Bu adım |
+| 9 | 9a 2. sistem kurulum sayfası (`web/deck.html`, kodlandı; Deck 1.9.1 pencere metni); 9b Defender yanlış alarmı: `PlaneRadarDeck.exe` `Trojan:Win32/Sabsik.TE.A!ml` diye engelleniyor (PyInstaller tek dosya + imzasız, yanlış alarm); bootloader'ı kaynaktan derleme + zip ile yayınlama burada tekrar konuşulacak | Bu adım |
 | 10 | Performans karşılaştırması, temizlik | |
 
 ## Kurulum sayfaları
