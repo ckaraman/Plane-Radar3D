@@ -373,7 +373,7 @@
     Şehir araması <a href="https://open-meteo.com/en/docs/geocoding-api" target="_blank" rel="noopener">Open-Meteo</a> servisini kullanır;
     girdiğiniz yer adı oraya gönderilir, başka hiçbir bilgi paylaşılmaz. WiFi şifresi yalnızca USB üzerinden cihaza yazılır.
     Harita çizgileri © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap katkıda bulunanları</a> (ODbL);
-    OpenFreeMap / OpenMapTiles karolarından (gerekirse Overpass servisinden) indirilir, yalnızca seçtiğiniz konumun çevresi istenir.
+    OpenFreeMap / OpenMapTiles karolarından (gerekirse Overpass servisinden), önemli yerler Wikidata’dan (CC0) indirilir; yalnızca seçtiğiniz konumun çevresi istenir.
     Uçak verisi: <a href="https://opendata.adsb.fi/" target="_blank" rel="noopener">adsb.fi</a>.
     Hava durumu: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0).
     Saat dilimi tablosu: <a href="https://github.com/nayarsystems/posix_tz_db" target="_blank" rel="noopener">posix_tz_db</a> (MIT).
@@ -1046,7 +1046,7 @@
       dev.map = blob.length;
       const lakeNote = !water ? '' : (blob.lakes ? ', ' + blob.lakes + ' göl' : ', bu alanda göl yok');
       const placeNote = blob.places ? ', ' + blob.places + ' önemli yer' : '';
-      const missNote = placesMissing ? ' Önemli yerler bu sefer alınamadı (Overpass sunucuları yoğun); birkaç dakika sonra tekrar "Cihaza kaydet" deyin.' : '';
+      const missNote = placesMissing ? ' Önemli yerler bu sefer alınamadı (sunucu cevap vermedi); birkaç dakika sonra tekrar "Cihaza kaydet" deyin.' : '';
       return ' Harita da yüklendi (' + label + ' km menzile kadar, ' + Math.round(blob.length / 1024) + ' KB' + lakeNote + placeNote + ').' +
         (water ? '' : ' Deniz dolgusu için önce 3. adımdan yazılımı güncelleyin.') + missNote;
     } catch (e) {

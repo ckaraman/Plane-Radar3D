@@ -6,7 +6,7 @@ const vm = require('vm');
 const assert = require('assert');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'mapdata.js'), 'utf8');
-const M = vm.runInThisContext(src + '\n;({ decodeTile, tileElements, buildMapBlob, KM_PER_DEG, fetchOpenFreeMap, buildCardMap });');
+const M = vm.runInThisContext(src + '\n;({ decodeTile, tileElements, buildMapBlob, KM_PER_DEG, fetchOpenFreeMap, buildCardMap, fetchLandmarks });');
 
 const E = 4096, Z = 12, X = 2375, Y = 1530;
 const tileLon = (x) => x / 2 ** Z * 360 - 180;
@@ -120,19 +120,36 @@ const southSea = () => poly('ocean', [[-64, 2048], [E + 64, 2048], [E + 64, E + 
   // buildCardMap: tiles first, Overpass only when a tile fails.
   let overpassCalls = 0;
   globalThis.fetchOverpass = async () => { overpassCalls++; return [{ type: 'way', tags: { highway: 'motorway' }, geometry: [{ lat, lon: lon - 0.03 }, { lat, lon: lon + 0.03 }] }]; };
-  // Landmarks are not in the tiles below zoom 14: they still come from Overpass (optional).
+  // Landmarks come from Wikidata, famous ones first, one row per item.
+  const row = (q, name, lo, la, links, type) => ({ item: { value: 'http://www.wikidata.org/entity/' + q }, itemLabel: { value: name },
+    loc: { value: 'Point(' + lo + ' ' + la + ')' }, links: { value: String(links) }, type: { value: 'http://www.wikidata.org/entity/' + type } });
+  let sparql = null;
+  const wd = async (url) => { sparql = decodeURIComponent(url); return { ok: true, json: async () => ({ results: { bindings: [
+    row('Q12506', 'Ayasofya', 28.98, 41.008, 152, 'Q32815'), row('Q12506', 'Ayasofya', 28.98, 41.008, 152, 'Q33506'),
+    row('Q1', 'Rams Park', 28.99, 41.10, 71, 'Q1154710'), row('Q2', 'Bir şey', 28.9, 41.0, 90, 'Q5'), row('Q3', 'Q3', 28.9, 41.0, 40, 'Q22698')] } }) }; };
+  const lms = await M.fetchLandmarks(41.0082, 28.9784, 25.7, wd);
+  assert.ok(sparql.includes('wikibase:radius "25.7"') && sparql.includes('Point(28.9784 41.0082)'), 'asks around the place');
+  assert.deepStrictEqual(lms.map((e) => e.tags.name), ['Ayasofya', 'Rams Park'], 'one per item, known kinds, with a name');
+  assert.strictEqual(lms[0].tags.amenity, 'place_of_worship');
+  assert.strictEqual(lms[0].lat, 41.008);
+  assert.strictEqual(lms[1].tags.leisure, 'stadium');
+  assert.ok(lms[0].tags.rank < lms[1].tags.rank, 'more Wikipedia articles: better rank');
+  assert.strictEqual(await M.fetchLandmarks(41, 29, 5, async () => { throw new Error('down'); }), null, 'Wikidata down: null');
+
   let placesCalls = 0;
-  globalThis.fetchPlaces = async () => { placesCalls++; return [{ type: 'node', lat: lat + 0.02, lon, tags: { leisure: 'stadium', name: 'Arena' } }]; };
+  globalThis.fetchLandmarks = async () => { placesCalls++; return [{ type: 'node', lat: lat + 0.02, lon, tags: { leisure: 'stadium', name: 'Arena', rank: -10 } }]; };
+  globalThis.fetchPlaces = async () => { throw new Error('Overpass not used for places when the tiles answer'); };
   globalThis.fetchCover = async () => null;
   globalThis.fetch = okFetch;
   let built = await M.buildCardMap(lat, lon, 5, { hw: 'ws5', mapv: 2 }, () => {});
   assert.ok(built && built.blob.length > 14, 'map from the tiles');
   assert.strictEqual(overpassCalls, 0, 'Overpass not asked when the tiles answer');
-  assert.strictEqual(placesCalls, 1, 'landmarks asked from Overpass');
+  assert.strictEqual(placesCalls, 1, 'landmarks asked from Wikidata');
   assert.strictEqual(built.placesMissing, false, 'landmarks arrived');
-  globalThis.fetchPlaces = async () => null;
+  globalThis.fetchLandmarks = async () => null;
   built = await M.buildCardMap(lat, lon, 5, { hw: 'ws5', mapv: 2 }, () => {});
-  assert.strictEqual(built.placesMissing, true, 'Overpass busy: landmarks missing, map still built');
+  assert.strictEqual(built.placesMissing, true, 'Wikidata down: landmarks missing, map still built');
+  globalThis.fetchPlaces = async () => null;
   globalThis.fetch = async (url) => { if (url.includes('/10/')) throw new Error('down'); return okFetch(url); };
   built = await M.buildCardMap(lat, lon, 5, { hw: 'ws5', mapv: 2 }, () => {});
   assert.ok(built && built.blob.length > 14, 'map from Overpass');

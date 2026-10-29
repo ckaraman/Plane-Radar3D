@@ -32,7 +32,7 @@ function crc32(bytes) {
 
 // ---- OpenFreeMap vector tiles (Mapbox Vector Tile, OpenMapTiles schema), turned into
 // Overpass-shaped elements so the map builders below read them unchanged. Landmarks are
-// only in zoom 14 tiles (far too many): they still come from Overpass.
+// only in zoom 14 tiles (far too many): they come from Wikidata.
 // Minimal protobuf reader: varints, zigzag, length-delimited fields; packed geometry.
 function decodeTile(buf) {
   let pos = 0;
@@ -360,6 +360,41 @@ async function fetchPlaces(lat, lon, radiusKm) {
   return null;   // places are optional
 }
 
+// Landmarks from Wikidata: the better known places (more Wikipedia articles) first. One
+// request, so it answers when Overpass is busy; null when it fails (landmarks are optional).
+const WD_KINDS = {
+  Q483110: { leisure: 'stadium' }, Q1154710: { leisure: 'stadium' }, Q43501: { tourism: 'zoo' },
+  Q12518: { man_made: 'tower' }, Q11166728: { man_made: 'tower' }, Q39715: { man_made: 'lighthouse' },
+  Q23413: { historic: 'castle' }, Q57821: { historic: 'fort' }, Q16560: { historic: 'palace' }, Q4989906: { historic: 'monument' },
+  Q12280: { bridge: 'yes' }, Q12570: { bridge: 'yes' }, Q33506: { tourism: 'museum' }, Q207694: { tourism: 'museum' },
+  Q22698: { leisure: 'park' }, Q22746: { leisure: 'park' }, Q194195: { tourism: 'theme_park' },
+  Q32815: { amenity: 'place_of_worship' }, Q16970: { amenity: 'place_of_worship' }, Q2977: { amenity: 'place_of_worship' },
+  Q34627: { amenity: 'place_of_worship' },
+};
+async function fetchLandmarks(lat, lon, radiusKm, fetchFn = fetch) {
+  // Names are looked up only for the 300 kept (the label service is the slow part).
+  const q = 'SELECT ?item ?itemLabel ?loc ?links ?type WHERE { { SELECT ?item ?loc ?links ?type WHERE { SERVICE wikibase:around { ?item wdt:P625 ?loc . ' +
+    'bd:serviceParam wikibase:center "Point(' + lon + ' ' + lat + ')"^^geo:wktLiteral . bd:serviceParam wikibase:radius "' + radiusKm + '" . } ' +
+    'VALUES ?type { ' + Object.keys(WD_KINDS).map((k) => 'wd:' + k).join(' ') + ' } ?item wdt:P31 ?type . ?item wikibase:sitelinks ?links . ' +
+    'FILTER(?links >= 3) } ORDER BY DESC(?links) LIMIT 300 } SERVICE wikibase:label { bd:serviceParam wikibase:language "tr,en". } }';
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);   // a big city takes 5-10 s
+  try {
+    const r = await fetchFn('https://query.wikidata.org/sparql?format=json&query=' + encodeURIComponent(q), { signal: ctl.signal });
+    if (!r.ok) return null;
+    const j = await r.json(), seen = new Set(), out = [];
+    for (const b of (j && j.results && j.results.bindings) || []) {
+      const id = b.item.value, name = b.itemLabel && b.itemLabel.value, kind = WD_KINDS[b.type.value.split('/').pop()];
+      const m = /Point\(([-\d.]+) ([-\d.]+)\)/.exec(b.loc.value);
+      if (!kind || !m || !name || /^Q\d+$/.test(name) || seen.has(id)) continue;
+      seen.add(id);
+      out.push({ type: 'node', lat: Number(m[2]), lon: Number(m[1]), tags: { ...kind, name, rank: -Number(b.links.value) } });
+    }
+    return out;
+  } catch (_) {
+    return null;
+  } finally { clearTimeout(timer); }
+}
+
 // Landmark symbol on the 5" map: 1 stadium, 2 zoo, 3 tower, 4 castle / historic,
 // 5 bridge, 6 museum, 7 park, 8 place of worship, 0 other (plain diamond).
 function landmarkCategory(t) {
@@ -399,7 +434,7 @@ function buildPlaceEntries(elements, lat, lon, radiusKm) {
     else if (t.name) {
       const cat = landmarkCategory(t);
       // Places with their own symbol first, then the better known ones.
-      if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.wikipedia ? 0 : 1 });   // no symbol: left out
+      if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.rank != null ? t.rank : (t.wikipedia ? 0 : 1) });   // no symbol: left out
     }
   }
   // Spread out: a place closer than `gap` km to one already taken is skipped.
@@ -961,10 +996,10 @@ async function buildCardMap(lat, lon, label, dev, onStatus) {
   if (ofm) {
     elements = ofm.map;
     // Airports and runways from the tiles; landmarks only exist at zoom 14 (far too many
-    // tiles), so they still come from Overpass and are left out when it is busy.
-    placesP = wantPlaces ? fetchPlaces(lat, lon, radius).then((lm) => {
+    // tiles), so they come from Wikidata and are left out when it does not answer.
+    placesP = wantPlaces ? fetchLandmarks(lat, lon, radius).then((lm) => {
       if (!lm) { placesMissing = true; return ofm.places; }
-      return ofm.places.concat(lm.filter((e) => !(e.tags && e.tags.aeroway)));
+      return ofm.places.concat(lm);
     }) : Promise.resolve(null);
     coverP = Promise.resolve(wantPlaces ? ofm.cover : null);
   } else {
