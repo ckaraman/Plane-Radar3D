@@ -294,19 +294,6 @@
     </details>
   </section>
 
-  <section class="card nr" aria-labelledby="h-bridge">
-    <h2 id="h-bridge"><span class="step">4</span>Wi-Fi olmadan çalıştırmak (USB köprüsü)</h2>
-    <div class="msg info" style="margin-top:10px">Plane Radar Deck 1.5.0 ve sonrası bu veriyi kendisi gönderir; köprü gerekmez. İkisini aynı anda açmayın (USB portunu tek program kullanabilir).</div>
-    <p class="hint"><span class="m4">Anten takılı değilse ya da </span>Wi-Fi'ye bağlanamıyorsa uçuş verisini bu bilgisayar indirip USB kablosuyla cihaza gönderebilir. Windows ve Mac için ayrı paketler var, ek program kurmak gerekmez.</p>
-    <div class="row" style="margin-top:12px">
-      <a class="btn primary" href="radar-usb-kopru.zip">Windows köprüsünü indir</a>
-      <a class="btn primary" href="radar-usb-kopru-mac.zip">Mac köprüsünü indir</a>
-    </div>
-    <p class="small"><strong>Windows:</strong> Zip dosyasını ayıklayın ve <strong>USB-Kopru-Baslat.bat</strong> dosyasına çift tıklayın. Windows uyarı verirse “Ek bilgi → Yine de çalıştır” deyin.</p>
-    <p class="small"><strong>Mac:</strong> Terminal'i açın, <code>python3 </code> yazın (sonunda boşluk), indirilen <strong>usb-kopru-mac</strong> klasöründeki <strong>radar_kopru.py</strong> dosyasını Terminal penceresine sürükleyin ve Enter'a basın. macOS “komut satırı geliştirici araçları”nı kurmayı önerirse “Yükle” deyin (tek seferlik). Çift tıklamayla açmak için bir kez Terminal'de <code>xattr -dr com.apple.quarantine ~/Downloads/usb-kopru-mac</code> çalıştırın; sonra <strong>Kopru-Baslat.command</strong> açılır (macOS “Done / Move to Trash” uyarısını bu yüzden verir, “Move to Trash” demeyin).</p>
-    <p class="small">Köprü çalışırken bu sayfanın cihaza bağlı olmaması gerekir: önce yukarıdan “Bağlantıyı kes”e basın. Köprü penceresi açık kaldığı sürece radar çalışır.</p>
-  </section>
-
   <section class="card m5" aria-labelledby="h-recover">
     <h2 id="h-recover">Kart açılmıyor ya da donuyorsa (kurtarma)</h2>
     <p class="hint">Önce kabloyu çıkarıp yeniden takın. Kart yine açılmıyorsa, takılı kalıyorsa ya da bu sayfa bağlanamıyorsa yazılımı baştan yükleyin. Kartın içindeki yükleme modu silinemez, bu yüzden kart her zaman kurtarılabilir.</p>
@@ -336,8 +323,8 @@
   </section>
 
   <section class="card m5 nr" aria-labelledby="h-deck">
-    <h2 id="h-deck"><span class="step">5</span>Kontrol tuşları <span class="sub">(stream deck ekranı)</span></h2>
-    <div class="msg info" style="margin-bottom:14px"><strong>Windows ve Mac için Plane Radar Deck:</strong> tuşları bilgisayardaki bu programla da ayarlayabilirsiniz. Program ayrıca istediğiniz siteyi istediğiniz tarayıcıda açar, program başlatır, gerçek ses seviyesini ve çalan şarkıyı (kapağıyla) karta gönderir.<br><a class="btn primary" href="PlaneRadarDeck.exe" download style="margin:8px 6px 4px 0">Windows programını indir</a><a class="btn primary" href="PlaneRadarDeck-mac.dmg" download style="margin:8px 6px 4px 0">Mac (Apple M işlemci)</a><a class="btn primary" href="PlaneRadarDeck-mac-intel.dmg" download style="margin:8px 0 4px">Mac (Intel işlemci)</a><br><span class="small">Windows ilk açılışta “bilinmeyen yayımcı” uyarısı verebilir: “Ek bilgi → Yine de çalıştır”. Mac'te: indirilen dosyayı açıp “Plane Radar Deck”i Uygulamalar'a sürükleyin; ilk açılışta uygulamaya sağ tıklayıp “Aç” deyin. Hangi Mac sürümünü indireceğinizi Apple menüsü › Bu Mac Hakkında'daki “Yonga” (Apple M) ya da “İşlemci” (Intel) satırı gösterir. Program açıkken bu sayfa karta bağlanamaz; programın menüsünden “Bağlantıyı bırak” deyin.</span></div>
+    <h2 id="h-deck"><span class="step">4</span>Kontrol tuşları <span class="sub">(stream deck ekranı)</span></h2>
+    <div class="msg info" style="margin-bottom:14px"><strong>Windows ve Mac için Plane Radar Deck:</strong> tuşları bilgisayardaki bu programla da ayarlayabilirsiniz. <span class="nr">2. sistemde uçuş, rota ve hava verisini de internetten alıp karta bu program gönderir (açık kalmalı). </span>Program ayrıca istediğiniz siteyi istediğiniz tarayıcıda açar, program başlatır, gerçek ses seviyesini ve çalan şarkıyı (kapağıyla) karta gönderir.<br><a class="btn primary" href="PlaneRadarDeck.exe" download style="margin:8px 6px 4px 0">Windows programını indir</a><a class="btn primary" href="PlaneRadarDeck-mac.dmg" download style="margin:8px 6px 4px 0">Mac (Apple M işlemci)</a><a class="btn primary" href="PlaneRadarDeck-mac-intel.dmg" download style="margin:8px 0 4px">Mac (Intel işlemci)</a><br><span class="small">Windows ilk açılışta “bilinmeyen yayımcı” uyarısı verebilir: “Ek bilgi → Yine de çalıştır”. Mac'te: indirilen dosyayı açıp “Plane Radar Deck”i Uygulamalar'a sürükleyin; ilk açılışta uygulamaya sağ tıklayıp “Aç” deyin. Hangi Mac sürümünü indireceğinizi Apple menüsü › Bu Mac Hakkında'daki “Yonga” (Apple M) ya da “İşlemci” (Intel) satırı gösterir. Program açıkken bu sayfa karta bağlanamaz; programın menüsünden “Bağlantıyı bırak” deyin.</span></div>
     <p class="hint">Radardaki ızgara düğmesiyle açılan kontrol ekranının 12 tuşuna resim, yazı ve işlev verin. Tuşlar USB kablosundan bilgisayara klavye tuşu olarak gider; sağdaki yuvarlak düğme sesi açar / kısar, dokununca sessize alır. Bir tuşa tıklayıp aşağıdan düzenleyin, sonra “Cihaza gönder”e basın.</p>
     <div class="deck-wrap">
       <div class="deck-grid" id="deck-grid" role="group" aria-label="Kontrol tuşları"></div>
@@ -1837,7 +1824,7 @@
 
     const ssid = $('#ssid').value;
     const pass = $('#pass').value;
-    // WiFi is optional here: without it the device runs on the USB bridge (step 4).
+    // WiFi is optional here (system 1 page; system 2 gets its data from Plane Radar Deck).
     if (ssid.trim() && pass && pass.length < 8) { setMsg(msg, 'err', ERRORS.bad_wifi_password); return; }
 
     const payload = {
