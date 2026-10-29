@@ -518,7 +518,10 @@ def test_feed():
     del link.hello["feedv"]
     n = len(urls)
     f.tick(3000)
-    assert f.state == "kart eski" and len(urls) == n
+    assert f.state.startswith("1. sistem") and len(urls) == n
+    del link.hello["sys"]  # a system 2 card before 0.41
+    f.tick(3001)
+    assert f.state.startswith("kart yazılımı eski") and len(urls) == n
 
     link.connected = False
     f.tick(3005)

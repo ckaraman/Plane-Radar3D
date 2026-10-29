@@ -1,4 +1,5 @@
 ﻿# Radar USB köprüsü (Windows PowerShell 5.1, ek kurulum gerekmez)
+# NOT: 2. sistemde Plane Radar Deck 1.5.0+ bu işi kendisi yapar (helper/deck/feed.py). İkisini aynı anda açmayın. Aşama 10'da silinecek.
 # Uçuş verisini internetten indirir, USB seri port üzerinden Plane Radar 3D cihazına gönderir.
 # Protokol: PR:ABEGIN / PR:A lat,lon,track,gs,alt,vrate,callsign,type / PR:AEND <unix>
 #           PR:W ... (hava durumu, 10 dakikada bir; Open-Meteo)

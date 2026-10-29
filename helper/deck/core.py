@@ -7,6 +7,7 @@ import time
 from . import blob, browser_link, queue_card
 from .config import Config
 from .device import Device
+from .feed import Feed
 from .media import cover_jpeg
 from .plat import actions, media, volume
 
@@ -37,6 +38,19 @@ class Core:
         self.upload = {"running": False, "pct": 0, "text": "", "error": ""}
         threading.Thread(target=self._pump, name="pump", daemon=True).start()
         threading.Thread(target=self._heartbeat, name="heartbeat", daemon=True).start()
+        self.feed = Feed(self.device, log=log)
+        threading.Thread(target=self._feed_loop, name="feed", daemon=True).start()
+
+    def _feed_loop(self):
+        """System 2 cards: aircraft, routes and weather from the internet (feed.py)."""
+        while True:
+            time.sleep(1.0)
+            if self.device.busy:  # key upload: the card is in setup mode
+                continue
+            try:
+                self.feed.tick(time.time())
+            except Exception as e:  # noqa: BLE001 - keep feeding
+                self.log("feed: %s" % e)
 
     # ------------------------------------------------------------------ from the card
     def _card_event(self, tag, data):

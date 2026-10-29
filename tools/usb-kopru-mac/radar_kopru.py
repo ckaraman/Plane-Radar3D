@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+NOT: 2. sistemde Plane Radar Deck 1.5.0+ bu işi kendisi yapar (helper/deck/feed.py).
+İkisini aynı anda açmayın. Aşama 10'da silinecek.
+
 Radar USB köprüsü — macOS (Windows'taki usb-koprusu.ps1'in aynısı).
 
 Uçuş verisini (adsb.fi / airplanes.live / adsb.lol), rotaları (adsbdb.com) ve hava

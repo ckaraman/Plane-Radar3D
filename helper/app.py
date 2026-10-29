@@ -13,7 +13,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.4.2"
+VERSION = "1.5.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 IS_MAC = sys.platform == "darwin"
 
@@ -96,7 +96,7 @@ class Api:
         v = self._core.volume
         return {
             "version": VERSION, "slots": slots, "settings": settings,
-            "device": self._core.device.status(), "volume": {"v": v.level, "m": v.muted},
+            "device": self._core.device.status(), "feed": self._core.feed.state, "volume": {"v": v.level, "m": v.muted},
             "now": self._core.now, "browsers": [{"id": b["id"], "name": b["name"]} for b in actions.browsers()],
             "upload": dict(self._core.upload), "platform": "mac" if IS_MAC else "win", "link": self._link(),
             "music_hosts": list(__import__("deck.browser_link", fromlist=["MUSIC_HOSTS"]).MUSIC_HOSTS),
@@ -104,7 +104,7 @@ class Api:
 
     def live(self):
         v = self._core.volume
-        return {"device": self._core.device.status(), "volume": {"v": v.level, "m": v.muted},
+        return {"device": self._core.device.status(), "feed": self._core.feed.state, "volume": {"v": v.level, "m": v.muted},
                 "now": self._core.now, "upload": dict(self._core.upload), "link": self._link()}
 
     def _link(self):
@@ -472,7 +472,7 @@ def _test_png():
 
 def run():
     if "--selftest" in sys.argv:  # CI: the packaged program starts and its modules load
-        from deck import blob, config, device  # noqa: F401
+        from deck import blob, config, device, feed  # noqa: F401
         from deck.plat import actions, media, programs, volume  # noqa: F401
         import webview  # noqa: F401
         if IS_MAC:
@@ -573,7 +573,7 @@ def run():
         if st["released"]:
             return "Bağlantı bırakıldı (kurulum sayfası için)"
         if st["connected"]:
-            return "Kart bağlı · Ses %%%d" % core.volume.level
+            return "Kart bağlı · Ses %%%d · Veri: %s" % (core.volume.level, core.feed.state)
         return "Kart bekleniyor…"
 
     if IS_MAC:

@@ -224,6 +224,7 @@
           <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; font-size: 14px; margin-top: 10px">
             <div class="small">Bağlantı</div><div id="c-port">–</div>
             <div class="small">Kart yazılımı</div><div id="c-fw">–</div>
+            <div class="small">Veri (uçak, hava)</div><div id="c-feed">–</div>
             <div class="small">Bu program</div><div id="c-app">–</div>
           </div>
           <div class="btns"><button type="button" class="btn" id="b-release">Kurulum sayfası için bağlantıyı bırak</button></div>
@@ -639,6 +640,7 @@
   }
   function applyLive(st) {
     applyDevice(st.device);
+    $('#c-feed').textContent = st.device.connected && st.feed ? st.feed : '–';
     if (st.link) applyLink(st.link);
     const v = st.volume || {};
     $('#p-vol').textContent = v.m ? 'Ses kapalı' : 'Ses %' + (v.v ?? '–');

@@ -84,8 +84,11 @@ class Feed:
         if not h:
             self.state = "kart yok"
             return
+        if h.get("sys") == 1:
+            self.state = "1. sistem kartı, Wi-Fi'den kendisi alıyor"
+            return
         if h.get("sys") != 2 or not h.get("feedv"):
-            self.state = "kart eski"  # system 1 or a firmware before 0.41: it fetches itself
+            self.state = "kart yazılımı eski, güncelleyin"  # before 5in-0.41.0
             return
         lat, lon = num(h.get("lat")), num(h.get("lon"))
         if lat is None or lon is None:
