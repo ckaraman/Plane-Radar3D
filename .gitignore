@@ -5,3 +5,4 @@ __pycache__/
 helper/web/tz.json
 helper/web/tz-LICENSE.txt
 helper/web/mapdata.js
+.superpowers/

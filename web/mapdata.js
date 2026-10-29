@@ -30,6 +30,219 @@ function crc32(bytes) {
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
+// ---- OpenFreeMap vector tiles (Mapbox Vector Tile, OpenMapTiles schema), turned into
+// Overpass-shaped elements so the map builders below read them unchanged.
+// Minimal protobuf reader: varints, zigzag, length-delimited fields; packed geometry.
+function decodeTile(buf) {
+  let pos = 0;
+  const varint = () => {
+    let v = 0, mul = 1, b;
+    do { b = buf[pos++]; v += (b & 0x7f) * mul; mul *= 128; } while (b & 0x80);
+    return v;
+  };
+  const skip = (wire) => {
+    if (wire === 0) varint();
+    else if (wire === 1) pos += 8;
+    else if (wire === 2) pos += varint();
+    else if (wire === 5) pos += 4;
+    else throw new Error('bad tile');
+  };
+  const zz = (n) => (n % 2 ? -(n + 1) / 2 : n / 2);
+  const str = (end) => new TextDecoder().decode(buf.subarray(pos, end));
+  const value = (end) => {
+    let v = null;
+    while (pos < end) {
+      const tag = varint(), f = tag >> 3, w = tag & 7;
+      if (f === 1 && w === 2) { const n = varint(); v = str(pos + n); pos += n; }
+      else if (f === 2 && w === 5) { v = new DataView(buf.buffer, buf.byteOffset + pos, 4).getFloat32(0, true); pos += 4; }
+      else if (f === 3 && w === 1) { v = new DataView(buf.buffer, buf.byteOffset + pos, 8).getFloat64(0, true); pos += 8; }
+      else if ((f === 4 || f === 5) && w === 0) v = varint();
+      else if (f === 6 && w === 0) v = zz(varint());
+      else if (f === 7 && w === 0) v = !!varint();
+      else skip(w);
+    }
+    return v;
+  };
+  const geometry = (cmds) => {
+    const parts = [];
+    let x = 0, y = 0, cur = null;
+    for (let i = 0; i < cmds.length;) {
+      const c = cmds[i++], id = c & 7, count = c >> 3;
+      if (id === 7) { if (cur && cur.length) cur.push(cur[0].slice()); continue; }   // ClosePath
+      for (let k = 0; k < count; k++) {
+        x += zz(cmds[i++]); y += zz(cmds[i++]);
+        if (id === 1) { cur = []; parts.push(cur); }
+        cur.push([x, y]);
+      }
+    }
+    return parts;
+  };
+  const layers = {};
+  while (pos < buf.length) {
+    const tag = varint();
+    if (tag >> 3 !== 3 || (tag & 7) !== 2) { skip(tag & 7); continue; }
+    const end = varint() + pos;
+    let name = '', extent = 4096;
+    const keys = [], values = [], raw = [];
+    while (pos < end) {
+      const t = varint(), f = t >> 3, w = t & 7;
+      if (f === 1 && w === 2) { const n = varint(); name = str(pos + n); pos += n; }
+      else if (f === 2 && w === 2) {
+        const fend = varint() + pos, feat = { type: 0, tagIdx: [], cmds: [] };
+        while (pos < fend) {
+          const ft = varint(), ff = ft >> 3, fw = ft & 7;
+          if ((ff === 2 || ff === 4) && fw === 2) {
+            const pend = varint() + pos, out = ff === 2 ? feat.tagIdx : feat.cmds;
+            while (pos < pend) out.push(varint());
+          } else if (ff === 3 && fw === 0) feat.type = varint();
+          else skip(fw);
+        }
+        raw.push(feat);
+      } else if (f === 3 && w === 2) { const n = varint(); keys.push(str(pos + n)); pos += n; }
+      else if (f === 4 && w === 2) { const n = varint(); values.push(value(pos + n)); }
+      else if (f === 5 && w === 0) extent = varint();
+      else skip(w);
+    }
+    layers[name] = {
+      extent,
+      features: raw.map((ft) => {
+        const tags = {};
+        for (let k = 0; k + 1 < ft.tagIdx.length; k += 2) tags[keys[ft.tagIdx[k]]] = values[ft.tagIdx[k + 1]];
+        return { type: ft.type, tags, geom: geometry(ft.cmds) };
+      }),
+    };
+  }
+  return layers;
+}
+
+// Polygon ring clipped to the tile square 0..e (Sutherland-Hodgman); open ring in, open ring out.
+function clipRingSquare(ring, e) {
+  let pts = ring;
+  const edges = [[(p) => p[0] >= 0, (a, b) => [0, a[1] + (b[1] - a[1]) * (0 - a[0]) / (b[0] - a[0])]],
+                 [(p) => p[0] <= e, (a, b) => [e, a[1] + (b[1] - a[1]) * (e - a[0]) / (b[0] - a[0])]],
+                 [(p) => p[1] >= 0, (a, b) => [a[0] + (b[0] - a[0]) * (0 - a[1]) / (b[1] - a[1]), 0]],
+                 [(p) => p[1] <= e, (a, b) => [a[0] + (b[0] - a[0]) * (e - a[1]) / (b[1] - a[1]), e]]];
+  for (const [inside, cut] of edges) {
+    const out = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      if (inside(a)) { out.push(a); if (!inside(b)) out.push(cut(a, b)); }
+      else if (inside(b)) out.push(cut(a, b));
+    }
+    pts = out;
+    if (!pts.length) break;
+  }
+  return pts;
+}
+
+// Line clipped to the tile square: the pieces inside (Liang-Barsky per segment).
+function clipLineSquare(line, e) {
+  const pieces = [];
+  let cur = null;
+  for (let i = 1; i < line.length; i++) {
+    const [x0, y0] = line[i - 1], [x1, y1] = line[i], dx = x1 - x0, dy = y1 - y0;
+    let t0 = 0, t1 = 1, ok = true;
+    for (const [p, q] of [[-dx, x0], [dx, e - x0], [-dy, y0], [dy, e - y0]]) {
+      if (p === 0) { if (q < 0) ok = false; continue; }
+      const t = q / p;
+      if (p < 0) t0 = Math.max(t0, t); else t1 = Math.min(t1, t);
+    }
+    if (!ok || t0 > t1) { cur = null; continue; }
+    const a = [x0 + t0 * dx, y0 + t0 * dy], b = [x0 + t1 * dx, y0 + t1 * dy];
+    if (!cur || t0 > 0) { cur = [a]; pieces.push(cur); }
+    cur.push(b);
+    if (t1 < 1) cur = null;
+  }
+  return pieces.filter((p) => p.length >= 2);
+}
+
+const OFM_LANDMARK = {
+  stadium: { leisure: 'stadium' }, zoo: { tourism: 'zoo' }, museum: { tourism: 'museum' },
+  theme_park: { tourism: 'theme_park' }, attraction: { tourism: 'attraction' },
+  castle: { historic: 'castle' }, monument: { historic: 'monument' }, fort: { historic: 'fort' }, palace: { historic: 'palace' },
+  place_of_worship: { amenity: 'place_of_worship' }, park: { leisure: 'park' },
+  tower: { man_made: 'tower' }, lighthouse: { man_made: 'lighthouse' },
+};
+
+// Decoded tiles [{z, x, y, layers}] -> { map, places, cover } element lists (Overpass shape).
+// Coast: the tiles have sea polygons, not coastlines. The edges of a sea polygon that do not
+// lie on the tile border are the coast; MVT outer rings run clockwise with y down, so the
+// water is already on the right (the OSM coastline rule). Coast ends on a tile border are
+// snapped to the neighbour tile's so the pieces join by their end points.
+function tileElements(tiles) {
+  const map = [], places = [], cover = [];
+  let id = 1;
+  const coastChains = [];   // in global pixels of their zoom: { z, pts }
+  for (const { z, x: tx, y: ty, layers } of tiles) {
+    const n = 2 ** z;
+    for (const [lname, layer] of Object.entries(layers)) {
+      const e = layer.extent, gx = (p) => tx * e + p[0], gy = (p) => ty * e + p[1];
+      const ll = (p) => ({ lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * gy(p) / e / n))) * 180 / Math.PI, lon: gx(p) / e / n * 360 - 180 });
+      const closed = (r) => { const g = r.map(ll); g.push({ ...g[0] }); return g; };
+      for (const f of layer.features) {
+        const t = f.tags, cls = t.class;
+        const open = (r) => (r.length > 1 && r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1] ? r.slice(0, -1) : r);
+        const inTile = () => { const [px, py] = f.geom[0][0]; return px >= 0 && px < e && py >= 0 && py < e; };   // labels repeat in neighbour tiles
+        const rings = () => f.geom.map((r) => clipRingSquare(open(r), e)).filter((r) => r.length >= 3);
+        if (lname === 'water' && f.type === 3) {
+          if (cls === 'ocean') {
+            for (const r of rings()) {
+              const onBorder = (a, b) => (a[0] === b[0] && (a[0] === 0 || a[0] === e)) || (a[1] === b[1] && (a[1] === 0 || a[1] === e));
+              const cut = r.findIndex((p, i) => onBorder(p, r[(i + 1) % r.length]));
+              if (cut < 0) { coastChains.push({ z, e, pts: r.concat([r[0]]).map((p) => [gx(p), gy(p)]) }); continue; }
+              let cur = null;
+              for (let k = 1; k <= r.length; k++) {   // start right after a border edge
+                const a = r[(cut + k) % r.length], b = r[(cut + k + 1) % r.length];
+                if (onBorder(a, b)) { cur = null; continue; }
+                if (!cur) { cur = { z, e, pts: [[gx(a), gy(a)]] }; coastChains.push(cur); }
+                cur.pts.push([gx(b), gy(b)]);
+              }
+            }
+          } else if (cls === 'lake') {
+            for (const r of rings()) map.push({ type: 'way', id: id++, tags: { natural: 'water' }, geometry: closed(r) });
+          }
+        } else if (lname === 'transportation' && f.type === 2 && (cls === 'motorway' || cls === 'trunk')) {
+          for (const line of f.geom) for (const p of clipLineSquare(line, e)) map.push({ type: 'way', id: id++, tags: { highway: cls }, geometry: p.map(ll) });
+        } else if (lname === 'landcover' && f.type === 3 && cls === 'wood') {
+          for (const r of rings()) cover.push({ type: 'way', id: id++, tags: { landuse: 'forest' }, geometry: closed(r) });
+        } else if (lname === 'landuse' && f.type === 3 && /^(residential|commercial|industrial|retail)$/.test(cls)) {
+          for (const r of rings()) {
+            const g = r.map(ll), lats = g.map((p) => p.lat), lons = g.map((p) => p.lon);
+            cover.push({ type: 'way', id: id++, tags: { landuse: cls },
+                         bounds: { minlat: Math.min(...lats), maxlat: Math.max(...lats), minlon: Math.min(...lons), maxlon: Math.max(...lons) } });
+          }
+        } else if (lname === 'aerodrome_label' && f.type === 1 && inTile() && /^[A-Z]{3}$/.test(t.iata || '')) {
+          places.push({ type: 'node', id: id++, ...ll(f.geom[0][0]), tags: { aeroway: 'aerodrome', iata: t.iata, name: t.name } });
+        } else if (lname === 'aeroway' && f.type === 2 && cls === 'runway') {
+          for (const line of f.geom) for (const p of clipLineSquare(line, e)) places.push({ type: 'way', id: id++, tags: { aeroway: 'runway' }, geometry: p.map(ll) });
+        } else if (lname === 'poi' && f.type === 1 && inTile() && t.name) {
+          const kind = OFM_LANDMARK[t.subclass] || OFM_LANDMARK[cls];
+          if (kind) places.push({ type: 'node', id: id++, ...ll(f.geom[0][0]), tags: { ...kind, name: t.name, rank: t.rank } });
+        }
+      }
+    }
+  }
+  // Snap coast ends on tile borders to the nearest coast start (2 px), then emit.
+  const onTileBorder = (c, p) => p[0] % c.e === 0 || p[1] % c.e === 0;
+  for (const a of coastChains) {
+    const end = a.pts[a.pts.length - 1];
+    if (!onTileBorder(a, end)) continue;
+    let best = null, bestD = 2;
+    for (const b of coastChains) {
+      if (b === a || b.z !== a.z) continue;
+      const d = Math.hypot(b.pts[0][0] - end[0], b.pts[0][1] - end[1]);
+      if (d <= bestD) { bestD = d; best = b; }
+    }
+    if (best) best.pts[0] = end.slice();
+  }
+  for (const c of coastChains) {
+    const n = 2 ** c.z, E = c.e * n;
+    const geometry = c.pts.map(([x, y]) => ({ lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * y / E))) * 180 / Math.PI, lon: x / E * 360 - 180 }));
+    if (geometry.length >= 2) map.push({ type: 'way', id: id++, tags: { natural: 'coastline' }, geometry });
+  }
+  return { map, places, cover };
+}
+
 // Sends the query to all mirrors at once and takes the first good answer (the others
 // are cancelled): a busy server no longer costs a 30 s wait before the next is tried.
 async function overpassRace(q, timeoutMs, reasons) {
@@ -148,7 +361,7 @@ function buildPlaceEntries(elements, lat, lon, radiusKm) {
     else if (t.name) {
       const cat = landmarkCategory(t);
       // Places with their own symbol first, then the better known ones.
-      if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.wikipedia ? 0 : 1 });   // no symbol: left out
+      if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.rank != null ? t.rank : (t.wikipedia ? 0 : 1) });   // no symbol: left out
     }
   }
   // Spread out: a place closer than `gap` km to one already taken is skipped.
