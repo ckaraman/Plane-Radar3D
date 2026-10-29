@@ -53,6 +53,19 @@ const southSea = () => poly('ocean', [[-64, 2048], [E + 64, 2048], [E + 64, E + 
   assert.strictEqual(blob[2], 2, 'sea rings present (coast stitched across the tile border)');
 }
 
+// A coast crossing a tile border at a shallow angle: the neighbour's copy, a pixel off across
+// the line, crosses the border far from this tile's crossing point; still one coast.
+{
+  // sea south of a line falling 0.097 px per px towards the east, crossing the south border near x 2000
+  const a = tile(X, { water: { extent: E, features: [poly('ocean', [[-64, 3896], [E + 64, 4306], [E + 64, E + 64], [-64, E + 64]])] } });
+  // the tile below: the same line a pixel lower, so it reaches its north border about 10 px away
+  const b = { z: Z, x: X, y: Y + 1, layers: { water: { extent: E, features: [poly('ocean', [[-64, -199], [E + 64, 211], [E + 64, E + 64], [-64, E + 64]])] } } };
+  const out = M.tileElements([a, b]);
+  const blob = M.buildMapBlob(out.map, tileLat(Y + 1), tileLon(X + 0.5), true, 3);
+  assert.ok(blob, 'map built');
+  assert.strictEqual(blob[2], 2, 'sea rings present (shallow seam joined)');
+}
+
 // A forest reaching past the tile edge is clipped to the tile (overlaps would cancel in even-odd).
 {
   const out = M.tileElements([tile(X, { landcover: { extent: E, features: [poly('wood', [[-500, -500], [4600, -500], [4600, 4600], [-500, 4600]])] } })]);
@@ -71,7 +84,8 @@ const southSea = () => poly('ocean', [[-64, 2048], [E + 64, 2048], [E + 64, E + 
 {
   const out = M.tileElements([tile(X, {
     transportation: { extent: E, features: [{ type: 2, tags: { class: 'motorway' }, geom: [[[100, 100], [3000, 3000]]] },
-                                            { type: 2, tags: { class: 'primary' }, geom: [[[100, 100], [3000, 100]]] }] },
+                                            { type: 2, tags: { class: 'primary' }, geom: [[[100, 100], [3000, 100]]] },
+                                            { type: 2, tags: { class: 'motorway', ramp: 1 }, geom: [[[200, 200], [900, 900]]] }] },
     water: { extent: E, features: [poly('lake', [[1000, 1000], [2000, 1000], [2000, 2000], [1000, 2000]]), poly('river', [[0, 0], [10, 0], [10, 10]])] },
     landuse: { extent: E, features: [poly('residential', [[100, 100], [200, 100], [200, 200], [100, 200]])] },
     aerodrome_label: { extent: E, features: [{ type: 1, tags: { iata: 'IST', name: 'İstanbul' }, geom: [[[2000, 2000]]] }] },

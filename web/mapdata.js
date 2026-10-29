@@ -182,19 +182,19 @@ function tileElements(tiles) {
             for (const r of rings()) {
               const onBorder = (a, b) => (a[0] === b[0] && (a[0] === 0 || a[0] === e)) || (a[1] === b[1] && (a[1] === 0 || a[1] === e));
               const cut = r.findIndex((p, i) => onBorder(p, r[(i + 1) % r.length]));
-              if (cut < 0) { coastChains.push({ z, e, pts: r.concat([r[0]]).map((p) => [gx(p), gy(p)]) }); continue; }
+              if (cut < 0) { coastChains.push({ z, e, tx, ty, pts: r.concat([r[0]]).map((p) => [gx(p), gy(p)]) }); continue; }
               let cur = null;
               for (let k = 1; k <= r.length; k++) {   // start right after a border edge
                 const a = r[(cut + k) % r.length], b = r[(cut + k + 1) % r.length];
                 if (onBorder(a, b)) { cur = null; continue; }
-                if (!cur) { cur = { z, e, pts: [[gx(a), gy(a)]] }; coastChains.push(cur); }
+                if (!cur) { cur = { z, e, tx, ty, pts: [[gx(a), gy(a)]] }; coastChains.push(cur); }
                 cur.pts.push([gx(b), gy(b)]);
               }
             }
           } else if (cls === 'lake') {
             for (const r of rings()) map.push({ type: 'way', id: id++, tags: { natural: 'water' }, geometry: closed(r) });
           }
-        } else if (lname === 'transportation' && f.type === 2 && (cls === 'motorway' || cls === 'trunk')) {
+        } else if (lname === 'transportation' && f.type === 2 && (cls === 'motorway' || cls === 'trunk') && !t.ramp) {
           for (const line of f.geom) for (const p of clipLineSquare(line, e)) map.push({ type: 'way', id: id++, tags: { highway: cls }, geometry: p.map(ll) });
         } else if (lname === 'landcover' && f.type === 3 && cls === 'wood') {
           for (const r of rings()) cover.push({ type: 'way', id: id++, tags: { landuse: 'forest' }, geometry: closed(r) });
@@ -212,18 +212,21 @@ function tileElements(tiles) {
       }
     }
   }
-  // Snap coast ends on tile borders to the nearest coast start (2 px), then emit.
-  const onTileBorder = (c, p) => p[0] % c.e === 0 || p[1] % c.e === 0;
+  // Snap each coast end on a tile border to the nearest coast start on the same border line in
+  // a neighbour tile. Each tile is simplified on its own, so a coast meeting the border at a
+  // shallow angle crosses it some pixels apart in the two tiles: 32 px along the border.
+  const taken = new Set();
   for (const a of coastChains) {
-    const end = a.pts[a.pts.length - 1];
-    if (!onTileBorder(a, end)) continue;
-    let best = null, bestD = 2;
+    const end = a.pts[a.pts.length - 1], horiz = end[1] % a.e === 0, vert = end[0] % a.e === 0;
+    if (!horiz && !vert) continue;
+    let best = null, bestD = 32;
     for (const b of coastChains) {
-      if (b === a || b.z !== a.z) continue;
-      const d = Math.hypot(b.pts[0][0] - end[0], b.pts[0][1] - end[1]);
+      if (b.z !== a.z || (b.tx === a.tx && b.ty === a.ty) || taken.has(b)) continue;
+      const s = b.pts[0];
+      const d = horiz && s[1] === end[1] ? Math.abs(s[0] - end[0]) : vert && s[0] === end[0] ? Math.abs(s[1] - end[1]) : Infinity;
       if (d <= bestD) { bestD = d; best = b; }
     }
-    if (best) best.pts[0] = end.slice();
+    if (best) { taken.add(best); best.pts[0] = end.slice(); }
   }
   for (const c of coastChains) {
     const n = 2 ** c.z, E = c.e * n;
