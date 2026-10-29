@@ -179,6 +179,10 @@ class Device:
             p[2].append((tag, data))
             p[1].set()
             return
+        if tag == "PREFS":  # range / units changed on the card: the feed reads it from hello
+            if self.hello is not None:
+                self.hello["prefs"] = data
+            return
         if tag in ("KEY", "SETVOL", "MUTE"):
             try:
                 self.on_event(tag, data)
@@ -211,10 +215,10 @@ class Device:
             finally:
                 self.pending = None
 
-    def send_batch(self, lines, end, ack, timeout):
+    def send_batch(self, lines, end=None, ack=None, timeout=0):
         """Short lines, then an end line the card answers (PR:ABEGIN .. PR:AEND -> AOK).
         Not in the middle of a cover / key upload: the card's USB link loses data when
-        they mix. Returns the answer or None (skipped, no answer)."""
+        they mix. Returns the answer (True without an end line) or None (skipped, no answer)."""
         if not self.stream_lock.acquire(timeout=5):
             return None
         try:
@@ -223,7 +227,7 @@ class Device:
                     return None
                 if i % 6 == 5:
                     time.sleep(0.04)  # the radar_kopru pacing: CDC drops long bursts
-            return self.request(end, [ack], timeout)
+            return self.request(end, [ack], timeout) if end else True
         finally:
             self.stream_lock.release()
 

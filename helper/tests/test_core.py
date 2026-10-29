@@ -137,6 +137,8 @@ def test_all():
     r = d.send_batch(["PR:ABEGIN", "PR:A 41.0,29.0,0,0,5000,0,THY1,A321"], "PR:AEND 1700000001", "AOK", 3)
     assert r == ("AOK", {"n": 1}), r
     assert card.aircraft == ["41.0,29.0,0,0,5000,0,THY1,A321"]
+    card.say('PR:PREFS {"range_km":30,"fetch_km":40,"miles":false}')  # range changed on the card
+    assert wait(lambda: (d.hello.get("prefs") or {}).get("fetch_km") == 40), d.hello
 
     # Card -> helper events.
     card.say('PR:KEY {"i":4}')
@@ -424,11 +426,16 @@ def test_feed():
         connected = True
 
         def __init__(self):
-            self.hello = {"sys": 2, "feedv": 1, "lat": 41.0, "lon": 29.0, "prefs": {"fetch_km": 23}}
+            self.hello = {"sys": 2, "feedv": 1, "lat": 41.0, "lon": 29.0, "prefs": {"fetch_km": 23},
+                          "wxv": 1, "weather": True}
             self.batches = []
+            self.weather = []
             self.answer = True
 
-        def send_batch(self, lines, end, ack, timeout):
+        def send_batch(self, lines, end=None, ack=None, timeout=0):
+            if end is None:
+                self.weather += lines
+                return True
             self.batches.append((lines, end))
             return (ack, {"n": len(lines) - 1}) if self.answer else None
 
@@ -444,6 +451,16 @@ def test_feed():
         urls.append(url)
         if any(s in url for s in down):
             raise feed.HttpError("HTTP 503", 503)
+        if "open-meteo" in url:
+            return {"utc_offset_seconds": 10800,
+                    "current": {"temperature_2m": 21.4, "relative_humidity_2m": 60, "apparent_temperature": 21.0,
+                                "weather_code": 2, "is_day": 1, "wind_speed_10m": 12.3, "wind_direction_10m": 200},
+                    "daily": {"time": [1761696000, 1761782400], "weather_code": [2, 61],
+                              "temperature_2m_max": [23.1, 19.0], "temperature_2m_min": [14.2, 12.5],
+                              "precipitation_probability_max": [10, 80], "sunrise": [1761710000, 1761796000],
+                              "sunset": [1761748000, 1761834000], "wind_speed_10m_max": [20, 30],
+                              "wind_direction_10m_dominant": [180, 220], "precipitation_sum": [0, 5.5],
+                              "relative_humidity_2m_mean": [55, 85]}}
         if "adsbdb" in url:
             if url.endswith("/PGT2"):
                 raise feed.HttpError("HTTP 404", 404)
@@ -459,8 +476,10 @@ def test_feed():
     assert lines == ["PR:ABEGIN",  # nearest first, the one on the ground left out, routes added
                      "PR:A 41.01000,29.00000,0,0,5000,-700,PGT2,,-",
                      "PR:A 41.20000,29.00000,90,450,30000,0,THY1,A321,IST,İstanbul,AGP,Malaga"], lines
-    assert "/dist/13" in urls[0], urls[0]  # 23 km -> 13 NM
+    assert [u for u in urls if "/dist/13" in u], urls  # 23 km -> 13 NM
     assert f.state == "2 uçak (adsb.fi)", f.state
+    assert link.weather == ["PR:W 10800 21.4 60 21.0 2 1 12.3 200 1761710000 1761748000 2 "
+                            "1761696000,2,23.1,14.2,10,20,180,0.0,55 1761782400,61,19.0,12.5,80,30,220,5.5,85"], link.weather
 
     f.tick(1002)  # not due yet
     assert len(link.batches) == 1
@@ -480,14 +499,29 @@ def test_feed():
     f.tick(1015)
     assert f.state == "kart cevap vermedi"
 
+    link.answer = True
+    link.hello["prefs"] = {"fetch_km": 40}  # the card's PR:PREFS (device.py keeps it in hello)
+    urls.clear()
+    f.tick(1020)
+    assert urls[0].endswith("/29.0000/22"), urls  # 40 km -> 22 NM (airplanes.live answered last)
+    assert len(link.weather) == 1  # not due yet
+    link.hello = dict(link.hello)  # reconnected: the card may have restarted
+    f.tick(1021)
+    assert len(link.weather) == 2
+    f.tick(1021 + 600)
+    assert len(link.weather) == 3
+    link.hello = dict(link.hello, weather=False)
+    f.tick(1021 + 1300)
+    assert len(link.weather) == 3
+
     link.hello = dict(link.hello, sys=1)
     del link.hello["feedv"]
     n = len(urls)
-    f.tick(1020)
+    f.tick(3000)
     assert f.state == "kart eski" and len(urls) == n
 
     link.connected = False
-    f.tick(1025)
+    f.tick(3005)
     assert f.state == "kart yok"
 
 
