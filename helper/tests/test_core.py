@@ -105,6 +105,12 @@ class FakeCard:
         elif tag == "USBSETUP":
             self.say('PR:USBMODE {"usb":"setup","restart":true}')
             self.usb = "setup"
+        elif tag == "ABEGIN":  # services/usb_feed.cpp
+            self.aircraft = []
+        elif tag == "A":
+            self.aircraft.append(rest)
+        elif tag == "AEND":
+            self.say('PR:AOK {"n":%d}' % len(self.aircraft))
         elif tag == "USBNORMAL":
             self.say('PR:USBMODE {"usb":"kb","restart":true}')
             self.usb = "kb"
@@ -126,6 +132,11 @@ def test_all():
     d = device.Device(lambda tag, data: events.append((tag, data)), log=lambda m: None)
     assert wait(lambda: d.connected), "no connection"
     assert d.status()["usb"] == "kb"
+
+    # Aircraft batch (system 2 feed): lines, then AEND answered with AOK.
+    r = d.send_batch(["PR:ABEGIN", "PR:A 41.0,29.0,0,0,5000,0,THY1,A321"], "PR:AEND 1700000001", "AOK", 3)
+    assert r == ("AOK", {"n": 1}), r
+    assert card.aircraft == ["41.0,29.0,0,0,5000,0,THY1,A321"]
 
     # Card -> helper events.
     card.say('PR:KEY {"i":4}')
@@ -406,6 +417,80 @@ def test_cover_and_position():
     media.time.monotonic = real_monotonic
 
 
+def test_feed():
+    from deck import feed
+
+    class Link:  # device.Device as the feed sees it
+        connected = True
+
+        def __init__(self):
+            self.hello = {"sys": 2, "feedv": 1, "lat": 41.0, "lon": 29.0, "prefs": {"fetch_km": 23}}
+            self.batches = []
+            self.answer = True
+
+        def send_batch(self, lines, end, ack, timeout):
+            self.batches.append((lines, end))
+            return (ack, {"n": len(lines) - 1}) if self.answer else None
+
+    traffic = {"ac": [
+        {"lat": 41.2, "lon": 29.0, "alt_baro": 30000, "gs": 450, "track": 90, "flight": "THY1  ", "t": "A321"},
+        {"lat": 41.01, "lon": 29.0, "alt_baro": 5000, "baro_rate": -700, "flight": "PGT2"},
+        {"lat": 41.0, "lon": 29.0, "alt_baro": "ground", "flight": "GND1"},
+        {"lon": 29.0},
+    ]}
+    urls, down = [], set()
+
+    def fetch(url, timeout):
+        urls.append(url)
+        if any(s in url for s in down):
+            raise feed.HttpError("HTTP 503", 503)
+        if "adsbdb" in url:
+            if url.endswith("/PGT2"):
+                raise feed.HttpError("HTTP 404", 404)
+            return {"response": {"flightroute": {"origin": {"iata_code": "IST", "municipality": "İstanbul"},
+                                                 "destination": {"iata_code": "AGP", "municipality": "Málaga"}}}}
+        return traffic
+
+    link = Link()
+    f = feed.Feed(link, fetch, log=lambda m: None)
+    f.tick(1000)
+    lines, end = link.batches[-1]
+    assert end == "PR:AEND 1000"
+    assert lines == ["PR:ABEGIN",  # nearest first, the one on the ground left out, routes added
+                     "PR:A 41.01000,29.00000,0,0,5000,-700,PGT2,,-",
+                     "PR:A 41.20000,29.00000,90,450,30000,0,THY1,A321,IST,İstanbul,AGP,Malaga"], lines
+    assert "/dist/13" in urls[0], urls[0]  # 23 km -> 13 NM
+    assert f.state == "2 uçak (adsb.fi)", f.state
+
+    f.tick(1002)  # not due yet
+    assert len(link.batches) == 1
+
+    urls.clear()
+    down.add("adsb.fi")
+    f.tick(1005)  # next source; routes come from the cache
+    assert f.state == "2 uçak (airplanes.live)", f.state
+    assert not [u for u in urls if "adsbdb" in u], urls
+
+    down.update(("airplanes.live", "adsb.lol"))
+    f.tick(1010)  # no internet: nothing goes to the card
+    assert f.state == "internet yok" and len(link.batches) == 2
+
+    down.clear()
+    link.answer = False
+    f.tick(1015)
+    assert f.state == "kart cevap vermedi"
+
+    link.hello = dict(link.hello, sys=1)
+    del link.hello["feedv"]
+    n = len(urls)
+    f.tick(1020)
+    assert f.state == "kart eski" and len(urls) == n
+
+    link.connected = False
+    f.tick(1025)
+    assert f.state == "kart yok"
+
+
 if __name__ == "__main__":
     test_blob()
     test_blob_v2()
@@ -413,5 +498,6 @@ if __name__ == "__main__":
     test_config_moves_transport()
     test_browser_link()
     test_cover_and_position()
+    test_feed()
     test_all()
     print("tests ok")

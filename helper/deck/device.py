@@ -211,6 +211,22 @@ class Device:
             finally:
                 self.pending = None
 
+    def send_batch(self, lines, end, ack, timeout):
+        """Short lines, then an end line the card answers (PR:ABEGIN .. PR:AEND -> AOK).
+        Not in the middle of a cover / key upload: the card's USB link loses data when
+        they mix. Returns the answer or None (skipped, no answer)."""
+        if not self.stream_lock.acquire(timeout=5):
+            return None
+        try:
+            for i, line in enumerate(lines):
+                if not self.send(line):
+                    return None
+                if i % 6 == 5:
+                    time.sleep(0.04)  # the radar_kopru pacing: CDC drops long bursts
+            return self.request(end, [ack], timeout)
+        finally:
+            self.stream_lock.release()
+
     def send_json(self, tag, obj):
         return self.send("PR:%s %s" % (tag, json.dumps(obj, ensure_ascii=False, separators=(",", ":"))))
 
