@@ -166,6 +166,9 @@ jobs:
           pip install pyserial pillow "websockets>=13"
           python helper/tests/test_core.py
 
+      - name: Map tile tests (shared map code)
+        run: node web/tests/mapdata.test.js
+
       - name: Windows helper from the deckapp job
         continue-on-error: true
         uses: actions/download-artifact@v4

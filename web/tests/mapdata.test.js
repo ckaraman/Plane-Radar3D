@@ -6,7 +6,7 @@ const vm = require('vm');
 const assert = require('assert');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'mapdata.js'), 'utf8');
-const M = vm.runInThisContext(src + '\n;({ decodeTile, tileElements, buildMapBlob, KM_PER_DEG });');
+const M = vm.runInThisContext(src + '\n;({ decodeTile, tileElements, buildMapBlob, KM_PER_DEG, fetchOpenFreeMap, buildCardMap });');
 
 const E = 4096, Z = 12, X = 2375, Y = 1530;
 const tileLon = (x) => x / 2 ** Z * 360 - 180;
@@ -67,7 +67,7 @@ const southSea = () => poly('ocean', [[-64, 2048], [E + 64, 2048], [E + 64, E + 
   assert.ok(g[0].lat === g[g.length - 1].lat && g[0].lon === g[g.length - 1].lon, 'forest ring closed');
 }
 
-// Roads, lakes, built-up land, airports and landmarks get the tags the map builders read.
+// Roads, lakes, built-up land and airports get the tags the map builders read.
 {
   const out = M.tileElements([tile(X, {
     transportation: { extent: E, features: [{ type: 2, tags: { class: 'motorway' }, geom: [[[100, 100], [3000, 3000]]] },
@@ -76,8 +76,6 @@ const southSea = () => poly('ocean', [[-64, 2048], [E + 64, 2048], [E + 64, E + 
     landuse: { extent: E, features: [poly('residential', [[100, 100], [200, 100], [200, 200], [100, 200]])] },
     aerodrome_label: { extent: E, features: [{ type: 1, tags: { iata: 'IST', name: 'İstanbul' }, geom: [[[2000, 2000]]] }] },
     aeroway: { extent: E, features: [{ type: 2, tags: { class: 'runway' }, geom: [[[1500, 1500], [1900, 1500]]] }] },
-    poi: { extent: E, features: [{ type: 1, tags: { class: 'stadium', subclass: 'stadium', name: 'Arena', rank: 3 }, geom: [[[500, 500]]] },
-                                 { type: 1, tags: { class: 'shop', subclass: 'bakery', name: 'Fırın', rank: 9 }, geom: [[[600, 600]]] }] },
   })]);
   assert.deepStrictEqual(out.map.filter((e) => e.tags.highway).map((e) => e.tags.highway), ['motorway']);
   assert.strictEqual(out.map.filter((e) => e.tags.natural === 'water').length, 1, 'lake kept, river left out');
@@ -87,10 +85,43 @@ const southSea = () => poly('ocean', [[-64, 2048], [E + 64, 2048], [E + 64, E + 
   const ap = out.places.find((e) => e.tags.aeroway === 'aerodrome');
   assert.ok(ap && ap.type === 'node' && ap.tags.iata === 'IST', 'airport');
   assert.ok(out.places.some((e) => e.tags.aeroway === 'runway' && e.geometry.length === 2), 'runway');
-  const lm = out.places.filter((e) => e.type === 'node' && !e.tags.aeroway);
-  assert.strictEqual(lm.length, 1, 'only landmarks with a symbol');
-  assert.strictEqual(lm[0].tags.leisure, 'stadium');
-  assert.strictEqual(lm[0].tags.rank, 3);
 }
 
-console.log('ok');
+
+(async () => {
+  const fixture = fs.readFileSync(path.join(__dirname, 'ofm-12-2375-1530.pbf'));
+  const urls = [];
+  const okFetch = async (url) => {
+    urls.push(url);
+    if (url === 'https://tiles.openfreemap.org/planet') return { ok: true, json: async () => ({ tiles: ['https://t.test/{z}/{x}/{y}.pbf'] }) };
+    return { ok: true, arrayBuffer: async () => fixture.buffer.slice(fixture.byteOffset, fixture.byteOffset + fixture.length) };
+  };
+  // Tiles for the map box at zoom 12 and for the airport box at zoom 10, all decoded.
+  const lat = tileLat(Y + 0.5), lon = tileLon(X + 0.5);
+  const ofm = await M.fetchOpenFreeMap(lat, lon, 5, okFetch);
+  assert.ok(ofm.map.some((e) => e.tags.natural === 'coastline'), 'coast from the tiles');
+  assert.ok(urls.some((u) => u.startsWith('https://t.test/12/2375/1530')), 'map tile at zoom 12');
+  assert.ok(urls.some((u) => u.startsWith('https://t.test/10/')), 'airport tiles at zoom 10');
+
+  // buildCardMap: tiles first, Overpass only when a tile fails.
+  let overpassCalls = 0;
+  globalThis.fetchOverpass = async () => { overpassCalls++; return [{ type: 'way', tags: { highway: 'motorway' }, geometry: [{ lat, lon: lon - 0.03 }, { lat, lon: lon + 0.03 }] }]; };
+  // Landmarks are not in the tiles below zoom 14: they still come from Overpass (optional).
+  let placesCalls = 0;
+  globalThis.fetchPlaces = async () => { placesCalls++; return [{ type: 'node', lat: lat + 0.02, lon, tags: { leisure: 'stadium', name: 'Arena' } }]; };
+  globalThis.fetchCover = async () => null;
+  globalThis.fetch = okFetch;
+  let built = await M.buildCardMap(lat, lon, 5, { hw: 'ws5', mapv: 2 }, () => {});
+  assert.ok(built && built.blob.length > 14, 'map from the tiles');
+  assert.strictEqual(overpassCalls, 0, 'Overpass not asked when the tiles answer');
+  assert.strictEqual(placesCalls, 1, 'landmarks asked from Overpass');
+  assert.strictEqual(built.placesMissing, false, 'landmarks arrived');
+  globalThis.fetchPlaces = async () => null;
+  built = await M.buildCardMap(lat, lon, 5, { hw: 'ws5', mapv: 2 }, () => {});
+  assert.strictEqual(built.placesMissing, true, 'Overpass busy: landmarks missing, map still built');
+  globalThis.fetch = async (url) => { if (url.includes('/10/')) throw new Error('down'); return okFetch(url); };
+  built = await M.buildCardMap(lat, lon, 5, { hw: 'ws5', mapv: 2 }, () => {});
+  assert.ok(built && built.blob.length > 14, 'map from Overpass');
+  assert.strictEqual(overpassCalls, 1, 'one failed tile: Overpass is used');
+  console.log('ok');
+})().catch((e) => { console.error(e); process.exit(1); });

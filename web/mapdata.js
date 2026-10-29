@@ -31,7 +31,8 @@ function crc32(bytes) {
 }
 
 // ---- OpenFreeMap vector tiles (Mapbox Vector Tile, OpenMapTiles schema), turned into
-// Overpass-shaped elements so the map builders below read them unchanged.
+// Overpass-shaped elements so the map builders below read them unchanged. Landmarks are
+// only in zoom 14 tiles (far too many): they still come from Overpass.
 // Minimal protobuf reader: varints, zigzag, length-delimited fields; packed geometry.
 function decodeTile(buf) {
   let pos = 0;
@@ -156,14 +157,6 @@ function clipLineSquare(line, e) {
   return pieces.filter((p) => p.length >= 2);
 }
 
-const OFM_LANDMARK = {
-  stadium: { leisure: 'stadium' }, zoo: { tourism: 'zoo' }, museum: { tourism: 'museum' },
-  theme_park: { tourism: 'theme_park' }, attraction: { tourism: 'attraction' },
-  castle: { historic: 'castle' }, monument: { historic: 'monument' }, fort: { historic: 'fort' }, palace: { historic: 'palace' },
-  place_of_worship: { amenity: 'place_of_worship' }, park: { leisure: 'park' },
-  tower: { man_made: 'tower' }, lighthouse: { man_made: 'lighthouse' },
-};
-
 // Decoded tiles [{z, x, y, layers}] -> { map, places, cover } element lists (Overpass shape).
 // Coast: the tiles have sea polygons, not coastlines. The edges of a sea polygon that do not
 // lie on the tile border are the coast; MVT outer rings run clockwise with y down, so the
@@ -215,9 +208,6 @@ function tileElements(tiles) {
           places.push({ type: 'node', id: id++, ...ll(f.geom[0][0]), tags: { aeroway: 'aerodrome', iata: t.iata, name: t.name } });
         } else if (lname === 'aeroway' && f.type === 2 && cls === 'runway') {
           for (const line of f.geom) for (const p of clipLineSquare(line, e)) places.push({ type: 'way', id: id++, tags: { aeroway: 'runway' }, geometry: p.map(ll) });
-        } else if (lname === 'poi' && f.type === 1 && inTile() && t.name) {
-          const kind = OFM_LANDMARK[t.subclass] || OFM_LANDMARK[cls];
-          if (kind) places.push({ type: 'node', id: id++, ...ll(f.geom[0][0]), tags: { ...kind, name: t.name, rank: t.rank } });
         }
       }
     }
@@ -241,6 +231,51 @@ function tileElements(tiles) {
     if (geometry.length >= 2) map.push({ type: 'way', id: id++, tags: { natural: 'coastline' }, geometry });
   }
   return { map, places, cover };
+}
+
+// Tiles for the map (zoom 12, the same box as fetchOverpass) and for airports and runways
+// (zoom 10, the AIRPORT_KM box). Throws when any tile fails: the caller falls back to Overpass.
+const OFM_TILEJSON = 'https://tiles.openfreemap.org/planet';
+let ofmTemplate = null;   // tile URL of the current planet build, once per page
+async function fetchOpenFreeMap(lat, lon, radiusKm, fetchFn = fetch) {
+  const get = async (url, how) => {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 15000);
+    try {
+      const r = await fetchFn(url, { signal: ctl.signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r[how]();
+    } finally { clearTimeout(timer); }
+  };
+  if (!ofmTemplate) {
+    const j = await get(OFM_TILEJSON, 'json');
+    if (!j || !Array.isArray(j.tiles) || !j.tiles[0]) throw new Error('OpenFreeMap: no tiles');
+    ofmTemplate = j.tiles[0];
+  }
+  const range = (z, km) => {
+    const n = 2 ** z, dLat = km / KM_PER_DEG, dLon = km / (KM_PER_DEG * Math.cos(lat * Math.PI / 180));
+    const tx = (lo) => Math.floor((lo + 180) / 360 * n);
+    const ty = (la) => Math.floor((1 - Math.asinh(Math.tan(la * Math.PI / 180)) / Math.PI) / 2 * n);
+    const out = [];
+    for (let x = tx(lon - dLon); x <= tx(lon + dLon); x++) for (let y = ty(lat + dLat); y <= ty(lat - dLat); y++) out.push({ z, x, y });
+    return out;
+  };
+  const AIR = ['aerodrome_label', 'aeroway'];
+  const jobs = range(12, radiusKm * 1.25).map((t) => ({ ...t, keep: (l) => !AIR.includes(l) }))
+    .concat(range(10, Math.max(radiusKm, AIRPORT_KM)).map((t) => ({ ...t, keep: (l) => AIR.includes(l) })));
+  const tiles = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const job = jobs[next++];
+      const url = ofmTemplate.replace('{z}', job.z).replace('{x}', job.x).replace('{y}', job.y);
+      const layers = decodeTile(new Uint8Array(await get(url, 'arrayBuffer')));
+      for (const l of Object.keys(layers)) if (!job.keep(l)) delete layers[l];
+      tiles.push({ z: job.z, x: job.x, y: job.y, layers });
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  const { map, places, cover } = tileElements(tiles);
+  return { map, places, cover: { urban: cover.filter((e) => !e.geometry), forest: cover.filter((e) => e.geometry) } };
 }
 
 // Sends the query to all mirrors at once and takes the first good answer (the others
@@ -361,7 +396,7 @@ function buildPlaceEntries(elements, lat, lon, radiusKm) {
     else if (t.name) {
       const cat = landmarkCategory(t);
       // Places with their own symbol first, then the better known ones.
-      if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.rank != null ? t.rank : (t.wikipedia ? 0 : 1) });   // no symbol: left out
+      if (cat) landmarks.push({ p, name: t.name, kind: 1, cat, rank: t.wikipedia ? 0 : 1 });   // no symbol: left out
     }
   }
   // Spread out: a place closer than `gap` km to one already taken is skipped.
@@ -915,14 +950,27 @@ async function elevationFromOpenMeteo(pts, onProgress) {
 // at this place. Throws on network errors (with err.reasons) or a map that is too big.
 async function buildCardMap(lat, lon, label, dev, onStatus) {
   const radius = mapRadiusFor(label);
-  onStatus('Harita indiriliyor… (birkaç saniye sürebilir)');
-  // 5" board: places are fetched at the same time as the map.
+  onStatus('Harita indiriliyor (OpenFreeMap)…');
   const wantPlaces = dev.hw === 'ws5' || dev.hw === 'ws5b';
-  let placesMissing = false;
-  const placesP = wantPlaces ? fetchPlaces(lat, lon, radius) : Promise.resolve(null);
-  const elements = await fetchOverpass(lat, lon, radius, onStatus);
-  // After the map, so no more than two requests run at once.
-  const coverP = wantPlaces ? fetchCover(lat, lon, radius) : Promise.resolve(null);
+  let placesMissing = false, placesP, elements, coverP;
+  // OpenFreeMap tiles first; Overpass (often busy) only when a tile fails.
+  const ofm = await fetchOpenFreeMap(lat, lon, radius).catch(() => { ofmTemplate = null; return null; });   // a new planet build may have replaced the cached one
+  if (ofm) {
+    elements = ofm.map;
+    // Airports and runways from the tiles; landmarks only exist at zoom 14 (far too many
+    // tiles), so they still come from Overpass and are left out when it is busy.
+    placesP = wantPlaces ? fetchPlaces(lat, lon, radius).then((lm) => {
+      if (!lm) { placesMissing = true; return ofm.places; }
+      return ofm.places.concat(lm.filter((e) => !(e.tags && e.tags.aeroway)));
+    }) : Promise.resolve(null);
+    coverP = Promise.resolve(wantPlaces ? ofm.cover : null);
+  } else {
+    // 5" board: places are fetched at the same time as the map.
+    placesP = wantPlaces ? fetchPlaces(lat, lon, radius) : Promise.resolve(null);
+    elements = await fetchOverpass(lat, lon, radius, onStatus);
+    // After the map, so no more than two requests run at once.
+    coverP = wantPlaces ? fetchCover(lat, lon, radius) : Promise.resolve(null);
+  }
   const water = (dev.mapv || 1) >= 2;
   let blob = buildMapBlob(elements, lat, lon, water, radius);
   if (!blob) return null;
@@ -931,7 +979,7 @@ async function buildCardMap(lat, lon, label, dev, onStatus) {
     onStatus('Önemli yerler, yerleşim ve ormanlar ekleniyor…');
     const [places, cover] = await Promise.all([placesP, coverP]);
     const urban = cover && cover.urban, forest = cover && cover.forest;
-    placesMissing = !places;
+    placesMissing = placesMissing || !places;
     const extra = places ? buildPlaceEntries(places, lat, lon, radius) : [];
     const town = urban ? buildUrbanEntry(urban, lat, lon, radius) : null;
     if (town) extra.unshift(town);
