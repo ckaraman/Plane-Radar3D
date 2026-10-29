@@ -101,6 +101,7 @@
   .msg { margin-top: 12px; padding: 10px 14px; border-radius: 12px; font-size: 14px; }
   .msg.ok { background: rgba(127,227,176,0.12); color: #c9f4dd; } .msg.err { background: rgba(255,120,120,0.14); color: #ffd0d0; } .msg.info { background: rgba(185,166,255,0.14); color: #e5ddff; }
   progress { width: 100%; height: 6px; margin-top: 12px; accent-color: #c4b3ff; }
+  #fw-bar { margin: 0 0 16px; } #fw-bar.dim { opacity: .6; } #fw-bar .btns { margin-top: 10px; }
   .np { display: flex; gap: 18px; align-items: center; }
   .np img, .np .ph { width: 140px; height: 140px; border-radius: 16px; object-fit: cover; background: rgba(255,255,255,0.06); flex: none; }
   dialog { border: 1px solid rgba(255,255,255,0.12); border-radius: 22px; padding: 0; width: min(520px, 92vw); color: var(--text);
@@ -137,6 +138,15 @@
   </nav>
 
   <main>
+    <!-- New card firmware (stage 8c) -->
+    <div class="msg" id="fw-bar" role="status" hidden>
+      <span id="fw-text"></span>
+      <progress id="fw-prog" max="100" value="0" hidden></progress>
+      <div class="btns" id="fw-btns">
+        <button type="button" class="btn primary" id="fw-go">Güncelle</button>
+        <button type="button" class="btn" id="fw-later">Şimdi değil</button>
+      </div>
+    </div>
     <!-- Keys -->
     <section id="page-keys" class="row">
       <div class="card" style="flex: 1 1 440px">
@@ -676,8 +686,32 @@
     $('#b-release').textContent = d.released ? 'Bağlantıyı geri al' : 'Kurulum sayfası için bağlantıyı bırak';
     $('#b-send').disabled = !!(S.upload && S.upload.running) || !(d.connected || d.released);
   }
+  // New card firmware: offer, progress, result (Core.fw in deck/core.py).
+  function applyFw(f, d) {
+    const bar = $('#fw-bar');
+    let kind = '', text = '';
+    if (f.running) { kind = 'info'; text = f.text || 'Güncelleniyor…'; }
+    else if (f.error) { kind = 'err'; text = 'Güncellenemedi: ' + f.error + '. Kart eski yazılımla çalışmaya devam eder; tekrar deneyin.'; }
+    else if (f.done) { kind = 'ok'; text = 'Kart güncellendi (sürüm ' + f.done + ').'; }
+    else if (f.offer) { kind = 'info'; text = 'Kart için yeni yazılım var: ' + f.latest + ' (kartta ' + (d.fw || '?') + ').'; }
+    bar.hidden = !kind;
+    bar.className = 'msg ' + kind + (f.offer && f.skipped && !f.running && !f.error ? ' dim' : '');
+    $('#fw-text').textContent = text;
+    $('#fw-prog').hidden = !f.running;
+    $('#fw-prog').value = f.pct || 0;
+    $('#fw-btns').hidden = f.running || !f.offer;
+    $('#fw-later').hidden = !!f.skipped;
+  }
+  $('#fw-go').addEventListener('click', async () => {
+    if (!confirm('Kartın yazılımı güncellenecek (yaklaşık 2 dakika). Bu sırada kabloyu çıkarmayın. Devam edilsin mi?')) return;
+    $('#fw-btns').hidden = true;
+    await api().fw_update();
+  });
+  $('#fw-later').addEventListener('click', async () => { await api().fw_skip(); });
+
   function applyLive(st) {
     applyDevice(st.device);
+    if (st.fw) applyFw(st.fw, st.device || {});
     if (!$('#page-radar').hidden && !R.busy && R.loaded !== !!st.device.connected) loadRadar();  // card came or went (not during a map upload)
     $('#c-feed').textContent = st.device.connected && st.feed ? st.feed : '–';
     if (st.link) applyLink(st.link);

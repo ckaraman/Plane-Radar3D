@@ -31,9 +31,9 @@ class _Target(NSObject):
 class MacTray:
     """Created on the main thread before the window loop starts."""
 
-    def __init__(self, png, status_text, released, on_edit, on_release, on_quit):
+    def __init__(self, png, status_text, released, on_edit, on_release, on_quit, fw_offer=lambda: False):
         NSApplication.sharedApplication().setActivationPolicy_(1)  # accessory: no Dock icon
-        self._status_text, self._released = status_text, released
+        self._status_text, self._released, self._fw_offer = status_text, released, fw_offer
         self.target = _Target.alloc().initWithCallbacks_(
             {"edit": on_edit, "release": on_release, "quit": on_quit, "tick": self.refresh})
         self.item = NSStatusBar.systemStatusBar().statusItemWithLength_(NSVariableStatusItemLength)
@@ -54,6 +54,10 @@ class MacTray:
             "Bağlantıyı bırak (kurulum sayfası için)", "release:", "")
         self.rel.setTarget_(self.target)
         menu.addItem_(self.rel)
+        self.fw = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Kart yazılımını güncelle…", "edit:", "")
+        self.fw.setTarget_(self.target)  # opens the window, where the strip asks
+        self.fw.setHidden_(True)
+        menu.addItem_(self.fw)
         menu.addItem_(NSMenuItem.separatorItem())
         quit_ = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Programı kapat", "quit:", "")
         quit_.setTarget_(self.target)
@@ -67,6 +71,7 @@ class MacTray:
         try:
             self.status.setTitle_(self._status_text())
             self.rel.setState_(1 if self._released() else 0)
+            self.fw.setHidden_(not self._fw_offer())
         except Exception:  # noqa: BLE001
             pass
 

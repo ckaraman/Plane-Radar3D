@@ -41,8 +41,15 @@ def test_download():
             assert "bozuk" in str(e)
 
 
+def test_state():
+    assert firmware.state(CARD, "5in-0.42.0", "") == {"offer": True, "skipped": False}
+    assert firmware.state(CARD, "5in-0.42.0", "5in-0.42.0") == {"offer": True, "skipped": True}
+    assert firmware.state(CARD, "5in-0.41.0", "") == {"offer": False, "skipped": False}
+
+
 if __name__ == "__main__":
     test_latest_version()
     test_offer()
     test_download()
+    test_state()
     print("tests ok")

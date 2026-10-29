@@ -14,7 +14,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 IS_MAC = sys.platform == "darwin"
 
@@ -99,14 +99,15 @@ class Api:
             "version": VERSION, "slots": slots, "settings": settings,
             "device": self._core.device.status(), "feed": self._core.feed.state, "volume": {"v": v.level, "m": v.muted},
             "now": self._core.now, "browsers": [{"id": b["id"], "name": b["name"]} for b in actions.browsers()],
-            "upload": dict(self._core.upload), "platform": "mac" if IS_MAC else "win", "link": self._link(),
+            "upload": dict(self._core.upload), "fw": dict(self._core.fw), "platform": "mac" if IS_MAC else "win", "link": self._link(),
             "music_hosts": list(__import__("deck.browser_link", fromlist=["MUSIC_HOSTS"]).MUSIC_HOSTS),
         }
 
     def live(self):
         v = self._core.volume
         return {"device": self._core.device.status(), "feed": self._core.feed.state, "volume": {"v": v.level, "m": v.muted},
-                "now": self._core.now, "upload": dict(self._core.upload), "link": self._link()}
+                "now": self._core.now, "upload": dict(self._core.upload), "fw": dict(self._core.fw),
+                "link": self._link()}
 
     def _link(self):
         st = self._core.link.status()
@@ -271,6 +272,14 @@ class Api:
             return ""
         except (RuntimeError, ValueError, KeyError, TypeError) as e:
             return str(e) or "hata"
+
+    def fw_update(self):
+        """Install the card firmware the strip offers (progress in live()["fw"])."""
+        return self._core.update_firmware()
+
+    def fw_skip(self):
+        self._core.skip_firmware()
+        return True
 
     def release(self, released):
         self._core.device.release(bool(released))
@@ -599,13 +608,16 @@ def run():
             return "Kart bağlı · Ses %%%d · Veri: %s" % (core.volume.level, core.feed.state)
         return "Kart bekleniyor…"
 
+    def fw_offer(*_):
+        return core.fw["offer"] and not core.fw["running"]
+
     if IS_MAC:
         from deck import tray_mac
 
         tray = tray_mac.MacTray(
             tray_template_png(), status_text, lambda: core.device.released,
             on_edit=lambda: threading.Thread(target=open_editor, daemon=True).start(),
-            on_release=toggle_release, on_quit=quit_app)
+            on_release=toggle_release, on_quit=quit_app, fw_offer=fw_offer)
         log("tray: ready")
     else:
         import pystray
@@ -615,11 +627,17 @@ def run():
             pystray.MenuItem("Tuşları düzenle…", open_editor, default=True),
             pystray.MenuItem("Bağlantıyı bırak (kurulum sayfası için)", toggle_release,
                              checked=lambda _i: core.device.released),
+            pystray.MenuItem("Kart yazılımını güncelle…", open_editor, visible=fw_offer),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Programı kapat", quit_app),
         )
         tray = pystray.Icon("PlaneRadarDeck", tray_image(), APP_NAME, menu)
         tray.run_detached()
+
+        def fw_notice(version):
+            tray.update_menu()
+            tray.notify("Kart için yeni yazılım var: %s. Programın penceresinden güncelleyebilirsiniz." % version, APP_NAME)
+        core.on_fw_offer = fw_notice
 
     def listen():
         while True:
