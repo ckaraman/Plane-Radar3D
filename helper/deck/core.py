@@ -4,7 +4,7 @@ import os
 import threading
 import time
 
-from . import blob, browser_link, queue_card
+from . import blob, browser_link, firmware, queue_card
 from .config import Config
 from .device import Device
 from .feed import Feed
@@ -36,6 +36,12 @@ class Core:
         self._last_now_sent = 0.0
         self._was_connected = False
         self.upload = {"running": False, "pct": 0, "text": "", "error": ""}
+        # New card firmware on the setup site (stage 8c): offered, never installed unasked.
+        self.fw = {"latest": None, "offer": False, "skipped": False, "running": False,
+                   "pct": 0, "text": "", "error": "", "done": ""}
+        self.on_fw_offer = lambda version: None  # the tray's notification
+        self._fw_told = None
+        threading.Thread(target=self._fw_loop, name="firmware", daemon=True).start()
         threading.Thread(target=self._pump, name="pump", daemon=True).start()
         threading.Thread(target=self._heartbeat, name="heartbeat", daemon=True).start()
         self.feed = Feed(self.device, log=log)
@@ -294,4 +300,60 @@ class Core:
                 self.upload.update(running=False, error=str(e) or "Gönderilemedi")
 
         threading.Thread(target=work, name="upload", daemon=True).start()
+        return True
+
+    # ------------------------------------------------------------------ card firmware
+    def _fw_loop(self):
+        """Looks for new card firmware when a card comes, then every 6 hours."""
+        last, card = 0.0, None
+        while True:
+            time.sleep(5.0)
+            fw = (self.device.hello or {}).get("fw") if self.device.connected else None
+            if self.device.busy or self.fw["running"] or not fw:
+                continue
+            if fw != card or time.time() - last > 6 * 3600:
+                card, last = fw, time.time()
+                self.check_firmware()
+
+    def check_firmware(self, latest_version=firmware.latest_version):
+        latest = latest_version()
+        if latest is None:  # no internet / site: try again next time
+            return
+        _, settings = self.config.snapshot()
+        st = firmware.state(self.device.hello if self.device.connected else None, latest,
+                            settings.get("fw_skip", ""))
+        self.fw.update(latest=latest, **st)
+        if st["offer"] and not st["skipped"] and self._fw_told != latest:
+            self._fw_told = latest
+            self.log("firmware: %s on the site, card has %s" % (latest, (self.device.hello or {}).get("fw")))
+            try:
+                self.on_fw_offer(latest)
+            except Exception as e:  # noqa: BLE001 - a notification is not worth a crash
+                self.log("firmware notice: %s" % e)
+
+    def skip_firmware(self):
+        """"Not now": no more notices for this version (the window keeps a dim strip)."""
+        _, settings = self.config.snapshot()
+        settings["fw_skip"] = self.fw["latest"] or ""
+        self.config.set_settings(settings)
+        self.fw["skipped"] = self.fw["offer"]
+
+    def update_firmware(self):
+        """Download and install the offered firmware (in a thread; see self.fw)."""
+        if self.fw["running"] or not self.fw["offer"] or self.device.busy:
+            return False
+        version = self.fw["latest"]
+        self.fw.update(running=True, pct=0, text="Yazılım indiriliyor…", error="", done="")
+
+        def work():
+            try:
+                data = firmware.download(version)
+                done = self.device.upload_firmware(data, lambda pct, text: self.fw.update(pct=pct, text=text))
+                self.log("firmware: card now on %s" % done)
+                self.fw.update(running=False, pct=100, done=done or version, offer=False, text="")
+            except Exception as e:  # noqa: BLE001 - shown in the window
+                self.log("firmware: %s" % e)
+                self.fw.update(running=False, error=str(e) or "hata", text="")
+
+        threading.Thread(target=work, name="firmware-update", daemon=True).start()
         return True

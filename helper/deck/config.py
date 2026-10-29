@@ -59,6 +59,7 @@ DEFAULT_SETTINGS = {
     "close_quits": False,       # closing the window ends the program (else it stays in the tray)
     "queue": True,              # the YouTube Music queue on the card (browser extension)
     "transport_moved": False,   # done once: previous / play / next keys taken off (they sit under the knob)
+    "fw_skip": "",              # card firmware version the user said "not now" to
 }
 
 
