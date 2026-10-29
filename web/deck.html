@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plane Radar Deck Kurulum</title>
+<meta name="description" content="Plane Radar Deck (2. sistem): kartın yazılımını yükleyin, PC programını indirin, kartı kurtarın.">
+<style>
+  /* Same look as the system 1 page (index.html), only the parts this page uses. */
+  :root {
+    --bg: #f4f6f4; --card: #ffffff; --text: #17201b; --muted: #5b6a61; --line: #d9e0db;
+    --accent: #14803c; --accent-text: #ffffff; --accent-soft: #e3f3e8;
+    --warn-bg: #fff4d6; --warn-text: #6b4a00; --info-bg: #e6eef8; --info-text: #1d3f6e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1411; --card: #151d18; --text: #e6efe9; --muted: #9db0a4; --line: #2a3830;
+      --accent: #3ec06b; --accent-text: #06210f; --accent-soft: #17301f;
+      --warn-bg: #3a2f10; --warn-text: #f3d891; --info-bg: #14263d; --info-text: #b5d0f2;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 56px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.1rem; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 0 0 16px; }
+  .card > p.hint { color: var(--muted); margin: 0 0 14px; font-size: .95rem; }
+  .step { display: inline-flex; width: 26px; height: 26px; align-items: center; justify-content: center;
+    border-radius: 50%; background: var(--accent); color: var(--accent-text); font-weight: 700; font-size: .9rem; margin-right: 8px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .sub { font-weight: 400; color: var(--muted); font-size: .9rem; }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  a { color: var(--accent); }
+  .btn { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 18px; font: inherit; font-weight: 600;
+    border-radius: 10px; cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--text); text-decoration: none; }
+  .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .msg { margin: 12px 0 0; padding: 10px 12px; border-radius: 10px; font-size: .95rem; }
+  .msg.info { background: var(--info-bg); color: var(--info-text); }
+  .msg.warn { background: var(--warn-bg); color: var(--warn-text); }
+  small, .small { color: var(--muted); font-size: .85rem; }
+  ol.small { padding-left: 20px; }
+  ol.small li { margin: 4px 0; }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
+  esp-web-install-button { display: inline-block; }
+  esp-web-install-button button { cursor: pointer; }
+  /* If the install component cannot load, do not show its fallback messages. */
+  esp-web-install-button:not(:defined) > [slot="unsupported"],
+  esp-web-install-button:not(:defined) > [slot="not-allowed"] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Plane Radar Deck kurulum <span class="sub">(2. sistem: PC destekli radar + deck)</span></h1>
+  <p class="lead">Kart USB kablosuyla bilgisayara bağlı çalışır. Uçuş, rota ve hava verisini internetten alıp karta
+    bilgisayardaki Plane Radar Deck programı gönderir; konum, harita, tuşlar ve kart yazılımı güncellemeleri de
+    programdan yapılır.</p>
+
+  <section class="card" aria-labelledby="h-prepare">
+    <h2 id="h-prepare"><span class="step">1</span>Kartı hazırla</h2>
+    <p class="hint">Kartta 2. sistem yoksa (yeni kart ya da Wi-Fi radardan, yani 1. sistemden geçiş) yazılımı buradan
+      yükleyin. Kart zaten 2. sistemle çalışıyorsa bu adımı atlayın; güncellemeleri program yapar.</p>
+    <div class="row">
+      <esp-web-install-button manifest="manifest-full-ws5.json">
+        <button slot="activate" class="btn primary" type="button">Kart yazılımını yükle</button>
+        <span slot="unsupported" class="msg warn">Bu tarayıcı USB cihazlarla konuşamıyor. Bilgisayarda Google Chrome veya Microsoft Edge kullanın.</span>
+        <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+      </esp-web-install-button>
+    </div>
+    <p class="small">Kartı USB ile takın, düğmeye basın ve listede kartı seçin (adı genelde “USB JTAG/serial debug unit”).
+      Yeni kartta ve 1. sistemde BOOT tuşu gerekmez. Kartın ayarları silinir; konum ve harita sonra programdan girilir.
+      Plane Radar Deck açıksa önce tepsi menüsünden “Bağlantıyı bırak” deyin, yoksa kart listede görünmez.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-program">
+    <h2 id="h-program"><span class="step">2</span>Programı indir</h2>
+    <p class="hint">Plane Radar Deck, kart çalıştığı sürece bilgisayarda açık kalmalı. Ayrıca kartın tuşlarıyla
+      istediğiniz siteyi ya da programı açar, gerçek ses seviyesini ve çalan şarkıyı (kapağıyla) karta gönderir.</p>
+    <div class="row">
+      <a class="btn primary" href="PlaneRadarDeck.exe" download>Windows</a>
+      <a class="btn primary" href="PlaneRadarDeck-mac.dmg" download>Mac (Apple M işlemci)</a>
+      <a class="btn primary" href="PlaneRadarDeck-mac-intel.dmg" download>Mac (Intel işlemci)</a>
+    </div>
+    <p class="small">Windows ilk açılışta “bilinmeyen yayımcı” uyarısı verebilir: “Ek bilgi → Yine de çalıştır”.
+      Mac'te indirilen dosyayı açıp “Plane Radar Deck”i Uygulamalar'a sürükleyin; ilk açılışta uygulamaya sağ tıklayıp
+      “Aç” deyin. Hangi Mac sürümünü indireceğinizi Apple menüsü › Bu Mac Hakkında'daki “Yonga” (Apple M) ya da
+      “İşlemci” (Intel) satırı gösterir.</p>
+    <p class="small">Program açılınca kartı kendisi bulur. Konumu ve ekran ayarlarını “Radar” sayfasından girin;
+      yeni kart yazılımı çıktığında program haber verir.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-recover">
+    <h2 id="h-recover">Kart açılmıyor ya da donuyorsa (kurtarma)</h2>
+    <p class="hint">Önce kabloyu çıkarıp yeniden takın. Kart yine açılmıyorsa ya da takılı kalıyorsa yazılımı baştan
+      yükleyin. Kartın içindeki yükleme modu silinemez, bu yüzden kart her zaman kurtarılabilir.</p>
+    <ol class="small">
+      <li>Plane Radar Deck açıksa tepsi menüsünden “Bağlantıyı bırak” deyin ya da programı kapatın.</li>
+      <li>Kartın arka yüzündeki <strong>BOOT</strong> tuşunu basılı tutun, <strong>RESET</strong> tuşuna basıp bırakın,
+        sonra BOOT'u bırakın. Ekran kararabilir; kart şimdi yükleme modunda bekliyor.</li>
+      <li>Aşağıdaki düğmeye basın ve listede kartı seçin (adı genelde “USB JTAG/serial debug unit”).</li>
+      <li>Açılan pencerede “Erase device” kutusunu <strong>işaretlemeden</strong> deneyin. Ayarlar silinir, harita kalır.</li>
+      <li>Bittiğinde RESET'e bir kez basın. Programda “Bağlantıyı bırak”ı geri alın; konumu programın “Radar”
+        sayfasından yeniden girin.</li>
+      <li>Kart hâlâ açılmıyorsa aynı adımları “Erase device” <strong>işaretli</strong> tekrarlayın. Harita da silinir;
+        programın “Radar” sayfası onu yeniden gönderir.</li>
+    </ol>
+    <div class="row">
+      <esp-web-install-button manifest="manifest-full-ws5.json">
+        <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
+        <span slot="unsupported" class="msg warn">Bu tarayıcı USB cihazlarla konuşamıyor. Bilgisayarda Google Chrome veya Microsoft Edge kullanın.</span>
+        <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
+      </esp-web-install-button>
+    </div>
+  </section>
+
+  <p class="small">Bilgisayarsız çalışan Wi-Fi radar (1. sistem, deck yok) için: <a href="radar/">1. sistemin kurulum sayfası</a>.</p>
+
+  <footer>
+    Yazılım yükleme <a href="https://esphome.github.io/esp-web-tools/" target="_blank" rel="noopener">ESP Web Tools</a>
+    ile tarayıcıdan USB üzerinden yapılır; kartınızdan hiçbir bilgi bu siteye gönderilmez.
+  </footer>
+</main>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.1.1/dist/web/install-button.js?module"></script>
+</body>
+</html>
