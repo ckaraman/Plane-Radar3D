@@ -14,7 +14,7 @@
 
 - PyInstaller `6.22.3`, `PYINSTALLER_COMPILE_BOOTLOADER=1`, `pip install pyinstaller==6.22.3 --no-binary pyinstaller`.
 - Exe hâlâ `--onefile --windowed --name PlaneRadarDeck`; diğer bayraklar aynı.
-- Sürüm bilgisi: ProductName ve FileDescription "Plane Radar Deck", CompanyName "Plane Radar 3D", OriginalFilename "PlaneRadarDeck.exe", InternalName "PlaneRadarDeck", LegalCopyright "Copyright (c) 2026 MatixYo, ckaraman (MIT)", FileVersion/ProductVersion `VERSION` + ".0" (1.9.2 → "1.9.2.0", sayısal (1, 9, 2, 0)).
+- Sürüm bilgisi: ProductName ve FileDescription "Plane Radar Deck", CompanyName "Plane Radar 3D", OriginalFilename "PlaneRadarDeck.exe", InternalName "PlaneRadarDeck", LegalCopyright "Copyright (c) 2026 ckaraman", FileVersion/ProductVersion `VERSION` + ".0" (1.9.2 → "1.9.2.0", sayısal (1, 9, 2, 0)).
 - `helper/app.py` `VERSION = "1.9.2"`.
 - Defender ayarlarına dokunulmaz; yalnızca tarama.
 
