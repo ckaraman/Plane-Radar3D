@@ -298,7 +298,8 @@ jobs:
 
   deploy:
     # Needs: repository Settings -> Pages -> Source = "GitHub Actions".
-    if: github.event_name != 'pull_request'
+    # !cancelled(): a skipped helper job (the paused Mac build) must not skip the site.
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && needs.firmware.result == 'success' }}
     needs: firmware
     runs-on: ubuntu-latest
     permissions:
