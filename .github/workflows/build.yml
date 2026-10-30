@@ -84,6 +84,9 @@ jobs:
 
   # Mac helper (same program, macOS parts): a .dmg each for Apple M and Intel Macs.
   deckapp-mac:
+    # Paused at the owner's request: Windows only until the program is final and a Mac
+    # build is asked for again. Remove this line to build the .dmg files again.
+    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
