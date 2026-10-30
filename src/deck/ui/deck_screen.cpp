@@ -569,7 +569,7 @@ void drawTransport(Gfx& s, const paint::Canvas& c, int prev_cx, int play_cx, int
 void buildKeysBase() {
   auto& s = s_keys_base;
   const auto c = cv(s);
-  paint::background(c);
+  paint::backgroundFast(c);
   text::drawMid(c, text::Ui13b, "KONTROL", D(20), kTopCy, {230, 232, 246}, 255, text::Align::Left, 1);
   if (!console::keyboardMode()) {
     text::drawMid(c, text::Ui13, "Kurulum modu: tuşlar kapalı", kW - D(20), kH - D(16), {245, 190, 120}, 255,
@@ -602,16 +602,18 @@ float smooth01(float t) {
 /** Byte order of a decoded 24-bit sprite (B G R in memory?), from pixels whose red and blue
  *  differ: the fast page code reads the sprite's memory directly. */
 bool coverIsBgr(LGFX_Sprite& pic, int cw, int ch) {
+  static int s_known = -1;  // the library's order does not change: found once
+  if (s_known >= 0) return s_known == 1;
   const auto* buf = static_cast<const uint8_t*>(pic.getBuffer());
   for (int i = 0; i < 64; ++i) {
     const int x = (cw - 1) * i / 63, y = (ch - 1) * ((i * 37) % 64) / 63;
     const auto p = pic.readPixelRGB(x, y);
     if (p.R8() == p.B8()) continue;
     const uint8_t* q = buf + (y * cw + x) * 3;
-    if (q[0] == p.B8() && q[2] == p.R8()) return true;
-    if (q[0] == p.R8() && q[2] == p.B8()) return false;
+    if (q[0] == p.B8() && q[2] == p.R8()) return (s_known = 1) == 1;
+    if (q[0] == p.R8() && q[2] == p.B8()) return (s_known = 0) == 1;
   }
-  return true;  // a grey cover: either order looks the same
+  return true;  // a grey cover: either order looks the same (asked again next time)
 }
 
 /** True when the stored cover belongs to what is playing now. */
@@ -997,8 +999,8 @@ void ensureBuffers() {
     }
   }
   buildRing();
-  // The page background, worked out once (~2 s, the first time the deck opens) and kept:
-  // every music / queue page is put together from it afterwards.
+  // The page background on a coarse grid, worked out once (~74 KB) and kept: every page is
+  // put together from it afterwards.
   if (!paint::bgCacheInit(kW, kH, [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); })) {
     Console.println("deck: no PSRAM for the background copy, pages drawn the slow way");
   }

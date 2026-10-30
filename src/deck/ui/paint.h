@@ -51,14 +51,14 @@ void background(const Canvas& c, const Shade* shades = nullptr, int n = 0);
 /** The background's exact colour at (x, y) of a w x h canvas (to blend other things into). */
 void backgroundRgb(int w, int h, int x, int y, float* r, float* g, float* b);
 
-/** The background worked out once for a w x h canvas and kept (8.8 fixed point, 6 bytes a
- *  pixel, from alloc). Afterwards bgRgb / backgroundFast / coverPage read it instead of
- *  working out every pixel again (~1.9 s a page on the card). False: no memory, they
- *  fall back to backgroundRgb. */
+/** The background worked out once for a w x h canvas on a coarse grid and kept (~74 KB
+ *  for 800 x 480, from alloc; one size per program run). Afterwards bgRgb / backgroundFast /
+ *  coverPage interpolate it instead of working out every pixel again (~1.9 s a page on the
+ *  card). False: no memory, they fall back to backgroundRgb. */
 bool bgCacheInit(int w, int h, void* (*alloc)(size_t));
-/** backgroundRgb from the kept copy when there is one (within 1/256). */
+/** backgroundRgb from the kept grid when there is one (within half a colour step). */
 void bgRgb(int w, int h, int x, int y, float* r, float* g, float* b);
-/** background(), from the kept copy, the shades worked out once a row. */
+/** background(), from the kept grid, the shades worked out once a row (at most 4 shades). */
 void backgroundFast(const Canvas& c, const Shade* shades = nullptr, int n = 0);
 /** The music page: the background with a cw x ch cover in the middle whose edges fade in
  *  (fx, fy px), a dark band of rim px in rim_col around it, then the shades. pix: the

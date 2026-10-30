@@ -250,8 +250,11 @@ void shade(const Canvas& c, int y0, int y1, Rgb col, int a0, int a1) {
 
 namespace {
 
-uint16_t* s_bg = nullptr;  // r, g, b in 8.8 fixed point, row by row
-int s_bg_w = 0, s_bg_h = 0;
+// The background on a coarse grid (it is smooth: a gradient and two wide glows), read back
+// by bilinear interpolation. 101 x 61 points for 800 x 480: ~74 KB instead of 2.3 MB.
+constexpr int kGrid = 8;
+float* s_bg = nullptr;  // r, g, b of each grid point, row by row
+int s_bg_w = 0, s_bg_h = 0, s_gw = 0;
 
 constexpr int kMaxShades = 4;
 
@@ -278,20 +281,17 @@ inline uint16_t packRow(float r, float g, float b, int x, int y, const Shade* sh
 }  // namespace
 
 bool bgCacheInit(int w, int h, void* (*alloc)(size_t)) {
-  if (s_bg != nullptr && s_bg_w == w && s_bg_h == h) return true;
-  auto* p = static_cast<uint16_t*>(alloc(static_cast<size_t>(w) * h * 3 * sizeof(uint16_t)));
+  if (s_bg != nullptr) return s_bg_w == w && s_bg_h == h;  // one size per program run
+  const int gw = (w - 1) / kGrid + 2, gh = (h - 1) / kGrid + 2;  // a point past each far edge
+  auto* p = static_cast<float*>(alloc(static_cast<size_t>(gw) * gh * 3 * sizeof(float)));
   if (p == nullptr) return false;
-  for (int y = 0; y < h; ++y) {
-    for (int x = 0; x < w; ++x) {
-      float r, g, b;
-      backgroundRgb(w, h, x, y, &r, &g, &b);
-      uint16_t* q = p + (y * w + x) * 3;
-      q[0] = static_cast<uint16_t>(r * 256.0f + 0.5f);
-      q[1] = static_cast<uint16_t>(g * 256.0f + 0.5f);
-      q[2] = static_cast<uint16_t>(b * 256.0f + 0.5f);
+  for (int j = 0; j < gh; ++j) {
+    for (int i = 0; i < gw; ++i) {
+      float* q = p + (j * gw + i) * 3;
+      backgroundRgb(w, h, i * kGrid, j * kGrid, &q[0], &q[1], &q[2]);
     }
   }
-  s_bg_w = w, s_bg_h = h;
+  s_bg_w = w, s_bg_h = h, s_gw = gw;
   s_bg = p;
   return true;
 }
@@ -301,8 +301,18 @@ void bgRgb(int w, int h, int x, int y, float* r, float* g, float* b) {
     backgroundRgb(w, h, x, y, r, g, b);
     return;
   }
-  const uint16_t* q = s_bg + (y * w + x) * 3;
-  *r = q[0] * (1.0f / 256.0f), *g = q[1] * (1.0f / 256.0f), *b = q[2] * (1.0f / 256.0f);
+  const int i = x / kGrid, j = y / kGrid;
+  const float u = (x - i * kGrid) * (1.0f / kGrid), v = (y - j * kGrid) * (1.0f / kGrid);
+  const float* q00 = s_bg + (j * s_gw + i) * 3;
+  const float* q10 = q00 + 3;
+  const float* q01 = q00 + s_gw * 3;
+  const float* q11 = q01 + 3;
+  float out[3];
+  for (int k = 0; k < 3; ++k) {
+    const float top = q00[k] + (q10[k] - q00[k]) * u, bottom = q01[k] + (q11[k] - q01[k]) * u;
+    out[k] = top + (bottom - top) * v;
+  }
+  *r = out[0], *g = out[1], *b = out[2];
 }
 
 void backgroundFast(const Canvas& c, const Shade* shades, int n) {
