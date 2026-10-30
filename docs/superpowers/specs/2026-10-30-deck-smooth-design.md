@@ -87,11 +87,33 @@ Kullanıcı kararı: 10b üç küçük adıma bölünür, her biri ölçülür.
 - Kullanıcı denemesi: 10a ile aynı; büyük kapak, liste ve küçük kapak süreleri, radar kare/sn'si ve
   atlanan uçak partileri karşılaştırılır.
 
-### 10b-2 — Kart (10b-1 ölçümünden sonra planlanır)
+### 10b-1 sonucu (kartta, Deck 1.10.1)
 
-- Kapak gelirken 4 kare/sn sınırı radarda kalkar (yalnız deck müzik sayfasında).
-- Müzik/sıra sayfasının kapakla kurulması hızlanır ve gereksiz ikinci kurulum olmaz.
-- 10b-1'den sonra aktarımlar hâlâ uçak partilerini atlatıyorsa: partiler aktarım parçalarının arasına girer.
+72 KB kapak 82 sn → 2,8 sn; liste 6,5 → 1,1 sn; küçük kapak 2 → 0,3 sn; 76 uçak partisinin hiçbiri
+atlanmadı; radarda kopma yok (kullanıcı). Kalan: müzik/sıra sayfası kurulumu ~1,8-1,9 sn (şarkı
+değişince iki kez: önce kapaksız, kapak gelince kapaklı); sıra listesi açıkken deck 8 kare/sn (tur
+~120 ms); kapak gelirken (~3 sn) radar yarı hızda.
+
+### 10b-2 — Kart: aynı görünüm, akıllı hesap (kullanıcı Yol A'yı seçti)
+
+Yol B (kapak hesabı öbür çekirdekte) A yetmezse sıradaki; Yol C (kenar geçişi ve renk yumuşatmayı
+kaldırmak) görünümü değiştirdiği için seçilmedi.
+
+- **Arka plan bir kez:** `paint::backgroundRgb` (renk geçişi + iki parıltı, piksel başına bölme ve
+  karekök) her sayfa kurulumunda 384.000 kez çalışıyor. Sonucu bir kez hesaplanıp PSRAM'de tutulur
+  (kanal başına 8.8 sabit nokta); müzik, sıra ve kapaksız sayfa bundan okur. Bellek ayrılamazsa
+  bugünkü hesap kullanılır (bozulmaz, yalnız yavaş).
+- **Satır başına bir kez:** gölge (shade) alfaları ve kapak kenar geçişinin satır/sütun değerleri
+  piksel yerine satır/sütun başına hesaplanır; kapak pikselleri `readPixelRGB` yerine sprite
+  belleğinden okunur.
+- **Görünüm aynı:** hızlı hesap ile bugünkü hesap aynı girdilerle CI'da (Linux, g++) karşılaştırılır;
+  565 piksel başına kanal farkı en çok 1 adım ve farklı piksel oranı ≤ %1.
+- **Sıra listesi:** satırlar (yazılar, küçük kapaklar, şeritler) yalnız liste, kaydırma ya da vurgu
+  değişince ayrı bir panel tamponuna çizilir; her karede yalnız ilerleme çubuğu ve tuşlar çizilir.
+- **Radar önce:** kapak gelirken 4 kare/sn sınırı yalnız deck müzik sayfasında.
+- Ölçüm raporuna boş PSRAM eklenir (`psram`).
+- Başarı: şarkı geçişinde deck'te `turn_max` < 200 ms; sıra listesi açıkken ≥ 20 kare/sn; kapak
+  gelirken radar normal hızının ≥ %80'i.
 
 ### 10b-3 — Gerekirse (10b-1/10b-2 ölçümüne göre)
 
