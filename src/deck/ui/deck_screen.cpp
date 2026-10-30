@@ -104,8 +104,9 @@ Page s_page = Page::Keys;
 
 LGFX_Sprite s_canvas(&tft);      // only for an upside-down screen
 LGFX_Sprite s_keys_base(&tft);   // keys page without the moving parts
-LGFX_Sprite s_music_base(&tft);  // cover (or background) with its shades
-LGFX_Sprite s_queue_base(&tft);  // queue panel open: small cover left, panel glass right
+// Cover (or background) with its shades; with the queue open, the small cover and the panel
+// glass instead: a third screen (768 KB) left the queue page short of PSRAM (stage 10b-4).
+LGFX_Sprite s_music_base(&tft);
 bool s_ready = false;
 bool s_keys_dirty = true, s_music_dirty = true;
 uint32_t s_keys_gen = 0, s_cover_gen = 0, s_now_gen = 0;
@@ -655,6 +656,7 @@ void buildMusicBase() {
   s_cover_gen = host::coverGeneration();
   s_cover_for_id = host::now().id;
   s_music_dirty = false;
+  s_qbase_dirty = true;  // the open queue is drawn on this screen too
 }
 
 void fmtTime(char* out, size_t cap, uint32_t s) {
@@ -1023,8 +1025,7 @@ void composeInto(Gfx& g, const paint::Canvas& c) {
     s_shown_level = pct;
     s_shown_muted = muted;
   } else if (s_queue_open && host::queueValid()) {
-    LGFX_Sprite& qb = s_queue_base.getBuffer() != nullptr ? s_queue_base : s_music_base;
-    memcpy(c.px, qb.getBuffer(), kW * kH * 2);
+    memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
     drawQueueFront(g, c);
   } else {
     memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
@@ -1037,15 +1038,8 @@ void openQueue(bool open) {
   s_queue_open = open;
   s_qscroll = 0;
   s_qflash = -1;
-  if (open && s_queue_base.getBuffer() == nullptr) {
-    s_queue_base.setPsram(true);
-    s_queue_base.setColorDepth(16);
-    if (s_queue_base.createSprite(kW, kH) == nullptr) {
-      Console.println("deck: queue panel shares the music screen's memory");
-    }
-  }
   s_qbase_dirty = true;
-  if (!open && s_queue_base.getBuffer() == nullptr) s_music_dirty = true;  // it was borrowed
+  if (!open) s_music_dirty = true;  // its screen was borrowed
 }
 
 /** Put the current page together and show it. */
@@ -1056,12 +1050,8 @@ void present() {
   } else if (s_queue_open && host::queueValid()) {
     if (s_qbase_dirty || s_qbase_cover_gen != host::coverGeneration() || s_qbase_id != host::now().id) {
       const uint32_t t0 = micros();
-      if (s_queue_base.getBuffer() != nullptr) {
-        buildQueueBase(s_queue_base);
-      } else {
-        buildQueueBase(s_music_base);  // no room for a third screen: borrowed
-        s_music_dirty = true;
-      }
+      buildQueueBase(s_music_base);
+      s_music_dirty = true;
       services::perf::jpeg(false, micros() - t0);  // the cover decoded and faded in
     }
   } else if (s_music_dirty || s_cover_gen != host::coverGeneration() || s_cover_for_id != host::now().id) {
