@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 /**
@@ -49,6 +50,21 @@ uint16_t packShaded(float r, float g, float b, int x, int y, const Shade* shades
 void background(const Canvas& c, const Shade* shades = nullptr, int n = 0);
 /** The background's exact colour at (x, y) of a w x h canvas (to blend other things into). */
 void backgroundRgb(int w, int h, int x, int y, float* r, float* g, float* b);
+
+/** The background worked out once for a w x h canvas and kept (8.8 fixed point, 6 bytes a
+ *  pixel, from alloc). Afterwards bgRgb / backgroundFast / coverPage read it instead of
+ *  working out every pixel again (~1.9 s a page on the card). False: no memory, they
+ *  fall back to backgroundRgb. */
+bool bgCacheInit(int w, int h, void* (*alloc)(size_t));
+/** backgroundRgb from the kept copy when there is one (within 1/256). */
+void bgRgb(int w, int h, int x, int y, float* r, float* g, float* b);
+/** background(), from the kept copy, the shades worked out once a row. */
+void backgroundFast(const Canvas& c, const Shade* shades = nullptr, int n = 0);
+/** The music page: the background with a cw x ch cover in the middle whose edges fade in
+ *  (fx, fy px), a dark band of rim px in rim_col around it, then the shades. pix: the
+ *  decoded cover, 3 bytes a pixel, B G R in memory when bgr (else R G B). */
+void coverPage(const Canvas& c, const uint8_t* pix, bool bgr, int cw, int ch, float fx, float fy, float rim,
+               Rgb rim_col, const Shade* shades, int n);
 
 /** Rounded rectangle in colour `c` at `alpha` (0..255) over what is there, with
  *  anti-aliased edges. `border_alpha` > 0 adds a 1 px outline in `border`. */

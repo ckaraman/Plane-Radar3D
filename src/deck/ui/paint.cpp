@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace ui::paint {
 
@@ -244,6 +245,115 @@ void shade(const Canvas& c, int y0, int y1, Rgb col, int a0, int a1) {
     const int a = static_cast<int>(a0 + (a1 - a0) * t + 0.5f);
     uint16_t* row = c.px + py * c.w;
     for (int px = 0; px < c.w; ++px) blendPx(row + px, px, py, col, a);
+  }
+}
+
+namespace {
+
+uint16_t* s_bg = nullptr;  // r, g, b in 8.8 fixed point, row by row
+int s_bg_w = 0, s_bg_h = 0;
+
+constexpr int kMaxShades = 4;
+
+inline float smooth01(float t) {
+  t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+  return t * t * (3.0f - 2.0f * t);
+}
+
+/** Shade alphas of row y (packShaded's own sum, worked out once a row). */
+inline void rowShades(const Shade* shades, int n, int y, float* a) {
+  for (int i = 0; i < n && i < kMaxShades; ++i) a[i] = shadeAlpha(shades[i], y);
+}
+
+inline uint16_t packRow(float r, float g, float b, int x, int y, const Shade* shades, const float* a, int n) {
+  for (int i = 0; i < n && i < kMaxShades; ++i) {
+    if (a[i] <= 0.0f) continue;
+    r += (shades[i].col.r - r) * a[i];
+    g += (shades[i].col.g - g) * a[i];
+    b += (shades[i].col.b - b) * a[i];
+  }
+  return pack(static_cast<int>(r + 0.5f), static_cast<int>(g + 0.5f), static_cast<int>(b + 0.5f), x, y);
+}
+
+}  // namespace
+
+bool bgCacheInit(int w, int h, void* (*alloc)(size_t)) {
+  if (s_bg != nullptr && s_bg_w == w && s_bg_h == h) return true;
+  auto* p = static_cast<uint16_t*>(alloc(static_cast<size_t>(w) * h * 3 * sizeof(uint16_t)));
+  if (p == nullptr) return false;
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      float r, g, b;
+      backgroundRgb(w, h, x, y, &r, &g, &b);
+      uint16_t* q = p + (y * w + x) * 3;
+      q[0] = static_cast<uint16_t>(r * 256.0f + 0.5f);
+      q[1] = static_cast<uint16_t>(g * 256.0f + 0.5f);
+      q[2] = static_cast<uint16_t>(b * 256.0f + 0.5f);
+    }
+  }
+  s_bg_w = w, s_bg_h = h;
+  s_bg = p;
+  return true;
+}
+
+void bgRgb(int w, int h, int x, int y, float* r, float* g, float* b) {
+  if (s_bg == nullptr || w != s_bg_w || h != s_bg_h) {
+    backgroundRgb(w, h, x, y, r, g, b);
+    return;
+  }
+  const uint16_t* q = s_bg + (y * w + x) * 3;
+  *r = q[0] * (1.0f / 256.0f), *g = q[1] * (1.0f / 256.0f), *b = q[2] * (1.0f / 256.0f);
+}
+
+void backgroundFast(const Canvas& c, const Shade* shades, int n) {
+  float a[kMaxShades];
+  for (int y = 0; y < c.h; ++y) {
+    rowShades(shades, n, y, a);
+    uint16_t* row = c.px + y * c.w;
+    for (int x = 0; x < c.w; ++x) {
+      float r, g, b;
+      bgRgb(c.w, c.h, x, y, &r, &g, &b);
+      row[x] = packRow(r, g, b, x, y, shades, a, n);
+    }
+  }
+}
+
+void coverPage(const Canvas& c, const uint8_t* pix, bool bgr, int cw, int ch, float fx, float fy, float rim,
+               Rgb rim_col, const Shade* shades, int n) {
+  const int x0 = (c.w - cw) / 2, y0 = (c.h - ch) / 2;
+  const int ri = bgr ? 2 : 0, bi = bgr ? 0 : 2;
+  // Column values once: the fade across the cover and the distance outside it.
+  std::vector<float> ax(c.w), ox(c.w);
+  for (int x = 0; x < c.w; ++x) {
+    const int px = x - x0;
+    ax[x] = (px >= 0 && px < cw) ? smooth01(std::min(px + 0.5f, cw - px - 0.5f) / fx) : 0.0f;
+    ox[x] = std::max({0.0f, static_cast<float>(x0 - x), static_cast<float>(x - (x0 + cw - 1))});
+  }
+  float sa[kMaxShades];
+  for (int y = 0; y < c.h; ++y) {
+    rowShades(shades, n, y, sa);
+    const int py = y - y0;
+    const float ay = (py < 0 || py >= ch) ? 0.0f : smooth01(std::min(py + 0.5f, ch - py - 0.5f) / fy);
+    const float oy = std::max({0.0f, static_cast<float>(y0 - y), static_cast<float>(y - (y0 + ch - 1))});
+    uint16_t* row = c.px + y * c.w;
+    const uint8_t* src = (py >= 0 && py < ch) ? pix + py * cw * 3 : nullptr;
+    for (int x = 0; x < c.w; ++x) {
+      const float a = ay * ax[x];
+      const float near = (ox[x] == 0.0f && oy == 0.0f) ? 1.0f
+                         : (ox[x] >= rim || oy >= rim) ? 0.0f
+                                                       : 1.0f - smooth01(sqrtf(ox[x] * ox[x] + oy * oy) / rim);
+      float r, g, b;
+      bgRgb(c.w, c.h, x, y, &r, &g, &b);
+      if (a > 0.0f || near > 0.0f) {
+        const float dk = near * (1.0f - a) * 0.85f;  // the dark rim, strongest at the edge
+        r += (rim_col.r - r) * dk, g += (rim_col.g - g) * dk, b += (rim_col.b - b) * dk;
+      }
+      if (a > 0.0f) {
+        const uint8_t* p = src + (x - x0) * 3;
+        r += (p[ri] - r) * a, g += (p[1] - g) * a, b += (p[bi] - b) * a;
+      }
+      row[x] = packRow(r, g, b, x, y, shades, sa, n);
+    }
   }
 }
 
