@@ -115,9 +115,49 @@ kaldırmak) görünümü değiştirdiği için seçilmedi.
 - Başarı: şarkı geçişinde deck'te `turn_max` < 200 ms; sıra listesi açıkken ≥ 20 kare/sn; kapak
   gelirken radar normal hızının ≥ %80'i.
 
-### 10b-3 — Gerekirse (10b-1/10b-2 ölçümüne göre)
+### 10b-2 sonucu (kartta, 5in-0.43.0, 20:50-20:55)
 
-Aşağıdaki maddeler (ilk tasarım) ölçüm hâlâ başarı ölçütünün altında kalırsa yapılır.
+- Radar dakikalarca 39-40 kare/sn, uçak partileri 0,00 sn; kapak 0,6-2,9 sn; liste 30 satır 0,7 sn.
+- Müzik sayfası kurulumu hâlâ 0,5-1 sn (`turn_max` 600-1200 ms; hedef < 200).
+- Radar kapaksız bir anda 9,6-20 kare/sn'ye düştü (20:52:45-55; nedeni bilinmiyor, 10b-1'de de vardı).
+- **Bağlantı takıldı (20:53:57):** kullanıcı sıra kartından bir şarkıya bastı. Program yeni listeyi
+  (3,5 sn) ve küçük kapakların hepsini baştan göndermeye başladı. Sonra karttan hiçbir satır gelmedi:
+  `PR:PERF` kesildi, uçak partileri "skipped" sonra 1,5 dk "noanswer". Kart çalışıyordu (ekran,
+  sayfa geçişi; ileri/geri klavye tuşları). Sıra kartı (`PR:QPLAY`) çalışmadı. Kartın 20 sn
+  kurtarması devreye girmedi, çünkü program karta yazmayı sürdürdü. Okuma tarafı mı takıldı, kartın
+  USB çıkışı mı, kanıt yok.
+- Boş PSRAM: radar 3,56 MB → müzik 1,83 MB → sıra açık 0,67 MB. Sıra sayfası 156 px'lik kapak için
+  kapağın tamamını 24 bit açıyor (480² ≈ 691 KB).
+
+### 10b-3 — Takılma, küçük kapaklar, bellek (kullanıcı onayladı: "Evet, planla")
+
+1. **Takılmayı görmek ve kurtarmak:**
+   - Program, bağlıyken 15 sn karttan hiç satır alamazsa `perf.log`'a bir kez "stall" satırı yazar.
+     Satırın yanına her iş parçacığının o anki yığınını (isim + son çağrılar) ekler. Satırlar yeniden
+     gelince "lines again after N s" yazar.
+   - Kart, çıkışı (USB CDC TX) 20 sn boyunca hep dolu kalırsa (yazılan her şey atılıyorsa) bugünkü
+     kurtarmayı yapar: USB'yi yazılımla çıkarıp takar. Program portu kendisi yeniden açar.
+2. **Sıra tıklaması okuma tarafında beklemez:** `QPLAY` tarayıcıya ayrı bir iş parçacığında gider
+   (`KEY` gibi).
+3. **Küçük kapaklar şarkıya bağlı:**
+   - Yeni liste gönderilirken program, kartta resmi olan eski satırlardan aynı resim adresine sahip
+     olanı `QITEM`'de `"p": <eski satır>` ile bildirir.
+   - Kart `QEND`'de o resmi yeni satıra taşır, gerisini siler.
+   - Program yalnız kartta olmayanları gönderir.
+   - Kart bunu `HELLO`'da `"qkeep":1` ile bildirir. Alanı olmayan karta program eskisi gibi
+     hepsini yollar; eski program `p`'yi göndermez.
+4. **Bellek:** sıra sayfası kapağı 156×156 boyutunda açar (LovyanGFX `drawJpg` ölçek ve kaydırma
+   parametreleriyle). Görünüm aynı kalır: kırpılmış kare, kenar bandı.
+
+Başarı:
+- Şarkı geçişinde liste + en çok birkaç küçük kapak gider.
+- Sıra açıkken boş PSRAM ≥ 1,2 MB.
+- Sıra kartından şarkı seçince bağlantı takılmaz.
+- Takılırsa `perf.log` nerede takıldığını gösterir, kart 20 sn içinde kendini toparlar.
+
+Sonra ölçülür. Sayfa kurulumu (0,5-1 sn) hâlâ hedefin üstündeyse Yol B (kapak hesabı öbür
+çekirdekte) ayrıca konuşulur. Aşağıdaki ilk tasarımın "Radar önce" ve "Kart tekrar açmaz" maddeleri
+bu adımda yok.
 
 ### 10b — Gereksiz yükü kaldır (ilk tasarım, artık 10b-3)
 
