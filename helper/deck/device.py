@@ -19,6 +19,7 @@ from serial.tools import list_ports
 VID = 0x303A
 PID_KEYBOARD = 0x8150
 PID_SETUP = 0x1001
+BATCH_WAIT = 5  # s a batch waits for a transfer on the cable before it is skipped
 
 
 def find_port(pid):
@@ -146,7 +147,7 @@ class Device:
         buf = b""
         while self.ser is ser:
             try:
-                chunk = ser.read(512)
+                chunk = ser.read(ser.in_waiting or 1)  # an answer is read as soon as it is here
             except (serial.SerialException, OSError, TypeError, AttributeError):
                 break
             if not chunk:
@@ -220,17 +221,23 @@ class Device:
         """Short lines, then an end line the card answers (PR:ABEGIN .. PR:AEND -> AOK).
         Not in the middle of a cover / key upload: the card's USB link loses data when
         they mix. Returns the answer (True without an end line) or None (skipped, no answer)."""
-        if not self.stream_lock.acquire(timeout=5):
+        t0 = time.time()
+        tag = lines[0][3:].split(" ")[0] if lines else ""
+        if not self.stream_lock.acquire(timeout=BATCH_WAIT):
+            self.perf("batch %s %d skipped %.2f s" % (tag, len(lines), time.time() - t0))
             return None
+        r = None
         try:
             for i, line in enumerate(lines):
                 if not self.send(line):
                     return None
                 if i % 6 == 5:
                     time.sleep(0.04)  # the radar_kopru pacing: CDC drops long bursts
-            return self.request(end, [ack], timeout) if end else True
+            r = self.request(end, [ack], timeout) if end else True
+            return r
         finally:
             self.stream_lock.release()
+            self.perf("batch %s %d %s %.2f s" % (tag, len(lines), "ok" if r else "noanswer", time.time() - t0))
 
     # ------------------------------------------------------------------ radar settings
     RADAR_KEYS = ("lat", "lon", "tz", "clock", "weather", "miles", "runways", "rings")
