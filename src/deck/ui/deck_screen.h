@@ -20,4 +20,7 @@ bool tick();
 enum class Touch { None, Back };
 Touch touch(int fingers, int x, int y);
 
+/** "music" or "keys": the page shown (timing report, services/perf.h). */
+const char* pageName();
+
 }  // namespace ui::deck

@@ -3,6 +3,7 @@
 #if defined(WITH_DECK)
 #include "services/deck_store.h"
 #include "services/host_link.h"
+#include "services/perf.h"
 #endif
 
 #include <Arduino.h>
@@ -601,6 +602,9 @@ void handleReset() {
 }
 
 void handleLine(char* line) {
+#if defined(WITH_DECK)
+  services::perf::line();
+#endif
   if (strncmp(line, "PR:", 3) != 0) {
     return;  // ordinary log text
   }

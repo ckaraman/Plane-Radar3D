@@ -18,6 +18,7 @@
 #include "services/deck_store.h"
 #include "services/hid_keys.h"
 #include "services/host_link.h"
+#include "services/perf.h"
 #include "ui/fonts_tr.h"
 #include "ui/paint.h"
 #include "ui/ui_text.h"
@@ -744,7 +745,10 @@ void refreshThumbs() {
     t.setColorDepth(16);
     if (t.createSprite(px, px) == nullptr) continue;
     t.fillScreen(0);
-    if (t.drawJpg(src, r.art_len, 0, 0, px, px)) {
+    const uint32_t t0 = micros();
+    const bool ok = t.drawJpg(src, r.art_len, 0, 0, px, px);
+    services::perf::jpeg(true, micros() - t0);
+    if (ok) {
       if (s_thumb[i] == nullptr) {
         s_thumb[i] = static_cast<uint16_t*>(heap_caps_malloc(px * px * 2, MALLOC_CAP_SPIRAM));
       }
@@ -1008,15 +1012,19 @@ void present() {
     if (s_keys_dirty || s_keys_gen != store::generation()) buildKeysBase();
   } else if (s_queue_open && host::queueValid()) {
     if (s_qbase_dirty || s_qbase_cover_gen != host::coverGeneration() || s_qbase_id != host::now().id) {
+      const uint32_t t0 = micros();
       if (s_queue_base.getBuffer() != nullptr) {
         buildQueueBase(s_queue_base);
       } else {
         buildQueueBase(s_music_base);  // no room for a third screen: borrowed
         s_music_dirty = true;
       }
+      services::perf::jpeg(false, micros() - t0);  // the cover decoded and faded in
     }
   } else if (s_music_dirty || s_cover_gen != host::coverGeneration() || s_cover_for_id != host::now().id) {
+    const uint32_t t0 = micros();
     buildMusicBase();
+    services::perf::jpeg(false, micros() - t0);
   }
   if (tft.getRotation() != 2) {
     // Straight into the hidden frame buffer (same pixel format), then shown.
@@ -1081,6 +1089,8 @@ float angleAt(int x, int y) {
 }
 
 }  // namespace
+
+const char* pageName() { return s_page == Page::Music ? "music" : "keys"; }
 
 void enter() {
   if (s_level < 0) loadLevel();

@@ -23,6 +23,7 @@
 #if defined(WITH_DECK)
 #include "services/deck_store.h"
 #include "services/host_link.h"
+#include "services/perf.h"
 #include "services/hid_keys.h"
 #endif
 #include "services/map_store.h"
@@ -59,6 +60,17 @@ unsigned long g_last_redraw_ms = 0;
 
 enum class Screen { Radar, Clock, Weather, Water, Deck };
 volatile Screen g_screen = Screen::Radar;  // read by the network task too
+#if defined(WITH_DECK)
+const char* screenName() {  // timing report (services/perf.h)
+  switch (g_screen) {
+    case Screen::Clock: return "clock";
+    case Screen::Weather: return "weather";
+    case Screen::Water: return "water";
+    case Screen::Deck: return "deck";
+    default: return "radar";
+  }
+}
+#endif
 
 unsigned long g_last_aircraft_ms = 0;
 
@@ -595,6 +607,9 @@ void loop() {
     services::serial_ota::tick();
     return;
   }
+#if defined(WITH_DECK)
+  const unsigned long turn_start_ms = millis();
+#endif
   handleBootButton();
   services::serial_setup::poll();
   console::tick();
@@ -632,8 +647,15 @@ void loop() {
     if (millis() - g_last_redraw_ms >= interval) {
       g_last_redraw_ms = millis();
       updateScreen();
+#if defined(WITH_DECK)
+      services::perf::frame();
+#endif
       pollTouch();  // a short tap may start while the frame is being drawn
     }
+#if defined(WITH_DECK)
+    services::perf::turn(millis() - turn_start_ms, services::host::coverReceiving());
+    services::perf::tick(screenName(), g_screen == Screen::Deck ? ui::deck::pageName() : "");
+#endif
     delay(5);
     return;
   }

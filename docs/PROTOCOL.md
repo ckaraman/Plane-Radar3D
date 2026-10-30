@@ -82,6 +82,14 @@ Bugün bu verileri kurulum sayfası (tarayıcı) hazırlıyor; 2. sistemde PC pr
 `VOL`, `NOW`, `COVER*`, `Q*`, `DECK*`, `KEY`, `SETVOL`, `MUTE`: bugünkü gibi
 (`src/deck/services/host_link.h`). Değişiklik yok.
 
+`PERF` (kart → PC, 5in-0.42.0+, 5 sn'de bir; `src/deck/services/perf.h`): ölçüm raporu,
+değerler o 5 sn'ye ait. `scr` açık ekran (`radar`, `clock`, `weather`, `water`, `deck`),
+`page` deck sayfası (`music`, `keys`; deck dışında `""`), `fps` çizilen kare/sn, `turn_max`
+en uzun döngü turu (ms), `turns` tur sayısı, `lines` işlenen kablo satırı, `cover_n`/`cover_ms`
+müzik ya da sıra sayfasının kapakla yeniden kurulması (JPEG açma + kenar geçişi), `thumb_n`/
+`thumb_ms` küçük kapak açma, `rx_ms` büyük kapak gelirken geçen süre, `heap` boş RAM.
+Program (1.10.0+) günlüğe ve `perf.log`'a yazar; eski program yok sayar.
+
 ## Modüller
 
 **Kart tarafı.** Çizim kodu verinin nereden geldiğini bilmez: radar `adsb`, hava `weather`,
