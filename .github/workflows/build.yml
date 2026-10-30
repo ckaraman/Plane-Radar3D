@@ -203,6 +203,8 @@ jobs:
         run: |
           g++ -std=gnu++17 -O2 -Wall -Isrc/deck tools/host-tests/paint_test.cpp src/deck/ui/paint.cpp -o /tmp/paint_test
           /tmp/paint_test
+          g++ -std=gnu++17 -O2 -Wall -Isrc/deck tools/host-tests/queue_carry_test.cpp -o /tmp/queue_carry_test
+          /tmp/queue_carry_test
 
       - name: Windows helper from the deckapp job
         continue-on-error: true

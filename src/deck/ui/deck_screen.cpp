@@ -838,16 +838,18 @@ void buildQueueBase(LGFX_Sprite& s) {
   const uint8_t* jpg = host::cover(&len, &cw, &ch);
   if (coverForNow()) {
     if (cw <= 0 || ch <= 0 || cw > kW || ch > kH) cw = kW, ch = kH;
+    // Decoded straight at its size here, cropped to a square: ~73 KB instead of the whole
+    // cover (~691 KB for 480 x 480), which left the queue page short of PSRAM (stage 10b-3).
+    const float k = std::max(static_cast<float>(kQCoverS) / cw, static_cast<float>(kQCoverS) / ch);
+    const float ox = (cw * k - kQCoverS) / 2.0f, oy = (ch * k - kQCoverS) / 2.0f;
     LGFX_Sprite pic(&tft);
     pic.setPsram(true);
     pic.setColorDepth(24);
-    if (pic.createSprite(cw, ch) != nullptr) {
+    if (pic.createSprite(kQCoverS, kQCoverS) != nullptr) {
       pic.fillScreen(0);
-      if (pic.drawJpg(jpg, len, 0, 0, cw, ch)) {
+      if (pic.drawJpg(jpg, len, -lroundf(ox), -lroundf(oy), 0, 0, 0, 0, k, k)) {
         const auto* pix = static_cast<const uint8_t*>(pic.getBuffer());
-        const bool bgr = coverIsBgr(pic, cw, ch);
-        const float k = std::max(static_cast<float>(kQCoverS) / cw, static_cast<float>(kQCoverS) / ch);
-        const float ox = (cw * k - kQCoverS) / 2.0f, oy = (ch * k - kQCoverS) / 2.0f;
+        const bool bgr = coverIsBgr(pic, kQCoverS, kQCoverS);
         const float rim = D(60);
         for (int y = std::max(0, kQCoverY - static_cast<int>(rim)); y < std::min(kH, kQCoverY + kQCoverS + static_cast<int>(rim)); ++y) {
           for (int x = std::max(0, kQCoverX - static_cast<int>(rim)); x < kQCoverX + kQCoverS + static_cast<int>(rim); ++x) {
@@ -862,9 +864,7 @@ void buildQueueBase(LGFX_Sprite& s) {
               const float dk = near * 0.8f;
               r += (kCoverBg.r - r) * dk, g += (kCoverBg.g - g) * dk, b += (kCoverBg.b - b) * dk;
             } else {
-              const int sx = std::min(cw - 1, static_cast<int>((lx + ox) / k));
-              const int sy = std::min(ch - 1, static_cast<int>((ly + oy) / k));
-              const uint8_t* p = pix + (sy * cw + sx) * 3;
+              const uint8_t* p = pix + (ly * kQCoverS + lx) * 3;
               r = p[bgr ? 2 : 0], g = p[1], b = p[bgr ? 0 : 2];
             }
             c.px[y * kW + x] = paint::pack(static_cast<int>(r + 0.5f), static_cast<int>(g + 0.5f),

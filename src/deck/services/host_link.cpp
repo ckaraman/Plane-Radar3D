@@ -10,6 +10,7 @@
 #include "config.h"
 #include "hardware/console.h"
 #include "services/map_store.h"
+#include "services/queue_carry.h"
 
 namespace services::host {
 
@@ -258,6 +259,7 @@ bool ensureRows() {
 }
 int s_qsn = 0, s_qs_want = 0;
 uint32_t s_qs_gen = 0;
+int16_t s_qs_from[kQueueMax];  // old row whose picture each row coming in keeps ("p")
 bool s_qs_open = false;
 char s_qs_src[24] = "";
 
@@ -341,6 +343,7 @@ void handleQueueItem(const char* json) {
     strlcpy(r.artist, doc["a"] | "", sizeof(r.artist));
     strlcpy(r.dur, doc["d"] | "", sizeof(r.dur));
     r.index = doc["x"] | 0;
+    s_qs_from[k] = doc["p"] | -1;
     r.art = nullptr;
     r.art_len = 0;
     ++s_qsn;
@@ -352,6 +355,7 @@ void handleQueueEnd() {
   seen();
   if (s_qs_open) {
     dropArt();
+    carryArts(s_q, s_qn, s_qs, s_qsn, s_qs_from);  // pictures the new list keeps
     freeArts(s_q, s_qn);
     memcpy(s_q, s_qs, sizeof(QueueRow) * kQueueMax);
     s_qn = s_qsn;

@@ -143,6 +143,8 @@ namespace {
 unsigned long s_last_host_ms = 0;
 bool s_host_seen = false;
 int s_recoveries = 0;
+// Since when everything written is dropped (0: the computer reads what the card says).
+unsigned long s_tx_full_since = 0;
 }  // namespace
 
 void noteHost() {
@@ -157,9 +159,12 @@ void tick() {
     // The helper sends its volume every 2 s. Silent for 20 s while a program still holds
     // the port (DTR on): the link stalled. Unplugging and plugging in again by software
     // brings it back; the helper reopens the port by itself.
-    if (s_host_seen && millis() - s_last_host_ms > 20000 && tud_cdc_n_connected(0)) {
+    // The other way round: the helper still writes but reads nothing for 20 s (stage 10b-3).
+    const bool tx_stuck = s_tx_full_since != 0 && millis() - s_tx_full_since > 20000;
+    if (((s_host_seen && millis() - s_last_host_ms > 20000) || tx_stuck) && tud_cdc_n_connected(0)) {
       ++s_recoveries;
       s_host_seen = false;  // once, until the helper speaks again
+      s_tx_full_since = 0;
       tud_disconnect();
       delay(400);
       tud_connect();
@@ -210,6 +215,11 @@ size_t ConsoleIO::write(const uint8_t* buffer, size_t size) {
     if (w == 0) break;
     done += w;
   }
-  if (done == size) s_stalled_ms = 0;
+  if (done == size) {
+    s_stalled_ms = 0;
+    console::s_tx_full_since = 0;
+  } else if (console::s_tx_full_since == 0) {
+    console::s_tx_full_since = millis();
+  }
   return size;  // dropped bytes count as written: callers must not retry
 }

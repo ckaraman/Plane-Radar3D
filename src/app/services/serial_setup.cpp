@@ -159,6 +159,7 @@ void sendHello() {
   doc["deckcustom"] = services::deck::custom();
   doc["usbfix"] = console::usbRecoveries();       // USB link reconnects since start
   doc["queuev"] = 1;                           // queue panel (PR:QBEGIN ...)
+  doc["qkeep"] = 1;  // QITEM "p": a new list keeps the row pictures the card has (0.44.0+)
   doc["qthumb"] = services::host::queueThumbPx();  // its small covers, px
   doc["hostv"] = 2;  // Windows helper protocol (services/host_link.h): 2 = windowed cover, "pm"
 #endif

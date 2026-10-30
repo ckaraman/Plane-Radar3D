@@ -92,6 +92,15 @@ aktarım süresi programın `perf.log`'daki `cover … s` satırında), `heap` b
 Program (1.10.0+) hepsini `perf.log`'a, penceresinin günlüğüne yalnızca ilkini, ekran
 değişimini ve 200 ms'yi aşan turu yazar; eski program yok sayar.
 
+Sıra listesi (5in-0.44.0+, `HELLO` `"qkeep":1`): `PR:QITEM`'de `"p":<eski satır>` olan satır,
+kartta o eski satırın küçük kapağını `PR:QEND`'de alır; program (1.11.0+) yalnız kartta olmayan
+küçük kapakları yollar. `qkeep` demeyen karta `p` gönderilmez.
+
+Program (1.11.0+) `perf.log`'a ayrıca yazar: karttan 15 sn hiç satır gelmezse bir kez
+`stall: no line from the card for N s` ve altında her iş parçacığının yığını; satırlar dönünce
+`lines again after N s`; bağlantıda `card on <port> <fw>` ve `card gone`. Kart (0.44.0+) USB
+çıkışı 20 sn boyunca hep doluysa USB'yi yazılımla çıkarıp takar (`usbfix` sayacı artar).
+
 ## Modüller
 
 **Kart tarafı.** Çizim kodu verinin nereden geldiğini bilmez: radar `adsb`, hava `weather`,

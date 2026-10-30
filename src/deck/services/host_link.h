@@ -69,6 +69,7 @@ uint32_t coverGeneration();
  * The YouTube Music queue from the helper's browser extension, from the current song on:
  *   PR:QBEGIN {"gen":7,"n":12,"src":"YouTube Music"}   then n x
  *   PR:QITEM {"k":0,"x":14,"t":"…","a":"…","d":"3:58"}   (k = row, x = place in the queue)
+ *        "p":3 (0.44.0+, HELLO "qkeep"): keep old row 3's small cover for this row
  *   PR:QEND                                   each answered PR:QACK {}
  *   PR:QCLEAR                                 no queue (another app plays)
  *   PR:QARTBEGIN {"len":n,"crc":c,"k":0,"gen":7} PR:QART <seq> <b64> PR:QARTEND
