@@ -166,6 +166,7 @@ jobs:
           pip install pyserial pillow "websockets>=13"
           python helper/tests/test_core.py
           python helper/tests/test_firmware.py
+          python helper/tests/test_build.py
 
       - name: Map tile tests (shared map code)
         run: |
