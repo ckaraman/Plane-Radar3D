@@ -28,7 +28,28 @@ jobs:
         working-directory: helper
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt
+      - name: PyInstaller with its bootloader built here (the prebuilt one is shared with malware and trips Defender)
+        working-directory: helper
+        env:
+          PYINSTALLER_COMPILE_BOOTLOADER: 1
+        run: pip install pyinstaller==6.22.3 --no-binary pyinstaller
+      - name: Bootloader check (must differ from the prebuilt one)
+        working-directory: helper
+        shell: pwsh
+        run: |
+          pip download pyinstaller==6.22.3 --no-deps --only-binary :all: --platform win_amd64 -d wheel
+          $whl = Get-ChildItem wheel\pyinstaller-6.22.3-*.whl | Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($whl.FullName)
+          $zip.Entries | Where-Object FullName -eq "PyInstaller/bootloader/Windows-64bit-intel/runw.exe" | ForEach-Object { [System.IO.Compression.ZipFileExtensions]::ExtractToFile($_, "$PWD\prebuilt-runw.exe", $true) }
+          $zip.Dispose()
+          if (-not (Test-Path prebuilt-runw.exe)) { Write-Output "::error::prebuilt runw.exe not found in the wheel"; exit 1 }
+          $dir = python -c "import os, PyInstaller; print(os.path.dirname(PyInstaller.__file__))"
+          $mine = (Get-FileHash "$dir\bootloader\Windows-64bit-intel\runw.exe").Hash
+          $theirs = (Get-FileHash prebuilt-runw.exe).Hash
+          if ($mine -eq $theirs) { Write-Output "::error::bootloader is the prebuilt one ($mine)"; exit 1 }
+          Write-Output "::notice::bootloader built here $mine (prebuilt $theirs)"
       - name: Icon
         working-directory: helper
         run: python -c "import app; img = app.tray_image().resize((256, 256)); img.save('icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
@@ -37,11 +58,12 @@ jobs:
         run: Copy-Item ../web/tz.json, ../web/tz-LICENSE.txt, ../web/mapdata.js web/
       - name: Build
         working-directory: helper
-        run: >
-          pyinstaller --noconfirm --onefile --windowed --name PlaneRadarDeck --icon icon.ico
-          --add-data "web;web" --add-data "browser-extension;browser-extension" --collect-all webview
-          --collect-submodules winrt --collect-submodules websockets
-          --hidden-import pystray._win32 --hidden-import win32com.client app.py
+        run: |
+          python version_info.py > version.txt
+          pyinstaller --noconfirm --onefile --windowed --name PlaneRadarDeck --icon icon.ico --version-file version.txt `
+            --add-data "web;web" --add-data "browser-extension;browser-extension" --collect-all webview `
+            --collect-submodules winrt --collect-submodules websockets `
+            --hidden-import pystray._win32 --hidden-import win32com.client app.py
       - name: Self test (the packed program starts and loads its parts)
         working-directory: helper
         shell: pwsh
@@ -54,6 +76,7 @@ jobs:
           if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Output "::warning::window test did not finish" }
           if (Test-Path smoke.txt) { Get-Content smoke.txt | ForEach-Object { Write-Output "::notice::$_" } } else { Write-Output "::warning::no window test result" }
           Get-Item dist\PlaneRadarDeck.exe | Format-List Name, Length
+          (Get-Item dist\PlaneRadarDeck.exe).VersionInfo | Format-List ProductName, FileVersion, CompanyName, LegalCopyright
       - uses: actions/upload-artifact@v4
         with:
           name: deck-windows
