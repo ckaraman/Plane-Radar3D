@@ -212,7 +212,11 @@ class QueueSender:
                         c["p"] = j  # the card moves that row's picture here
                 if dev.send_queue(card, self.gen, "YouTube Music"):
                     self.sent_titles, self.card_has, self.sent_pics = titles, True, kept
+                    self.failed = set()  # "not again" holds for one list: retried with the next
                 else:
+                    # The card may have taken it (its answer lost) and moved its pictures:
+                    # what it has is unknown, so no "p" next time, every picture again.
+                    self.sent_pics = {}
                     self.dirty = True
                     return
             self._rows = rows

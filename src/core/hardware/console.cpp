@@ -160,7 +160,10 @@ void tick() {
     // the port (DTR on): the link stalled. Unplugging and plugging in again by software
     // brings it back; the helper reopens the port by itself.
     // The other way round: the helper still writes but reads nothing for 20 s (stage 10b-3).
-    const bool tx_stuck = s_tx_full_since != 0 && millis() - s_tx_full_since > 20000;
+    // Counted only while a program holds the port (with none, every write is dropped) and
+    // once until the helper speaks again.
+    if (!tud_cdc_n_connected(0)) s_tx_full_since = 0;
+    const bool tx_stuck = s_host_seen && s_tx_full_since != 0 && millis() - s_tx_full_since > 20000;
     if (((s_host_seen && millis() - s_last_host_ms > 20000) || tx_stuck) && tud_cdc_n_connected(0)) {
       ++s_recoveries;
       s_host_seen = false;  // once, until the helper speaks again

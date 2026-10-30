@@ -94,8 +94,7 @@ def test_failed_picture_not_carried():
     dev.fail.clear()
     song_change(q, dev, "abd")
     assert "p" not in dev.lists[-1][0], dev.lists[-1]  # the card never had "a"
-    assert 0 not in dev.thumbs  # and it is not tried again
-    assert dev.thumbs == [2], dev.thumbs
+    assert sorted(dev.thumbs) == [0, 2], dev.thumbs  # sent as new (tried again with a new list)
 
 
 def test_aborted_picture_tried_again():
@@ -116,6 +115,33 @@ def test_aborted_picture_tried_again():
     assert 0 in dev.thumbs, dev.thumbs
 
 
+def test_uncertain_list_send_carries_nothing():
+    # The card may have taken the list (and moved its pictures) with its answer lost: the
+    # next list must not say "p" against rows the card no longer has.
+    dev = FakeDev()
+    q = sender("abc")
+    run(q, dev)
+    dev.send_queue = lambda rows, gen, source: dev.lists.append(rows) and False
+    q.set_rows("bcd")
+    q.last_send, q.dirty = 0.0, True
+    q.pump(dev)
+    dev.send_queue = lambda rows, gen, source: dev.lists.append(rows) or True
+    q.last_send, q.dirty = 0.0, True
+    dev.thumbs.clear()
+    run(q, dev)
+    assert all("p" not in r for r in dev.lists[-1]), dev.lists[-1]
+    assert sorted(dev.thumbs) == [0, 1, 2], dev.thumbs
+
+
+def test_failed_picture_tried_with_the_next_list():
+    dev = FakeDev(fail={0})
+    q = sender("abc")
+    run(q, dev)
+    dev.fail.clear()
+    song_change(q, dev, "bca")
+    assert 2 in dev.thumbs, dev.thumbs  # "a" again, now row 2
+
+
 if __name__ == "__main__":
     test_carry_moves_by_picture()
     test_carry_same_picture_twice()
@@ -124,4 +150,6 @@ if __name__ == "__main__":
     test_no_qkeep_sends_all_again()
     test_failed_picture_not_carried()
     test_aborted_picture_tried_again()
+    test_uncertain_list_send_carries_nothing()
+    test_failed_picture_tried_with_the_next_list()
     print("queue thumbs ok")
