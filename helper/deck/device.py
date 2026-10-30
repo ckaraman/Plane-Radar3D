@@ -31,9 +31,10 @@ def find_port(pid):
 class Device:
     """Owns the serial port. on_event(tag, data) gets KEY / SETVOL / MUTE from the card."""
 
-    def __init__(self, on_event, log=print):
+    def __init__(self, on_event, log=print, perf=None):
         self.on_event = on_event
         self.log = log
+        self.perf = perf or (lambda text: None)  # perf.log line (stage 10a)
         self.ser = None
         self.port = None
         self.hello = None
@@ -183,7 +184,7 @@ class Device:
             if self.hello is not None:
                 self.hello["prefs"] = data
             return
-        if tag in ("KEY", "SETVOL", "MUTE"):
+        if tag in ("KEY", "SETVOL", "MUTE", "QPLAY", "PERF"):
             try:
                 self.on_event(tag, data)
             except Exception as e:  # noqa: BLE001
@@ -338,6 +339,7 @@ class Device:
             self._transfer("COVER", jpeg, 180, win, {"id": track_id, "w": w, "h": h},
                            abort=lambda: abort() or self.busy)
             self.log("cover: %d KB in %.1f s" % (len(jpeg) // 1024, time.time() - t0))
+            self.perf("cover %d B %.2f s" % (len(jpeg), time.time() - t0))
             return True
         except RuntimeError as e:
             if str(e) != "aborted":
@@ -349,6 +351,7 @@ class Device:
         if not self.connected or self.busy:
             return False
         try:
+            t0 = time.time()
             with self.stream_lock:
                 for line in (["PR:QBEGIN " + json.dumps({"gen": gen, "n": len(rows), "src": source}, ensure_ascii=False)] +
                              ["PR:QITEM " + json.dumps(dict(r, k=k), ensure_ascii=False, separators=(",", ":"))
@@ -358,6 +361,7 @@ class Device:
                         raise RuntimeError((r[1].get("msg") if r else "yanıt yok") or "hata")
                     if self.busy:
                         raise RuntimeError("aborted")
+            self.perf("queue %d rows %.2f s" % (len(rows), time.time() - t0))
             return True
         except RuntimeError as e:
             if str(e) != "aborted":
@@ -372,7 +376,9 @@ class Device:
         if not self.connected or self.busy:
             return False
         try:
+            t0 = time.time()
             self._transfer("QART", jpeg, 180, 1, {"k": k, "gen": gen}, abort=lambda: abort() or self.busy)
+            self.perf("thumb %d %d B %.2f s" % (k, len(jpeg), time.time() - t0))
             return True
         except RuntimeError as e:
             if str(e) != "aborted":

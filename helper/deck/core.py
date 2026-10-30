@@ -1,11 +1,13 @@
 """Ties it together: card <-> volume, what is playing, key actions."""
 
+import json
 import os
 import threading
 import time
 
-from . import blob, browser_link, firmware, queue_card
+from . import blob, browser_link, config, firmware, queue_card
 from .config import Config
+from .perf import PerfLog
 from .device import Device
 from .feed import Feed
 from .media import cover_jpeg
@@ -16,7 +18,8 @@ class Core:
     def __init__(self, log=print):
         self.log = log
         self.config = Config()
-        self.device = Device(self._card_event, log=log)
+        self.perf = PerfLog(os.path.join(config.APP_DIR, "perf.log"))
+        self.device = Device(self._card_event, log=log, perf=self.perf.write)
         self.volume = volume.VolumeWatcher(self._volume_changed, log=log)
         self.media = media.MediaWatcher(self._media_changed, log=log)
         try:
@@ -72,6 +75,9 @@ class Core:
             self.volume.toggle_mute()
         elif tag == "QPLAY":  # a song from the queue panel on the card
             self.link.play(int(data.get("x", -1)), str(data.get("t") or ""))
+        elif tag == "PERF":  # the card's timing report (stage 10a)
+            self.log("perf: %s" % json.dumps(data))
+            self.perf.write("card " + json.dumps(data, separators=(",", ":")))
 
     def _run_action(self, action):
         try:

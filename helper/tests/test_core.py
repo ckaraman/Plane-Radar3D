@@ -33,6 +33,7 @@ class FakeCard:
         self.deck = None
         self._stage = b""
         self.drop_once = False
+        self.perf_once = False
         self.queue = None
         self.thumbs = {}
         threading.Thread(target=self._run, daemon=True).start()
@@ -71,6 +72,9 @@ class FakeCard:
             if self.drop_once and seq == 3:  # one line lost on the cable
                 self.drop_once = False
                 return
+            if self.perf_once and seq == 2:  # a timing report in the middle of a transfer
+                self.perf_once = False
+                self.say('PR:PERF {"fps":4}')
             if seq < self._next:
                 self.say("PR:%s {\"seq\":%d}" % (ack, seq))
             elif seq > self._next:
@@ -174,7 +178,8 @@ def test_all():
     card = FakeCard()
     events = []
     device.find_port = lambda pid: card.path  # the same fake answers in both modes
-    d = device.Device(lambda tag, data: events.append((tag, data)), log=lambda m: None)
+    perf_lines = []
+    d = device.Device(lambda tag, data: events.append((tag, data)), log=lambda m: None, perf=perf_lines.append)
     assert wait(lambda: d.connected), "no connection"
     assert d.status()["usb"] == "kb"
 
@@ -201,6 +206,11 @@ def test_all():
     card.say('PR:SETVOL {"v":55}')
     assert wait(lambda: len(events) == 2)
     assert events[0] == ("KEY", {"i": 4}) and events[1] == ("SETVOL", {"v": 55})
+    card.say('PR:QPLAY {"x":3,"t":"Gece Yolu"}')  # a song from the queue panel
+    card.say('PR:PERF {"scr":"deck","page":"music","fps":12.5,"turn_max":340}')  # stage 10a
+    assert wait(lambda: len(events) == 4), events
+    assert events[2] == ("QPLAY", {"x": 3, "t": "Gece Yolu"})
+    assert events[3][0] == "PERF" and events[3][1]["turn_max"] == 340
 
     # Volume / now playing lines.
     d.send_json("VOL", {"v": 42, "m": False})
@@ -209,8 +219,11 @@ def test_all():
     # Cover in small chunks, a few on the way; one is lost and sent again.
     jpeg = bytes(range(256)) * 40
     card.drop_once = True
+    card.perf_once = True
     assert d.send_cover(jpeg, 3, 480, 480)
-    assert card.cover == jpeg
+    assert card.cover == jpeg and not card.perf_once
+    assert wait(lambda: events[-1] == ("PERF", {"fps": 4}))
+    assert any(l.startswith("cover %d B " % len(jpeg)) for l in perf_lines), perf_lines
     assert '"w": 480' in next(l for l in card.lines if l.startswith("PR:COVERBEGIN"))
 
     # Queue rows and a row picture.
@@ -218,7 +231,9 @@ def test_all():
     assert d.send_queue(rows, 7, "YouTube Music")
     assert card.queue["meta"] == {"gen": 7, "n": 2, "src": "YouTube Music"} and card.queue["rows"][1]["k"] == 1
     assert card.queue["rows"][1]["t"] == "Kıyı"
+    assert any(l.startswith("queue 2 rows ") for l in perf_lines), perf_lines
     assert d.send_thumb(b"\xff\xd8" + bytes(500), 1, 7) and card.thumbs[1][:2] == b"\xff\xd8"
+    assert any(l.startswith("thumb 1 502 B ") for l in perf_lines), perf_lines
     assert d.clear_queue() and card.queue is None
 
     # Key set through setup mode and back.
