@@ -88,7 +88,7 @@ değerler o 5 sn'ye ait. `scr` açık ekran (`radar`, `clock`, `weather`, `water
 en uzun döngü turu (ms), `turns` tur sayısı, `lines` işlenen kablo satırı, `cover_n`/`cover_ms`
 müzik ya da sıra sayfasının kapakla yeniden kurulması (JPEG açma + kenar geçişi), `thumb_n`/
 `thumb_ms` küçük kapak açma, `rx_ms` büyük kapak gelirken geçen gerçek süre (son parçadan sonraki 1,5 sn dahil; kesin
-aktarım süresi programın `perf.log`'daki `cover … s` satırında), `heap` boş RAM.
+aktarım süresi programın `perf.log`'daki `cover … s` satırında), `heap` boş RAM, `psram` boş PSRAM (5in-0.43.0+).
 Program (1.10.0+) hepsini `perf.log`'a, penceresinin günlüğüne yalnızca ilkini, ekran
 değişimini ve 200 ms'yi aşan turu yazar; eski program yok sayar.
 

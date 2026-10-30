@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <esp_heap_caps.h>
 
 #include "hardware/console.h"
 
@@ -66,6 +67,7 @@ void tick(const char* scr, const char* page) {
   doc["thumb_ms"] = s_thumb_us / 1000;
   doc["rx_ms"] = s_rx_ms;
   doc["heap"] = ESP.getFreeHeap();
+  doc["psram"] = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   char buf[256];
   serializeJson(doc, buf, sizeof(buf));
   Console.printf("PR:PERF %s\n", buf);

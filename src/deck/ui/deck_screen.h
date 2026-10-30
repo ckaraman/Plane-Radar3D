@@ -23,4 +23,8 @@ Touch touch(int fingers, int x, int y);
 /** "music" or "keys": the page shown (timing report, services/perf.h). */
 const char* pageName();
 
+/** True while the music page (or its queue panel) is shown: a cover on its way slows the
+ *  redraws only then (src/app/main.cpp). */
+bool musicShown();
+
 }  // namespace ui::deck

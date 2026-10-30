@@ -164,6 +164,19 @@ unsigned long s_qflash_ms = 0;
 uint16_t* s_thumb[host::kQueueMax] = {};
 const uint8_t* s_thumb_src[host::kQueueMax] = {};
 
+// The queue panel's rows, kept: drawn again only when the list, the scroll, the highlight or
+// the page under them changes (drawing them every frame held the page at ~8 frames a second).
+LGFX_Sprite s_qpanel;
+uint32_t s_qbase_builds = 0;
+struct PanelKey {
+  uint32_t ver, builds;
+  int scroll, flash;
+  bool operator==(const PanelKey& o) const {
+    return ver == o.ver && builds == o.builds && scroll == o.scroll && flash == o.flash;
+  }
+};
+PanelKey s_qpanel_key{0xFFFFFFFF, 0, -1, -1};
+
 bool s_dirty = true;  // canvas needs to be put together and shown
 unsigned long s_last_present_ms = 0;
 
@@ -586,6 +599,21 @@ float smooth01(float t) {
   return t * t * (3.0f - 2.0f * t);
 }
 
+/** Byte order of a decoded 24-bit sprite (B G R in memory?), from pixels whose red and blue
+ *  differ: the fast page code reads the sprite's memory directly. */
+bool coverIsBgr(LGFX_Sprite& pic, int cw, int ch) {
+  const auto* buf = static_cast<const uint8_t*>(pic.getBuffer());
+  for (int i = 0; i < 64; ++i) {
+    const int x = (cw - 1) * i / 63, y = (ch - 1) * ((i * 37) % 64) / 63;
+    const auto p = pic.readPixelRGB(x, y);
+    if (p.R8() == p.B8()) continue;
+    const uint8_t* q = buf + (y * cw + x) * 3;
+    if (q[0] == p.B8() && q[2] == p.R8()) return true;
+    if (q[0] == p.R8() && q[2] == p.B8()) return false;
+  }
+  return true;  // a grey cover: either order looks the same
+}
+
 /** True when the stored cover belongs to what is playing now. */
 bool coverForNow() {
   size_t len = 0;
@@ -605,7 +633,6 @@ void buildMusicBase() {
   if (coverForNow()) {
     if (cw <= 0 || ch <= 0 || cw > kW || ch > kH) cw = kW, ch = kH;  // older helper: whole panel
     // The cover in the middle, at its own size; its edges fade into the dark page.
-    const int x0 = (kW - cw) / 2, y0 = (kH - ch) / 2;
     const float fx = std::min<float>(D(60), cw / 5.0f), fy = std::min<float>(D(60), ch / 5.0f);
     const float rim = D(150);  // dark band around the cover before the background shows
     LGFX_Sprite pic(&tft);
@@ -616,36 +643,13 @@ void buildMusicBase() {
       have_cover = pic.drawJpg(jpg, len, 0, 0, cw, ch);
       if (have_cover) {
         shades[1].a1 = 235;
-        for (int y = 0; y < kH; ++y) {
-          const int py = y - y0;
-          const float ay = (py < 0 || py >= ch) ? 0.0f : smooth01(std::min(py + 0.5f, ch - py - 0.5f) / fy);
-          for (int x = 0; x < kW; ++x) {
-            const int px = x - x0;
-            float a = 0.0f;
-            if (ay > 0.0f && px >= 0 && px < cw) a = ay * smooth01(std::min(px + 0.5f, cw - px - 0.5f) / fx);
-            // Closeness to the cover's box (1 inside, 0 at rim distance): the dark rim.
-            const float ox = std::max({0.0f, static_cast<float>(x0 - x), static_cast<float>(x - (x0 + cw - 1))});
-            const float oy = std::max({0.0f, static_cast<float>(y0 - y), static_cast<float>(y - (y0 + ch - 1))});
-            const float near = 1.0f - smooth01(sqrtf(ox * ox + oy * oy) / rim);
-            // Into the page's own background, through a dark rim around the cover.
-            float r, g, b;
-            paint::backgroundRgb(kW, kH, x, y, &r, &g, &b);
-            if (a > 0.0f || near > 0.0f) {
-              const float dk = near * (1.0f - a) * 0.85f;  // the dark rim, strongest at the edge
-              r += (kCoverBg.r - r) * dk, g += (kCoverBg.g - g) * dk, b += (kCoverBg.b - b) * dk;
-            }
-            if (a > 0.0f) {
-              const auto p = pic.readPixelRGB(px, py);
-              r += (p.R8() - r) * a, g += (p.G8() - g) * a, b += (p.B8() - b) * a;
-            }
-            c.px[y * kW + x] = paint::packShaded(r, g, b, x, y, shades, 2);
-          }
-        }
+        paint::coverPage(c, static_cast<const uint8_t*>(pic.getBuffer()), coverIsBgr(pic, cw, ch), cw, ch, fx, fy,
+                         rim, kCoverBg, shades, 2);
       }
       pic.deleteSprite();
     }
   }
-  if (!have_cover) paint::background(c, shades, 2);
+  if (!have_cover) paint::backgroundFast(c, shades, 2);
   s_cover_gen = host::coverGeneration();
   s_cover_for_id = host::now().id;
   s_music_dirty = false;
@@ -825,7 +829,8 @@ void drawNextCard(const paint::Canvas& c) {
 /** Small cover (cropped square) with its dark rim, for the open queue's left column. */
 void buildQueueBase(LGFX_Sprite& s) {
   const auto c = cv(s);
-  paint::background(c);
+  paint::backgroundFast(c);
+  ++s_qbase_builds;
   size_t len = 0;
   int cw = 0, ch = 0;
   const uint8_t* jpg = host::cover(&len, &cw, &ch);
@@ -837,6 +842,8 @@ void buildQueueBase(LGFX_Sprite& s) {
     if (pic.createSprite(cw, ch) != nullptr) {
       pic.fillScreen(0);
       if (pic.drawJpg(jpg, len, 0, 0, cw, ch)) {
+        const auto* pix = static_cast<const uint8_t*>(pic.getBuffer());
+        const bool bgr = coverIsBgr(pic, cw, ch);
         const float k = std::max(static_cast<float>(kQCoverS) / cw, static_cast<float>(kQCoverS) / ch);
         const float ox = (cw * k - kQCoverS) / 2.0f, oy = (ch * k - kQCoverS) / 2.0f;
         const float rim = D(60);
@@ -847,7 +854,7 @@ void buildQueueBase(LGFX_Sprite& s) {
             const float ey = std::max({0.0f, static_cast<float>(-ly), static_cast<float>(ly - (kQCoverS - 1))});
             const float near = 1.0f - smooth01(sqrtf(ex * ex + ey * ey) / rim);
             float r, g, b;
-            paint::backgroundRgb(kW, kH, x, y, &r, &g, &b);
+            paint::bgRgb(kW, kH, x, y, &r, &g, &b);
             const bool inside = lx >= 0 && ly >= 0 && lx < kQCoverS && ly < kQCoverS;
             if (!inside) {
               const float dk = near * 0.8f;
@@ -855,8 +862,8 @@ void buildQueueBase(LGFX_Sprite& s) {
             } else {
               const int sx = std::min(cw - 1, static_cast<int>((lx + ox) / k));
               const int sy = std::min(ch - 1, static_cast<int>((ly + oy) / k));
-              const auto p = pic.readPixelRGB(sx, sy);
-              r = p.R8(), g = p.G8(), b = p.B8();
+              const uint8_t* p = pix + (sy * cw + sx) * 3;
+              r = p[bgr ? 2 : 0], g = p[1], b = p[bgr ? 0 : 2];
             }
             c.px[y * kW + x] = paint::pack(static_cast<int>(r + 0.5f), static_cast<int>(g + 0.5f),
                                            static_cast<int>(b + 0.5f), x, y);
@@ -872,6 +879,9 @@ void buildQueueBase(LGFX_Sprite& s) {
   s_qbase_id = host::now().id;
   s_qbase_dirty = false;
 }
+
+template <typename Gfx>
+void drawQueueRows(Gfx& g, const paint::Canvas& c, int count);
 
 template <typename Gfx>
 void drawQueueFront(Gfx& g, const paint::Canvas& c) {
@@ -903,8 +913,35 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
   paint::circle(c, bx + bw * f, kQBarY + kBarH / 2.0f, D(7), kWhite, 255);
   drawTransport(g, c, kQPrevCx, kQPlayCx, kQNextCx, kQCtrlY, kQSmallR, kQPlayR);
 
-  // Right: the queue.
+  // Right: the queue, from the kept panel when nothing in it changed.
   const int count = host::queueCount();
+  s_qscroll = std::max(0, std::min(s_qscroll, std::max(0, count - kQRows)));
+  const PanelKey key{host::queueVersion(), s_qbase_builds, s_qscroll, s_qflash};
+  if (s_qpanel.getBuffer() == nullptr) {
+    s_qpanel.setPsram(true);
+    s_qpanel.setColorDepth(16);
+    s_qpanel.createSprite(kQPanelW, kQPanelH);  // no room: drawn every frame as before
+  }
+  auto* kept = static_cast<uint16_t*>(s_qpanel.getBuffer());
+  if (kept != nullptr && key == s_qpanel_key) {
+    for (int y = 0; y < kQPanelH; ++y) {
+      memcpy(c.px + (kQPanelY + y) * kW + kQPanelX, kept + y * kQPanelW, kQPanelW * 2);
+    }
+    return;
+  }
+  drawQueueRows(g, c, count);
+  if (kept != nullptr) {
+    for (int y = 0; y < kQPanelH; ++y) {
+      memcpy(kept + y * kQPanelW, c.px + (kQPanelY + y) * kW + kQPanelX, kQPanelW * 2);
+    }
+    s_qpanel_key = key;
+  }
+}
+
+/** The queue panel's rows on the right (count rows in the list). */
+template <typename Gfx>
+void drawQueueRows(Gfx& g, const paint::Canvas& c, int count) {
+  char buf[200];
   text::draw(c, text::Ui15b, "Sıradakiler", kQPanelX + D(16), kQPanelY + D(24), kText);
   snprintf(buf, sizeof(buf), "%s · %d parça", host::queueSource()[0] ? host::queueSource() : "Sıra", count);
   text::draw(c, text::Ui13, buf, kQPanelX + D(16), kQPanelY + D(41), {158, 164, 196});
@@ -912,7 +949,6 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
     g.drawWideLine(kQCloseCx - D(7), kQCloseCy - k * D(7), kQCloseCx + D(7), kQCloseCy + k * D(7), D(1) + 1,
                    col565({226, 229, 245}));
   }
-  s_qscroll = std::max(0, std::min(s_qscroll, std::max(0, count - kQRows)));
   const int ts = host::queueThumbPx();
   for (int v = 0; v < kQRows; ++v) {
     const int i = s_qscroll + v;
@@ -961,6 +997,11 @@ void ensureBuffers() {
     }
   }
   buildRing();
+  // The page background, worked out once (~2 s, the first time the deck opens) and kept:
+  // every music / queue page is put together from it afterwards.
+  if (!paint::bgCacheInit(kW, kH, [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); })) {
+    Console.println("deck: no PSRAM for the background copy, pages drawn the slow way");
+  }
   s_ready = true;
 }
 
@@ -1091,6 +1132,8 @@ float angleAt(int x, int y) {
 }  // namespace
 
 const char* pageName() { return s_page == Page::Music ? "music" : "keys"; }
+
+bool musicShown() { return s_page == Page::Music; }
 
 void enter() {
   if (s_level < 0) loadLevel();
