@@ -1,9 +1,21 @@
 """perf.log: the card's timing reports (PR:PERF) and the program's send times, one line
 each with the time, so a trial on the card can be read afterwards (stage 10a)."""
 
+import json
 import os
 import threading
 import time
+
+SLOW_TURN_MS = 200  # a loop turn this long is a tap the card answers late (spec: 0.2 s)
+
+
+def window_line(data, last):
+    """The report as a line for the program window, or None: only the first one, a screen
+    change and a slow turn (the window keeps few lines; perf.log keeps them all)."""
+    if last is not None and (data.get("scr"), data.get("page")) == (last.get("scr"), last.get("page")) \
+            and (data.get("turn_max") or 0) < SLOW_TURN_MS:
+        return None
+    return "perf: %s" % json.dumps(data)
 
 
 class PerfLog:

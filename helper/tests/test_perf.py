@@ -25,7 +25,17 @@ def test_unwritable_is_quiet():
     perf.PerfLog(os.path.join(tempfile.mkdtemp(), "yok", "yok", "perf.log")).write("a")  # no exception
 
 
+def test_window_line_only_when_worth_it():
+    # The window log keeps 300 lines: a report every 5 s would push the rest out.
+    a = {"scr": "radar", "page": "", "turn_max": 40}
+    assert perf.window_line(a, None) is not None  # the first one
+    assert perf.window_line(dict(a, turn_max=60), a) is None  # same screen, no slow turn
+    assert perf.window_line(dict(a, turn_max=200), a) is not None  # a slow turn (0.2 s)
+    assert perf.window_line(dict(a, scr="deck", page="music"), a) is not None  # screen changed
+
+
 if __name__ == "__main__":
     test_writes_and_rotates()
     test_unwritable_is_quiet()
+    test_window_line_only_when_worth_it()
     print("tests ok")

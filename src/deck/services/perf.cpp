@@ -12,6 +12,7 @@ namespace {
 constexpr unsigned long kReportMs = 5000;
 
 unsigned long s_start_ms = 0;
+unsigned long s_rx_since = 0;  // a cover started arriving (0: none on its way)
 uint32_t s_turn_max = 0, s_turns = 0, s_frames = 0, s_lines = 0, s_rx_ms = 0;
 uint32_t s_cover_n = 0, s_cover_us = 0, s_thumb_n = 0, s_thumb_us = 0;
 
@@ -20,7 +21,13 @@ uint32_t s_cover_n = 0, s_cover_us = 0, s_thumb_n = 0, s_thumb_us = 0;
 void turn(uint32_t ms, bool cover_rx) {
   ++s_turns;
   if (ms > s_turn_max) s_turn_max = ms;
-  if (cover_rx) s_rx_ms += ms;
+  // Wall time while a cover arrives (the loop's own delays included).
+  const unsigned long now = millis();
+  if (cover_rx && s_rx_since == 0) s_rx_since = now;
+  if (!cover_rx && s_rx_since != 0) {
+    s_rx_ms += now - s_rx_since;
+    s_rx_since = 0;
+  }
 }
 
 void frame() { ++s_frames; }
@@ -42,6 +49,10 @@ void tick(const char* scr, const char* page) {
   if (s_start_ms == 0) s_start_ms = now;
   const unsigned long span = now - s_start_ms;
   if (span < kReportMs) return;
+  if (s_rx_since != 0) {  // still arriving: this report gets its part so far
+    s_rx_ms += now - s_rx_since;
+    s_rx_since = now;
+  }
   JsonDocument doc;
   doc["scr"] = scr;
   doc["page"] = page;
