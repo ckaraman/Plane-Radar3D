@@ -7,7 +7,7 @@ import time
 
 from . import blob, browser_link, config, firmware, queue_card
 from .config import Config
-from .perf import PerfLog, window_line
+from .perf import PerfLog, Stall, window_line
 from .device import Device
 from .feed import Feed
 from .media import cover_jpeg
@@ -20,6 +20,7 @@ class Core:
         self.config = Config()
         self.perf = PerfLog(os.path.join(config.APP_DIR, "perf.log"))
         self._last_perf = None
+        self._stall = Stall()
         self.device = Device(self._card_event, log=log, perf=self.perf.write)
         self.volume = volume.VolumeWatcher(self._volume_changed, log=log)
         self.media = media.MediaWatcher(self._media_changed, log=log)
@@ -75,7 +76,9 @@ class Core:
         elif tag == "MUTE":
             self.volume.toggle_mute()
         elif tag == "QPLAY":  # a song from the queue panel on the card
-            self.link.play(int(data.get("x", -1)), str(data.get("t") or ""))
+            # On its own thread: the card's reader must never wait on the browser.
+            threading.Thread(target=self.link.play, args=(int(data.get("x", -1)), str(data.get("t") or "")),
+                             name="qplay", daemon=True).start()
         elif tag == "PERF":  # the card's timing report (stage 10a)
             line = window_line(data, self._last_perf)
             self._last_perf = data
@@ -215,6 +218,9 @@ class Core:
         while True:
             time.sleep(0.25)
             dev = self.device
+            t = self._stall.check(time.time(), dev.last_line, dev.connected and not dev.busy)
+            if t:
+                self.perf.write(t)
             if not dev.connected or dev.busy:
                 last_vol, self._last_now_sent = 0.0, 0.0
                 continue

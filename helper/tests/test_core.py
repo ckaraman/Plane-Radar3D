@@ -438,6 +438,24 @@ def test_layout():
         assert cols * kw + (cols - 1) * 12 <= 602 and rows * kh + (rows - 1) * 12 <= 485 and cols * rows >= n
 
 
+def test_qplay_does_not_hold_the_reader():
+    from types import SimpleNamespace
+
+    from deck import core
+
+    played = threading.Event()
+
+    def play(x, t):
+        played.set()
+        time.sleep(2)  # a browser that takes its time
+
+    me = SimpleNamespace(link=SimpleNamespace(play=play), log=lambda m: None)
+    t0 = time.time()
+    core.Core._card_event(me, "QPLAY", {"x": 3, "t": "Gece Yolu"})
+    assert time.time() - t0 < 0.3
+    assert played.wait(1)
+
+
 def test_cover_and_position():
     from PIL import Image
 
@@ -660,6 +678,7 @@ if __name__ == "__main__":
     test_layout()
     test_config_moves_transport()
     test_browser_link()
+    test_qplay_does_not_hold_the_reader()
     test_cover_and_position()
     test_feed()
     test_all()

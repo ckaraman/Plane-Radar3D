@@ -113,9 +113,17 @@ def test_batch_logged():
     assert any(l.startswith("batch ABEGIN 1 skipped") for l in perf_lines), perf_lines
 
 
+def test_last_line_moves():
+    before = d.last_line
+    time.sleep(0.02)
+    FakePort.instance.feed(b"PR:PERF {}\n")
+    assert wait(lambda: d.last_line > before), (before, d.last_line)
+
+
 if __name__ == "__main__":
     test_answers_are_read_at_once()
     test_split_line_is_one_line()
     test_batch_logged()
+    test_last_line_moves()
     d.stop()
     print("tests ok")

@@ -48,6 +48,7 @@ class Device:
         self._stream = None                 # (tags, queue) of the running transfer
         self._stop = False
         self._reader = None
+        self.last_line = time.time()        # when the card last said a whole line
         threading.Thread(target=self._watch, name="device-watch", daemon=True).start()
 
     # ------------------------------------------------------------------ state
@@ -116,6 +117,7 @@ class Device:
             return False
         self._last_port_error = None
         self.ser, self.port, self.hello = ser, port, None
+        self.last_line = time.time()
         self._reader = threading.Thread(target=self._read_loop, args=(ser,), name="device-read", daemon=True)
         self._reader.start()
         for _ in range(8):
@@ -125,6 +127,7 @@ class Device:
                 self.log("card on %s, %s, USB %s%s" % (port, self.hello.get("fw"), self.hello.get("usb"),
                                                       ", USB link reconnected %s times" % self.hello["usbfix"]
                                                       if self.hello.get("usbfix") else ""))
+                self.perf("card on %s %s" % (port, self.hello.get("fw")))
                 return True
             if self.ser is None:
                 return False
@@ -155,11 +158,13 @@ class Device:
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
+                self.last_line = time.time()
                 self._line(line.decode("utf-8", "replace").strip())
             if len(buf) > 20000:
                 buf = buf[-2000:]
         if self.ser is ser:
             self.log("card gone")
+            self.perf("card gone")
             self._close()
 
     def _line(self, line):

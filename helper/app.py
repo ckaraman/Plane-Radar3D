@@ -14,7 +14,7 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.10.1"
+VERSION = "1.11.0"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 IS_MAC = sys.platform == "darwin"
 
