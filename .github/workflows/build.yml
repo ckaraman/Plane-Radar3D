@@ -190,6 +190,7 @@ jobs:
           python helper/tests/test_core.py
           python helper/tests/test_firmware.py
           python helper/tests/test_build.py
+          python helper/tests/test_perf.py
 
       - name: Map tile tests (shared map code)
         run: |
