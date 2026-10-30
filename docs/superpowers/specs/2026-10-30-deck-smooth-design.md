@@ -64,7 +64,40 @@ olarak akıcı kullanılsın; radar ekranına geçince uçaklar akıcı hareket 
 - Kullanıcı denemesi (önce): radar ekranı açıkken ve deck ekranı açıkken şarkı geçişi; birkaç
   geçişin sayıları kaydedilir.
 
-### 10b — Gereksiz yükü kaldır
+### 10a ölçümünün sonucu (2026-10-30, kart 5in-0.42.0, Deck 1.10.0)
+
+- Kablo çok yavaş: büyük kapak 25 KB → 29 sn, 72 KB → 82 sn (~0,9 KB/sn); 30 satırlık liste 6,5 sn;
+  küçük kapak ~2 sn. Kart bu sırada boşta (5 sn'de ~900 tur, ~28 satır).
+- Sebep programda: `device._read_loop` `ser.read(512)` ile 0,2 sn zaman aşımıyla okuyor; 25 baytlık
+  her cevap 0,2 sn bekliyor, parça parça aktarımda her parça bir cevap bekliyor.
+- Kapak gelirken radar 4 kare/sn (normalde 29-37); bu kapak boyunca, yani 30-80 sn sürüyor.
+- Aktarım `stream_lock`'u tutarken uçak partileri 5 sn bekleyip atlanıyor; 20 sn parti gelmeyince kart
+  PC'yi yok sayıyor (`usb_feed` `kActiveMs`): kullanıcı radarda bağlantının kesildiğini görüyor.
+- Müzik sayfasının kapakla kurulması ~1,9 sn (bazen arka arkaya iki kez): dokunuşlar bu sürede bekliyor.
+- Küçük kapak açma ~1 ms: önemsiz.
+
+Kullanıcı kararı: 10b üç küçük adıma bölünür, her biri ölçülür.
+
+### 10b-1 — Programın okuması (yalnız program)
+
+- `device._read_loop` kablodaki baytları beklemeden okur (`ser.read(ser.in_waiting or 1)`); bir cevap
+  geldiği anda işlenir.
+- `perf.log` uçak partilerini de yazar (`aircraft <n> ok|skipped|noanswer <sn> s`), böylece bağlantı
+  kopması ölçümde görünür.
+- Kullanıcı denemesi: 10a ile aynı; büyük kapak, liste ve küçük kapak süreleri, radar kare/sn'si ve
+  atlanan uçak partileri karşılaştırılır.
+
+### 10b-2 — Kart (10b-1 ölçümünden sonra planlanır)
+
+- Kapak gelirken 4 kare/sn sınırı radarda kalkar (yalnız deck müzik sayfasında).
+- Müzik/sıra sayfasının kapakla kurulması hızlanır ve gereksiz ikinci kurulum olmaz.
+- 10b-1'den sonra aktarımlar hâlâ uçak partilerini atlatıyorsa: partiler aktarım parçalarının arasına girer.
+
+### 10b-3 — Gerekirse (10b-1/10b-2 ölçümüne göre)
+
+Aşağıdaki maddeler (ilk tasarım) ölçüm hâlâ başarı ölçütünün altında kalırsa yapılır.
+
+### 10b — Gereksiz yükü kaldır (ilk tasarım, artık 10b-3)
 
 - **Küçük kapaklar şarkıya bağlı:** kart `QEND`'de eski listeden yeni listeye, aynı şarkı (satırın
   `x` sırası ve başlığı aynı) olan satırların kapağını taşır, siler değil. Program da aynı kuralla
