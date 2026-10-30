@@ -192,6 +192,7 @@ jobs:
           python helper/tests/test_build.py
           python helper/tests/test_perf.py
           python helper/tests/test_device_read.py
+          python helper/tests/test_queue_thumbs.py
 
       - name: Map tile tests (shared map code)
         run: |

@@ -107,6 +107,19 @@ THUMBS = 10        # rows that get a small cover (the ones in view first)
 MIN_GAP = 3.0      # s between two queue sends: a busy page does not flood the cable
 
 
+def carry_pics(sent_pics, rows, limit=THUMBS):
+    """Which old row's picture each new row can keep on the card (firmware 0.44+, HELLO
+    "qkeep"): (old row or -1 for every row, the pictures the card then has)."""
+    froms, kept, used = [-1] * len(rows), {}, set()
+    for k, r in enumerate(rows[:limit]):
+        url = r.get("img")
+        j = next((j for j, u in sent_pics.items() if u == url and j not in used), None) if url else None
+        if j is not None:
+            used.add(j)
+            froms[k], kept[k] = j, url
+    return froms, kept
+
+
 class QueueSender:
     """Sends the queue a little at a time from the card loop; pictures are fetched from
     the internet in a thread of their own, so the card loop never waits on the network."""
@@ -121,6 +134,7 @@ class QueueSender:
         self.dirty = True
         self.sent_titles = None   # rows as the card has them (without pictures)
         self.sent_pics = {}       # row -> picture address the card has
+        self.failed = set()       # picture addresses that could not be sent: not tried again
         self.card_has = False
         self.gen = 0
         self.last_send = 0.0
@@ -135,6 +149,7 @@ class QueueSender:
 
     def reset(self):
         self.sent_titles, self.sent_pics, self.card_has, self.dirty = None, {}, False, True
+        self.failed = set()
 
     def rows(self):
         if not self.core.config.settings.get("queue", True):
@@ -191,8 +206,12 @@ class QueueSender:
                     return
                 self.gen = (self.gen + 1) % 60000
                 card = [{"x": r["x"], "t": r["t"], "a": r["a"], "d": r["d"]} for r in rows]
+                froms, kept = carry_pics(self.sent_pics, rows) if hello.get("qkeep") else ([], {})
+                for c, j in zip(card, froms):
+                    if j >= 0:
+                        c["p"] = j  # the card moves that row's picture here
                 if dev.send_queue(card, self.gen, "YouTube Music"):
-                    self.sent_titles, self.card_has, self.sent_pics = titles, True, {}
+                    self.sent_titles, self.card_has, self.sent_pics = titles, True, kept
                 else:
                     self.dirty = True
                     return
@@ -204,12 +223,14 @@ class QueueSender:
         px = int(hello.get("qthumb") or 40)
         for k, r in enumerate(rows[:THUMBS]):
             url = r.get("img")
-            if not url or self.sent_pics.get(k) == url:
+            if not url or self.sent_pics.get(k) == url or url in self.failed:
                 continue
             ok, jpeg = self._ready(url, px)
             if not ok:
                 continue  # still on its way from the internet
-            self.sent_pics[k] = url  # a failed one is not tried again
-            if jpeg:
-                dev.send_thumb(jpeg, k, self.gen, abort=lambda: self.dirty)
+            # Only what the card took counts as on the card (a new list carries it over).
+            if jpeg and dev.send_thumb(jpeg, k, self.gen, abort=lambda: self.dirty):
+                self.sent_pics[k] = url
+            elif not self.dirty:  # stopped for a new list: tried again after it
+                self.failed.add(url)  # a failed one is not tried again
             return
