@@ -643,7 +643,9 @@ void buildMusicBase() {
     pic.setColorDepth(24);  // decoded at 24 bits, faded and shaded, then dithered: no steps
     if (pic.createSprite(cw, ch) != nullptr) {
       pic.fillScreen(0);
+      const uint32_t t0 = micros();
       have_cover = pic.drawJpg(jpg, len, 0, 0, cw, ch);
+      services::perf::decode(micros() - t0);
       if (have_cover) {
         shades[1].a1 = 235;
         paint::coverPage(c, static_cast<const uint8_t*>(pic.getBuffer()), coverIsBgr(pic, cw, ch), cw, ch, fx, fy,
@@ -849,7 +851,10 @@ void buildQueueBase(LGFX_Sprite& s) {
     pic.setColorDepth(24);
     if (pic.createSprite(kQCoverS, kQCoverS) != nullptr) {
       pic.fillScreen(0);
-      if (pic.drawJpg(jpg, len, -lroundf(ox), -lroundf(oy), 0, 0, 0, 0, k, k)) {
+      const uint32_t t0 = micros();
+      const bool ok = pic.drawJpg(jpg, len, -lroundf(ox), -lroundf(oy), 0, 0, 0, 0, k, k);
+      services::perf::decode(micros() - t0);
+      if (ok) {
         const auto* pix = static_cast<const uint8_t*>(pic.getBuffer());
         const bool bgr = coverIsBgr(pic, kQCoverS, kQCoverS);
         const float rim = D(60);

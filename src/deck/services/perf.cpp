@@ -15,7 +15,7 @@ constexpr unsigned long kReportMs = 5000;
 unsigned long s_start_ms = 0;
 unsigned long s_rx_since = 0;  // a cover started arriving (0: none on its way)
 uint32_t s_turn_max = 0, s_turns = 0, s_frames = 0, s_lines = 0, s_rx_ms = 0;
-uint32_t s_cover_n = 0, s_cover_us = 0, s_thumb_n = 0, s_thumb_us = 0;
+uint32_t s_cover_n = 0, s_cover_us = 0, s_dec_us = 0, s_thumb_n = 0, s_thumb_us = 0;
 
 }  // namespace
 
@@ -45,6 +45,8 @@ void jpeg(bool thumb, uint32_t us) {
   }
 }
 
+void decode(uint32_t us) { s_dec_us += us; }
+
 void tick(const char* scr, const char* page) {
   const unsigned long now = millis();
   if (s_start_ms == 0) s_start_ms = now;
@@ -63,6 +65,7 @@ void tick(const char* scr, const char* page) {
   doc["lines"] = s_lines;
   doc["cover_n"] = s_cover_n;
   doc["cover_ms"] = s_cover_us / 1000;
+  doc["dec_ms"] = s_dec_us / 1000;
   doc["thumb_n"] = s_thumb_n;
   doc["thumb_ms"] = s_thumb_us / 1000;
   doc["rx_ms"] = s_rx_ms;
@@ -73,7 +76,7 @@ void tick(const char* scr, const char* page) {
   Console.printf("PR:PERF %s\n", buf);
   s_start_ms = now;
   s_turn_max = s_turns = s_frames = s_lines = s_rx_ms = 0;
-  s_cover_n = s_cover_us = s_thumb_n = s_thumb_us = 0;
+  s_cover_n = s_cover_us = s_dec_us = s_thumb_n = s_thumb_us = 0;
 }
 
 }  // namespace services::perf
