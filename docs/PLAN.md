@@ -73,7 +73,8 @@ içinde. Sürümler `include/config.h` içinde.
 
 - Dal: ws5. 10b-5 kartta denendi (sonuçlar yukarıda 10. aşama satırında).
 - B-1 kartta denendi (sonuçlar yukarıda). Sıradaki: 10c. Sıra açıkken müzik sayfası 11–12 kare/sn, her tur ~80 ms (B-1'den bağımsız, 0.47'de de var).
-- Sıra paneli şarkı seçince bazen kapanıyordu: program, tarayıcının sırası ile Windows'un "şu an çalan" bilgisi bir an uyuşmayınca karta QCLEAR gönderiyordu. Deck 1.11.1: uyuşmazlık 3 sn sürmeden sıra silinmez; silinince `perf.log`'a `queue clear` yazılır. Kartta denenecek (sıra açıkken şarkı seç, panel kapanmamalı).
+- Sıra paneli şarkı seçince bazen kapanıyordu: program, tarayıcının sırası ile Windows'un "şu an çalan" bilgisi bir an uyuşmayınca karta QCLEAR gönderiyordu. Deck 1.11.1: uyuşmazlık 3 sn sürmeden sıra silinmez; silinince `perf.log`'a `queue clear` yazılır. Tamam (kartta denendi: ~2 dk'da 12 şarkı geçişinde silme yok, her geçişte 1 küçük kapak; başka uygulama çalınca 1 kez `queue clear ok`, YouTube Music'e dönünce sıra 12 sn sonra geri geldi).
+- Bir kez takılma (5in-0.48.0, 15:24:53): kart tuşlar sayfasındayken müzik başladı, sıra gönderildi, sonra kart 15 sn hiç satır göndermedi; program ~30 sn'de kendiliğinden yeniden bağlandı, kart yeniden başlamadı. Kayıtlarda tek takılma bu. Sebep belli değil: B-1'in ilk kapak kurulumuyla aynı ana denk geliyor. Tekrarlarsa kartta takılma anını yazan bir kayıt eklenecek.
 - 10c: sıra açıkken 11 fps, büyük kapak aktarılırken fps düşüşü.
 - Bilgisayarda `pio run -e ws5` bağlanma (link) hatası veriyor; kodla ilgisi yok, CI'a güven.
 - Ölçüm: `%APPDATA%\PlaneRadarDeck\perf.log`; bakılacaklar `cover_ms`, `dec_ms`, `turn_max`, `heap`, `psram`.
