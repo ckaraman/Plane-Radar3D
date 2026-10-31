@@ -64,6 +64,9 @@ uint32_t coverId();
  *  is answered quickly). */
 bool coverReceiving();
 uint32_t coverGeneration();
+/** While held, a new cover does not free the JPEG cover() returned (a page build on the
+ *  other core reads it); freed on release. Called from the loop only. */
+void holdCover(bool hold);
 
 /**
  * The YouTube Music queue from the helper's browser extension, from the current song on:

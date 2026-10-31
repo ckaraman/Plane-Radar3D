@@ -7,6 +7,7 @@
 #include <esp_heap_caps.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -624,16 +625,31 @@ bool coverForNow() {
   return host::cover(&len) != nullptr && len > 0 && n.valid && (host::coverId() == n.id || n.id == 0);
 }
 
-void buildMusicBase() {
+// ------------------------------------------------------------------ cover builds on core 0
+// A page base with the cover takes ~0.7 s (stage 10b-5). It is built on core 0 so the loop
+// on core 1 keeps reading touches and the cable; meanwhile nothing reads the music base and
+// the screen keeps its last frame (stage 10b B-1).
+enum class Job : uint8_t { Idle, Running, Done };
+struct CoverJob {
+  bool queue;          // the queue's small cover, else the music page
+  const uint8_t* jpg;  // nullptr: no cover for what plays, the background only
+  size_t len;
+  int cw, ch;
+  uint32_t gen, id;    // the cover generation and track it was built for
+  uint32_t dec_us, total_us;
+};
+CoverJob s_job{};
+std::atomic<Job> s_job_state{Job::Idle};
+TaskHandle_t s_job_task = nullptr;
+
+void buildMusicBase(CoverJob& j) {
   auto& s = s_music_base;
   const auto c = cv(s);
-  size_t len = 0;
-  int cw = 0, ch = 0;
-  const uint8_t* jpg = host::cover(&len, &cw, &ch);
+  int cw = j.cw, ch = j.ch;
   bool have_cover = false;
   // Shades: top for the pills, bottom for the text and controls; applied before packing.
   paint::Shade shades[2] = {{0, D(90), kInk, 140, 0}, {kH - D(300), kH, kInk, 0, 150}};
-  if (coverForNow()) {
+  if (j.jpg != nullptr) {
     if (cw <= 0 || ch <= 0 || cw > kW || ch > kH) cw = kW, ch = kH;  // older helper: whole panel
     // The cover in the middle, at its own size; its edges fade into the dark page.
     const float fx = std::min<float>(D(60), cw / 5.0f), fy = std::min<float>(D(60), ch / 5.0f);
@@ -644,8 +660,8 @@ void buildMusicBase() {
     if (pic.createSprite(cw, ch) != nullptr) {
       pic.fillScreen(0);
       const uint32_t t0 = micros();
-      have_cover = pic.drawJpg(jpg, len, 0, 0, cw, ch);
-      services::perf::decode(micros() - t0);
+      have_cover = pic.drawJpg(j.jpg, j.len, 0, 0, cw, ch);
+      j.dec_us = micros() - t0;
       if (have_cover) {
         shades[1].a1 = 235;
         paint::coverPage(c, static_cast<const uint8_t*>(pic.getBuffer()), coverIsBgr(pic, cw, ch), cw, ch, fx, fy,
@@ -655,10 +671,6 @@ void buildMusicBase() {
     }
   }
   if (!have_cover) paint::backgroundFast(c, shades, 2);
-  s_cover_gen = host::coverGeneration();
-  s_cover_for_id = host::now().id;
-  s_music_dirty = false;
-  s_qbase_dirty = true;  // the open queue is drawn on this screen too
 }
 
 void fmtTime(char* out, size_t cap, uint32_t s) {
@@ -833,14 +845,11 @@ void drawNextCard(const paint::Canvas& c) {
 }
 
 /** Small cover (cropped square) with its dark rim, for the open queue's left column. */
-void buildQueueBase(LGFX_Sprite& s) {
+void buildQueueBase(LGFX_Sprite& s, CoverJob& j) {
   const auto c = cv(s);
   paint::backgroundFast(c);
-  ++s_qbase_builds;
-  size_t len = 0;
-  int cw = 0, ch = 0;
-  const uint8_t* jpg = host::cover(&len, &cw, &ch);
-  if (coverForNow()) {
+  int cw = j.cw, ch = j.ch;
+  if (j.jpg != nullptr) {
     if (cw <= 0 || ch <= 0 || cw > kW || ch > kH) cw = kW, ch = kH;
     // Decoded straight at its size here, cropped to a square: ~73 KB instead of the whole
     // cover (~691 KB for 480 x 480), which left the queue page short of PSRAM (stage 10b-3).
@@ -852,8 +861,8 @@ void buildQueueBase(LGFX_Sprite& s) {
     if (pic.createSprite(kQCoverS, kQCoverS) != nullptr) {
       pic.fillScreen(0);
       const uint32_t t0 = micros();
-      const bool ok = pic.drawJpg(jpg, len, -lroundf(ox), -lroundf(oy), 0, 0, 0, 0, k, k);
-      services::perf::decode(micros() - t0);
+      const bool ok = pic.drawJpg(j.jpg, j.len, -lroundf(ox), -lroundf(oy), 0, 0, 0, 0, k, k);
+      j.dec_us = micros() - t0;
       if (ok) {
         const auto* pix = static_cast<const uint8_t*>(pic.getBuffer());
         const bool bgr = coverIsBgr(pic, kQCoverS, kQCoverS);
@@ -884,9 +893,62 @@ void buildQueueBase(LGFX_Sprite& s) {
   }
   paint::roundRect(c, kQPanelX, kQPanelY, kQPanelW, kQPanelH, D(18), kWhite, 16, kWhite, 34);
   paint::roundRect(c, kQPanelX + D(1), kQPanelY + kQHeadH, kQPanelW - D(2), 1, 0, kWhite, 20);
-  s_qbase_cover_gen = host::coverGeneration();
-  s_qbase_id = host::now().id;
-  s_qbase_dirty = false;
+}
+
+void runJob(CoverJob& j) {
+  const uint32_t t0 = micros();
+  j.dec_us = 0;
+  if (j.queue) {
+    buildQueueBase(s_music_base, j);
+  } else {
+    buildMusicBase(j);
+  }
+  j.total_us = micros() - t0;
+}
+
+void coverTask(void*) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    runJob(s_job);
+    s_job_state.store(Job::Done);
+  }
+}
+
+/** Back on core 1: what the page was built for, and the timings. */
+void finishJob() {
+  const CoverJob& j = s_job;
+  if (j.jpg != nullptr) host::holdCover(false);
+  services::perf::decode(j.dec_us);
+  services::perf::jpeg(false, j.total_us);  // the cover decoded and faded in
+  if (j.queue) {
+    ++s_qbase_builds;
+    s_qbase_cover_gen = j.gen;
+    s_qbase_id = j.id;
+    s_qbase_dirty = false;
+    s_music_dirty = true;  // its screen was borrowed
+  } else {
+    s_cover_gen = j.gen;
+    s_cover_for_id = j.id;
+    s_music_dirty = false;
+    s_qbase_dirty = true;  // the open queue is drawn on this screen too
+  }
+  s_job_state.store(Job::Idle);
+}
+
+/** A page base for what plays now: on core 0, or here when its task could not start. */
+void startJob(bool queue) {
+  size_t len = 0;
+  int cw = 0, ch = 0;
+  const uint8_t* jpg = host::cover(&len, &cw, &ch);
+  s_job = CoverJob{queue, coverForNow() ? jpg : nullptr, len, cw, ch, host::coverGeneration(), host::now().id, 0, 0};
+  if (s_job.jpg != nullptr) host::holdCover(true);
+  s_job_state.store(Job::Running);
+  if (s_job_task != nullptr) {
+    xTaskNotifyGive(s_job_task);
+    return;
+  }
+  runJob(s_job);
+  finishJob();
 }
 
 template <typename Gfx>
@@ -1011,6 +1073,11 @@ void ensureBuffers() {
   if (!paint::bgCacheInit(kW, kH, [](size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM); })) {
     Console.println("deck: no PSRAM for the background copy, pages drawn the slow way");
   }
+  // Below the cable and the screen's own work there; JPEG decoding needs a few KB of stack.
+  if (xTaskCreatePinnedToCore(coverTask, "cover", 12288, nullptr, 1, &s_job_task, 0) != pdPASS) {
+    s_job_task = nullptr;
+    Console.println("deck: no cover task, covers built in the loop");
+  }
   s_ready = true;
 }
 
@@ -1050,19 +1117,24 @@ void openQueue(bool open) {
 /** Put the current page together and show it. */
 void present() {
   if (!s_ready) return;
+  if (s_job_state.load() == Job::Done) finishJob();
+  // While a cover build runs, s_dirty stays set: shown once it is done.
+  const bool building = s_job_state.load() != Job::Idle;
   if (s_page == Page::Keys) {
-    if (s_keys_dirty || s_keys_gen != store::generation()) buildKeysBase();
+    if (s_keys_dirty || s_keys_gen != store::generation()) {
+      if (building) return;  // its background shares paint's row buffer with the build
+      buildKeysBase();
+    }
+  } else if (building) {
+    return;  // the music base is being written: the last frame stays
   } else if (s_queue_open && host::queueValid()) {
     if (s_qbase_dirty || s_qbase_cover_gen != host::coverGeneration() || s_qbase_id != host::now().id) {
-      const uint32_t t0 = micros();
-      buildQueueBase(s_music_base);
-      s_music_dirty = true;
-      services::perf::jpeg(false, micros() - t0);  // the cover decoded and faded in
+      startJob(true);
+      if (s_job_state.load() != Job::Idle) return;
     }
   } else if (s_music_dirty || s_cover_gen != host::coverGeneration() || s_cover_for_id != host::now().id) {
-    const uint32_t t0 = micros();
-    buildMusicBase();
-    services::perf::jpeg(false, micros() - t0);
+    startJob(false);
+    if (s_job_state.load() != Job::Idle) return;
   }
   if (tft.getRotation() != 2) {
     // Straight into the hidden frame buffer (same pixel format), then shown.

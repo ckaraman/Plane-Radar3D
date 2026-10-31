@@ -35,6 +35,8 @@ size_t s_cover_len = 0;
 int s_cover_w = 0, s_cover_h = 0;
 uint32_t s_cover_id = 0;
 uint32_t s_cover_gen = 1;
+bool s_cover_held = false;      // holdCover: the active JPEG is being decoded
+uint8_t* s_cover_old = nullptr;  // replaced while held, freed when let go
 
 uint8_t* s_stage = nullptr;
 size_t s_stage_len = 0, s_stage_got = 0;
@@ -109,6 +111,13 @@ const uint8_t* cover(size_t* len, int* w, int* h) {
 uint32_t coverId() { return s_cover_id; }
 bool coverReceiving() { return s_stage != nullptr && millis() - s_last_ms < 1500; }
 uint32_t coverGeneration() { return s_cover_gen; }
+void holdCover(bool hold) {
+  s_cover_held = hold;
+  if (!hold && s_cover_old != nullptr) {
+    heap_caps_free(s_cover_old);
+    s_cover_old = nullptr;
+  }
+}
 
 void handleVol(const char* json) {
   seen();
@@ -225,7 +234,11 @@ void handleCoverEnd() {
     reply("ERR", "{\"msg\":\"bad_cover\"}");
     return;
   }
-  if (s_cover != nullptr) heap_caps_free(s_cover);
+  if (s_cover_held && s_cover_old == nullptr) {
+    s_cover_old = s_cover;  // a page build on core 0 still reads it: freed when it lets go
+  } else if (s_cover != nullptr) {
+    heap_caps_free(s_cover);
+  }
   s_cover = s_stage;
   s_cover_len = s_stage_len;
   s_cover_w = s_stage_w;

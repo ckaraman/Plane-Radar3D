@@ -10,7 +10,7 @@ namespace config {
 /** Shown on the web setup page; the build copies it into the update manifest.
  *  Bump it for every release you publish. Keep this declaration on a single line. */
 #if defined(WITH_DECK)
-constexpr char kFirmwareVersion[] = "5in-0.47.0";  // system 2: no Wi-Fi, data from the PC
+constexpr char kFirmwareVersion[] = "5in-0.48.0";  // system 2: no Wi-Fi, data from the PC
 #else  // system 1: Wi-Fi radar without the stream deck (env:radar)
 constexpr char kFirmwareVersion[] = "radar-1.1.0";
 #endif
