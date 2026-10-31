@@ -69,6 +69,14 @@ içinde. Sürümler `include/config.h` içinde.
 | 9 | 9a 2. sistem kurulum sayfası (`web/deck.html`; tamam, sitede doğrulandı; Deck 1.9.1 pencere metni); 9b Defender yanlış alarmı (`PlaneRadarDeck.exe` indirirken `Trojan:Win32/Sabsik.TE.A!ml`): kodlandı (kaynaktan derlenmiş PyInstaller başlatıcısı + exe sürüm bilgisi, Deck 1.9.2; tamam: sitede, Edge ile indirmede alarm yok. Kullanıcı daha önce bu dosya için karantinadan izin vermişti, sonucu etkilemiş olabilir; alarm geri gelirse klasör + zip) | Tamam |
 | 10 | Akıcı deck ve radar (2. sistem): 10a ölçüm tamam (kart 5in-0.42.0 `PR:PERF`, Deck 1.10.0 `perf.log`; asıl yavaşlık programın kablo okumasında: 72 KB kapak 82 sn, bu sırada uçak partileri atlanıyor, radar 4 kare/sn); 10b-1 program okuması tamam (Deck 1.10.1; kartta: 72 KB kapak 2,8 sn, uçak partisi atlanmıyor, radarda kopma yok); 10b-2 kartta denendi (5in-0.43.0: radar 39-40 kare/sn, sayfa kurulumu 0,5-1 sn; sıradan şarkı seçince bağlantı takıldı); 10b-3 kodlandı (5in-0.44.0, Deck 1.11.0: takılma kaydı, sıra tıklaması ayrı iş parçacığında, küçük kapaklar şarkıya bağlı, USB çıkışı kurtarması, küçük sıra kapağı), kartta denendi (takılma, card gone, usbfix yok; şarkı geçişinde çoğunlukla 1 küçük kapak; ama sıra açıkken boş PSRAM yine 0,67 MB, kapak açılışı ~1 sn); 10b-4 kodlandı (5in-0.45.0: sıra ayrı 768 KB'lık ekran yerine müzik ekranını ödünç alır, beklenen boş PSRAM ~1,9 MB; sıra kapanınca müzik zemini yeniden çizilir), denenecek; tamam (kartta denendi: sıra açıkken boş PSRAM 1,39-1,53 MB, kopma ve ekran bozulması yok; kapak gelişinde hâlâ ~1 sn); B-0 ölçüm kartta denendi (5in-0.46.0, `dec_ms`: büyük kapak ~950 ms'nin ~200 ms'si JPEG açma, ~750 ms'si sayfaya işleme; sıra zemini 500-600 ms, JPEG açmasız); karartmayı kaldırmak yalnız %5-12 kazandırır (asıl iş arka plan); 10b-5 hızlandırma kodlandı (5in-0.47.0: arka plan satır satır, renk sıkıştırma 8 KB tablodan; pikseller aynı; bilgisayarda kapak sayfası %52, arka plan %39 süre), kartta denendi: JPEG dışı kurulum ~750 → ~530 ms (%30 kısa), JPEG ~160–215 ms, kapak başına toplam ~950 → ~700–750 ms; turn_max hâlâ ~800–880 ms; iç bellek 120 → 100 KB, PSRAM 1,43–1,49 MB, hata yok; sonra B-1 (kurulumun tamamı öbür çekirdekte); 10c temizlik (sıra açıkken 11 kare/sn de bakılacak) | Bu adım |
 
+## Sıradaki oturum (10. aşama devamı)
+
+- Dal: ws5. 10b-5 kartta denendi (sonuçlar yukarıda 10. aşama satırında).
+- Sıradaki iş B-1: kapak kurulumunun tamamı öbür çekirdekte (core 0), ek tampon yok, kurulum sürerken ekran son kareyi tutar. Önce riskleri anlat, "başla" denmeden kod yazma.
+- Sonra 10c: sıra açıkken 11 fps, büyük kapak aktarılırken fps düşüşü.
+- Bilgisayarda `pio run -e ws5` bağlanma (link) hatası veriyor; kodla ilgisi yok, CI'a güven.
+- Ölçüm: `%APPDATA%\PlaneRadarDeck\perf.log`; bakılacaklar `cover_ms`, `dec_ms`, `turn_max`, `heap`, `psram`.
+
 ## Kurulum sayfaları
 
 - **Kök (2. sistem):** `web/deck.html` → `site/index.html`. Karta bağlanmaz (Web Serial yok):
