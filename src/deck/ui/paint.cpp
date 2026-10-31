@@ -70,18 +70,28 @@ inline float glow(float x, float y, float cx, float cy, float rx, float ry, floa
   return u * u * (3.0f - 2.0f * u);  // smoothstep: no visible edge where it ends
 }
 
+// The dithered 5 / 6-bit value of each 8-bit value at each threshold, worked out once
+// (8 KB): the divisions per pixel were about half of a page build (stage 10b-5).
+struct PackLut {
+  uint8_t c5[16][256], c6[16][256];
+  PackLut() {
+    for (int d = 0; d < 16; ++d) {
+      for (int v = 0; v < 256; ++v) {
+        // 5-bit channels step by 8, 6-bit by 4: add a threshold below one step, then cut.
+        c5[d][v] = static_cast<uint8_t>(std::min(31, (v * 31 + (d * 255) / 16) / 255));
+        c6[d][v] = static_cast<uint8_t>(std::min(63, (v * 63 + (d * 255) / 16) / 255));
+      }
+    }
+  }
+};
+const PackLut s_lut;
+
 }  // namespace
 
 uint16_t pack(int r, int g, int b, int x, int y) {
   const int d = kBayer[y & 3][x & 3];  // 0..15
-  // 5-bit channels step by 8, 6-bit by 4: add a threshold below one step, then cut.
-  int r5 = (clamp8(r) * 31 + (d * 255) / 16) / 255;
-  int g6 = (clamp8(g) * 63 + (d * 255) / 16) / 255;
-  int b5 = (clamp8(b) * 31 + (d * 255) / 16) / 255;
-  if (r5 > 31) r5 = 31;
-  if (g6 > 63) g6 = 63;
-  if (b5 > 31) b5 = 31;
-  const uint16_t v = static_cast<uint16_t>((r5 << 11) | (g6 << 5) | b5);
+  const uint16_t v = static_cast<uint16_t>((s_lut.c5[d][clamp8(r)] << 11) | (s_lut.c6[d][clamp8(g)] << 5) |
+                                           s_lut.c5[d][clamp8(b)]);
   return static_cast<uint16_t>((v >> 8) | (v << 8));
 }
 
@@ -255,6 +265,8 @@ namespace {
 constexpr int kGrid = 8;
 float* s_bg = nullptr;  // r, g, b of each grid point, row by row
 int s_bg_w = 0, s_bg_h = 0, s_gw = 0;
+constexpr int kMaxW = 1024;  // widest panel (7")
+float s_row[kMaxW * 3];      // bgRow's result
 
 constexpr int kMaxShades = 4;
 
@@ -315,15 +327,39 @@ void bgRgb(int w, int h, int x, int y, float* r, float* g, float* b) {
   *r = out[0], *g = out[1], *b = out[2];
 }
 
+const float* bgRow(int w, int h, int y) {
+  if (s_bg == nullptr || w != s_bg_w || h != s_bg_h || w > kMaxW) {
+    for (int x = 0; x < std::min(w, kMaxW); ++x) backgroundRgb(w, h, x, y, &s_row[x * 3], &s_row[x * 3 + 1], &s_row[x * 3 + 2]);
+    return s_row;
+  }
+  // The two grid rows blended once per grid column, then one step across each cell: the
+  // same sums as bgRgb, ~a third of the work.
+  const int j = y / kGrid;
+  const float v = (y - j * kGrid) * (1.0f / kGrid);
+  const float* q0 = s_bg + j * s_gw * 3;
+  const float* q1 = q0 + s_gw * 3;
+  for (int i = 0; i * kGrid < w; ++i) {
+    float left[3], right[3];
+    for (int k = 0; k < 3; ++k) {
+      left[k] = q0[i * 3 + k] + (q1[i * 3 + k] - q0[i * 3 + k]) * v;
+      right[k] = q0[i * 3 + 3 + k] + (q1[i * 3 + 3 + k] - q0[i * 3 + 3 + k]) * v;
+    }
+    for (int x = i * kGrid; x < std::min(w, (i + 1) * kGrid); ++x) {
+      const float u = (x - i * kGrid) * (1.0f / kGrid);
+      for (int k = 0; k < 3; ++k) s_row[x * 3 + k] = left[k] + (right[k] - left[k]) * u;
+    }
+  }
+  return s_row;
+}
+
 void backgroundFast(const Canvas& c, const Shade* shades, int n) {
   float a[kMaxShades];
   for (int y = 0; y < c.h; ++y) {
     rowShades(shades, n, y, a);
     uint16_t* row = c.px + y * c.w;
+    const float* bg = bgRow(c.w, c.h, y);
     for (int x = 0; x < c.w; ++x) {
-      float r, g, b;
-      bgRgb(c.w, c.h, x, y, &r, &g, &b);
-      row[x] = packRow(r, g, b, x, y, shades, a, n);
+      row[x] = packRow(bg[x * 3], bg[x * 3 + 1], bg[x * 3 + 2], x, y, shades, a, n);
     }
   }
 }
@@ -347,13 +383,13 @@ void coverPage(const Canvas& c, const uint8_t* pix, bool bgr, int cw, int ch, fl
     const float oy = std::max({0.0f, static_cast<float>(y0 - y), static_cast<float>(y - (y0 + ch - 1))});
     uint16_t* row = c.px + y * c.w;
     const uint8_t* src = (py >= 0 && py < ch) ? pix + py * cw * 3 : nullptr;
+    const float* bg = bgRow(c.w, c.h, y);
     for (int x = 0; x < c.w; ++x) {
       const float a = ay * ax[x];
       const float near = (ox[x] == 0.0f && oy == 0.0f) ? 1.0f
                          : (ox[x] >= rim || oy >= rim) ? 0.0f
                                                        : 1.0f - smooth01(sqrtf(ox[x] * ox[x] + oy * oy) / rim);
-      float r, g, b;
-      bgRgb(c.w, c.h, x, y, &r, &g, &b);
+      float r = bg[x * 3], g = bg[x * 3 + 1], b = bg[x * 3 + 2];
       if (a > 0.0f || near > 0.0f) {
         const float dk = near * (1.0f - a) * 0.85f;  // the dark rim, strongest at the edge
         r += (rim_col.r - r) * dk, g += (rim_col.g - g) * dk, b += (rim_col.b - b) * dk;

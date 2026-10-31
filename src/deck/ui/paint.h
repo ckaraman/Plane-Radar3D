@@ -58,6 +58,9 @@ void backgroundRgb(int w, int h, int x, int y, float* r, float* g, float* b);
 bool bgCacheInit(int w, int h, void* (*alloc)(size_t));
 /** backgroundRgb from the kept grid when there is one (within half a colour step). */
 void bgRgb(int w, int h, int x, int y, float* r, float* g, float* b);
+/** bgRgb of the whole row y: r, g, b floats a pixel, in a buffer kept here (valid until the
+ *  next call; up to 1024 px wide). */
+const float* bgRow(int w, int h, int y);
 /** background(), from the kept grid, the shades worked out once a row (at most 4 shades). */
 void backgroundFast(const Canvas& c, const Shade* shades = nullptr, int n = 0);
 /** The music page: the background with a cw x ch cover in the middle whose edges fade in

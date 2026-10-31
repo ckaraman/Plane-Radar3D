@@ -52,6 +52,18 @@ void refCoverPage(const Canvas& c, const uint8_t* pix, bool bgr, int cw, int ch,
   }
 }
 
+// pack() as it was before its table (stage 10b-5): the table must give the same pixels.
+uint16_t refPack(int r, int g, int b, int x, int y) {
+  static const int kBayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+  const int d = kBayer[y & 3][x & 3];
+  auto c8 = [](int v) { return std::min(std::max(v, 0), 255); };
+  const int r5 = std::min(31, (c8(r) * 31 + (d * 255) / 16) / 255);
+  const int g6 = std::min(63, (c8(g) * 63 + (d * 255) / 16) / 255);
+  const int b5 = std::min(31, (c8(b) * 31 + (d * 255) / 16) / 255);
+  const uint16_t v = static_cast<uint16_t>((r5 << 11) | (g6 << 5) | b5);
+  return static_cast<uint16_t>((v >> 8) | (v << 8));
+}
+
 int failures = 0;
 size_t g_cache_bytes = 0;  // what bgCacheInit asked for
 
@@ -104,6 +116,13 @@ int main() {
   Shade cover[2] = {{0, 90, ink, 140, 0}, {kH - 300, kH, ink, 0, 235}};
   std::vector<uint16_t> a(kW * kH), b(kW * kH);
   Canvas ca{a.data(), kW, kH}, cb{b.data(), kW, kH};
+
+  int pack_bad = 0;
+  for (int v = -8; v < 264; ++v)
+    for (int y = 0; y < 4; ++y)
+      for (int x = 0; x < 4; ++x) pack_bad += pack(v, 255 - v, v * 7 % 300, x, y) != refPack(v, 255 - v, v * 7 % 300, x, y);
+  std::printf("%s pack table: %d of %d differ\n", pack_bad == 0 ? "ok  " : "FAIL", pack_bad, 272 * 16);
+  failures += pack_bad != 0;
 
   double ms_old = timed([&] { background(ca, plain, 2); });
   if (!bgCacheInit(kW, kH, countingAlloc)) {

@@ -859,13 +859,13 @@ void buildQueueBase(LGFX_Sprite& s) {
         const bool bgr = coverIsBgr(pic, kQCoverS, kQCoverS);
         const float rim = D(60);
         for (int y = std::max(0, kQCoverY - static_cast<int>(rim)); y < std::min(kH, kQCoverY + kQCoverS + static_cast<int>(rim)); ++y) {
+          const float* bg = paint::bgRow(kW, kH, y);
           for (int x = std::max(0, kQCoverX - static_cast<int>(rim)); x < kQCoverX + kQCoverS + static_cast<int>(rim); ++x) {
             const int lx = x - kQCoverX, ly = y - kQCoverY;
             const float ex = std::max({0.0f, static_cast<float>(-lx), static_cast<float>(lx - (kQCoverS - 1))});
             const float ey = std::max({0.0f, static_cast<float>(-ly), static_cast<float>(ly - (kQCoverS - 1))});
             const float near = 1.0f - smooth01(sqrtf(ex * ex + ey * ey) / rim);
-            float r, g, b;
-            paint::bgRgb(kW, kH, x, y, &r, &g, &b);
+            float r = bg[x * 3], g = bg[x * 3 + 1], b = bg[x * 3 + 2];
             const bool inside = lx >= 0 && ly >= 0 && lx < kQCoverS && ly < kQCoverS;
             if (!inside) {
               const float dk = near * 0.8f;
