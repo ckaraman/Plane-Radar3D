@@ -193,6 +193,38 @@ unsigned long s_last_present_ms = 0;
 
 paint::Canvas cv(LGFX_Sprite& s) { return {static_cast<uint16_t*>(s.getBuffer()), kW, kH}; }
 
+// What each of the three panel buffers holds (stage 10c-3): the base it was put together on
+// and a key per moving part, so a frame copies and draws only the parts changed since that
+// buffer was drawn last (a whole frame was ~80-100 ms, the base copy alone 37).
+constexpr int kParts = 5;
+struct FbState {
+  uint32_t base = 0;  // 0: unknown
+  uint32_t part[kParts] = {};
+};
+FbState s_fb[3];
+uint32_t s_base_serial = 0;  // bumped whenever a page base is built
+
+struct Frame {
+  paint::Canvas c, base;
+  FbState* fb;  // nullptr: not kept track of (upside-down screen)
+  bool full;    // the whole base was copied: every part is drawn
+};
+
+/** Part k needs drawing (its area then holds the base again) unless this buffer has key. */
+bool part(Frame& f, int k, uint32_t key, int x, int y, int w, int h) {
+  if (!f.full && f.fb->part[k] == key) return false;
+  if (!f.full) paint::copyRect(f.c, f.base, x, y, w, h);
+  if (f.fb != nullptr) f.fb->part[k] = key;
+  return true;
+}
+
+constexpr uint32_t kSeed = 2166136261u;  // FNV-1a
+uint32_t mix(uint32_t h, uint32_t v) { return (h ^ v) * 16777619u; }
+uint32_t mixStr(uint32_t h, const char* s) {
+  while (*s) h = mix(h, static_cast<uint8_t>(*s++));
+  return mix(h, 0);
+}
+
 // ------------------------------------------------------------------ volume
 int steps() { return store::volumeSteps(); }
 
@@ -603,6 +635,7 @@ void buildKeysBase() {
   text::drawMid(c, text::Ui13, "Sağa kaydır: müzik", D(20), kH - D(16), kTextMuted);
   s_keys_gen = store::generation();
   s_keys_dirty = false;
+  ++s_base_serial;
 }
 
 float smooth01(float t) {
@@ -680,6 +713,9 @@ void buildMusicBase(CoverJob& j) {
     }
   }
   if (!have_cover) paint::backgroundFast(c, shades, 2);
+  // The top bar never changes on this page: part of the base (stage 10c-3).
+  pageTabs(c, true);
+  radarPill(c);
 }
 
 void fmtTime(char* out, size_t cap, uint32_t s) {
@@ -688,14 +724,21 @@ void fmtTime(char* out, size_t cap, uint32_t s) {
 
 void drawNextCard(const paint::Canvas& c);
 
+// Music page parts, in bands that do not overlap (stage 10c-3): text, time bar, then the
+// bottom row split into volume, transport and the next card.
+constexpr int kMTextY = kTitleY - D(8), kMBarY = kBarY - D(14), kMRowY = kBarY + D(20);
+constexpr int kMTransX = kPrevCx - kSmallBtnR - D(2), kMNextX = kNextCx + kSmallBtnR + D(6);
+static_assert(kVolX + kVolW + kVolKnobR + D(4) < kMTransX, "volume knob inside its part");
+static_assert(kMNextX <= kNextX, "next card inside its part");
+
 template <typename Gfx>
-void drawMusicFront(Gfx& s, const paint::Canvas& c) {
+void drawMusicFront(Gfx& s, Frame& f) {
+  const paint::Canvas& c = f.c;
   const host::NowPlaying& n = host::now();
-  pageTabs(c, true);
-  radarPill(c);
   frontPart(kFpTabs);
 
   if (!n.valid) {
+    if (!part(f, 0, host::active(), 0, 0, kW, kH)) return;
     text::drawMid(c, text::Ui22b, "Şu an müzik çalmıyor", kW / 2, kH / 2 - D(16), kText, 255, text::Align::Center);
     text::drawMid(c, text::Ui13,
                   host::active() ? "Bilgisayarda müzik başlayınca burada görünür"
@@ -707,59 +750,71 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
 
   const int tx = kMusicPad, tw = kW - 2 * kMusicPad;
   char buf[200];
-  // Title and artist: quiet sizes, the artist line placed by the fonts' own heights.
-  text::fit(text::Ui22b, n.title[0] ? n.title : "Bilinmeyen parça", tw, buf, sizeof(buf));
-  const int title_base = kTitleY + text::Ui22b.ascent;
-  text::draw(c, text::Ui22b, buf, tx, title_base, kText);
-  char who[140];
-  if (n.artist[0] && n.album[0]) {
-    snprintf(who, sizeof(who), "%s · %s", n.artist, n.album);
-  } else {
-    strlcpy(who, n.artist[0] ? n.artist : n.album, sizeof(who));
+  if (part(f, 0, mixStr(mixStr(mixStr(kSeed, n.title), n.artist), n.album), 0, kMTextY, kW, kMBarY - kMTextY)) {
+    // Title and artist: quiet sizes, the artist line placed by the fonts' own heights.
+    text::fit(text::Ui22b, n.title[0] ? n.title : "Bilinmeyen parça", tw, buf, sizeof(buf));
+    const int title_base = kTitleY + text::Ui22b.ascent;
+    text::draw(c, text::Ui22b, buf, tx, title_base, kText);
+    char who[140];
+    if (n.artist[0] && n.album[0]) {
+      snprintf(who, sizeof(who), "%s · %s", n.artist, n.album);
+    } else {
+      strlcpy(who, n.artist[0] ? n.artist : n.album, sizeof(who));
+    }
+    text::fit(text::Ui16, who, tw, buf, sizeof(buf));
+    text::draw(c, text::Ui16, buf, tx, title_base + text::Ui22b.descent + D(4) + text::Ui16.ascent, kTextSub);
   }
-  text::fit(text::Ui16, who, tw, buf, sizeof(buf));
-  text::draw(c, text::Ui16, buf, tx, title_base + text::Ui22b.descent + D(4) + text::Ui16.ascent, kTextSub);
   frontPart(kFpText);
 
   // Progress: times either side of a gradient bar.
   const uint32_t pos = host::positionNow();
   s_shown_pos = pos;
-  char t0[12], t1[12];
-  fmtTime(t0, sizeof(t0), pos);
-  fmtTime(t1, sizeof(t1), n.duration_s);
-  text::drawMid(c, text::Ui13, t0, tx, kBarY + kBarH / 2, {195, 200, 222});
-  if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + tw, kBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
-  frontPart(kFpText);
   const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
-  paint::roundRect(c, bx, kBarY, bw, kBarH, kBarH / 2, kWhite, 46);
-  const float f =
+  const float fr =
       n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
-  paint::gradientBar(c, bx, kBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
-  paint::circle(c, bx + bw * f, kBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  if (part(f, 1, mix(mix(mix(kSeed, pos), n.duration_s), lroundf(bw * fr * 8)), 0, kMBarY, kW, kMRowY - kMBarY)) {
+    char t0[12], t1[12];
+    fmtTime(t0, sizeof(t0), pos);
+    fmtTime(t1, sizeof(t1), n.duration_s);
+    text::drawMid(c, text::Ui13, t0, tx, kBarY + kBarH / 2, {195, 200, 222});
+    if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + tw, kBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
+    frontPart(kFpText);
+    paint::roundRect(c, bx, kBarY, bw, kBarH, kBarH / 2, kWhite, 46);
+    paint::gradientBar(c, bx, kBarY, std::max(1, static_cast<int>(bw * fr)), kBarH, kPeach, kPink, kLavender);
+    paint::circle(c, bx + bw * fr, kBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  }
   frontPart(kFpBars);
 
-  drawTransport(s, c, kPrevCx, kPlayCx, kNextCx, kCtrlY, kSmallBtnR, kPlayR);
+  if (part(f, 2, n.playing, kMTransX, kMRowY, kMNextX - kMTransX, kH - kMRowY)) {
+    drawTransport(s, c, kPrevCx, kPlayCx, kNextCx, kCtrlY, kSmallBtnR, kPlayR);
+  }
+  frontPart(kFpCtrls);
 
   // Volume bar, left of the controls.
   const bool muted = mutedNow();
   const int pct = levelPercent();
-  speakerIcon(s, kMusicPad + D(10), kCtrlY, D(11), col565(muted ? kMutedRed : kWhite));
-  frontPart(kFpCtrls);
-  paint::roundRect(c, kVolX, kCtrlY - kVolH / 2, kVolW, kVolH, kVolH / 2, kWhite, 46);
-  const float vx = kVolX + kVolW * (muted ? 0 : pct) / 100.0f;
-  if (!muted && pct > 0) {
-    paint::gradientBar(c, kVolX, kCtrlY - kVolH / 2, std::max(kVolH, static_cast<int>(vx - kVolX)), kVolH, kPink,
-                       kPink, kLavender);
-  }
-  paint::circle(c, vx, kCtrlY, kVolKnobR + D(4), kLavender, muted ? 0 : 70);
-  paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
   s_shown_level = pct;
   s_shown_muted = muted;
+  if (part(f, 3, mix(mix(kSeed, pct), muted), 0, kMRowY, kMTransX, kH - kMRowY)) {
+    speakerIcon(s, kMusicPad + D(10), kCtrlY, D(11), col565(muted ? kMutedRed : kWhite));
+    paint::roundRect(c, kVolX, kCtrlY - kVolH / 2, kVolW, kVolH, kVolH / 2, kWhite, 46);
+    const float vx = kVolX + kVolW * (muted ? 0 : pct) / 100.0f;
+    if (!muted && pct > 0) {
+      paint::gradientBar(c, kVolX, kCtrlY - kVolH / 2, std::max(kVolH, static_cast<int>(vx - kVolX)), kVolH, kPink,
+                         kPink, kLavender);
+    }
+    paint::circle(c, vx, kCtrlY, kVolKnobR + D(4), kLavender, muted ? 0 : 70);
+    paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
+  }
   frontPart(kFpBars);
-  if (host::queueValid() && host::queueCount() > 1) {
-    drawNextCard(c);
-  } else {
-    text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
+  const bool next = host::queueValid() && host::queueCount() > 1;
+  // A queue picture arriving bumps the version too.
+  if (part(f, 4, next ? mix(kSeed, host::queueVersion()) : 0, kMNextX, kMRowY, kW - kMNextX, kH - kMRowY)) {
+    if (next) {
+      drawNextCard(c);
+    } else {
+      text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
+    }
   }
   frontPart(kFpPanel);
 }
@@ -909,6 +964,8 @@ void buildQueueBase(LGFX_Sprite& s, CoverJob& j) {
   }
   paint::roundRect(c, kQPanelX, kQPanelY, kQPanelW, kQPanelH, D(18), kWhite, 16, kWhite, 34);
   paint::roundRect(c, kQPanelX + D(1), kQPanelY + kQHeadH, kQPanelW - D(2), 1, 0, kWhite, 20);
+  pageTabs(c, true);
+  radarPill(c);
 }
 
 void runJob(CoverJob& j) {
@@ -936,6 +993,7 @@ void finishJob() {
   if (j.jpg != nullptr) host::holdCover(false);
   services::perf::decode(j.dec_us);
   services::perf::jpeg(false, j.total_us);  // the cover decoded and faded in
+  ++s_base_serial;
   if (j.queue) {
     ++s_qbase_builds;
     s_qbase_cover_gen = j.gen;
@@ -970,11 +1028,14 @@ void startJob(bool queue) {
 template <typename Gfx>
 void drawQueueRows(Gfx& g, const paint::Canvas& c, int count);
 
+// Open queue parts: the left column in three bands, the panel on the right (stage 10c-3).
+constexpr int kQTextY = D(254), kQBandY = kQBarY - D(12), kQRowY = kQBarY + D(18), kQLeftPartW = kQPanelX - D(4);
+static_assert(kQCoverX + kQLeftW <= kQLeftPartW, "left column inside its parts");
+
 template <typename Gfx>
-void drawQueueFront(Gfx& g, const paint::Canvas& c) {
+void drawQueueFront(Gfx& g, Frame& f) {
+  const paint::Canvas& c = f.c;
   const host::NowPlaying& n = host::now();
-  pageTabs(c, true);
-  radarPill(c);
   frontPart(kFpTabs);
   refreshThumbs();
   frontPart(kFpPanel);
@@ -982,33 +1043,48 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
   char buf[200];
   // Left: what plays, a little smaller.
   const int tx = kQCoverX;
-  text::fit(text::Ui18b, n.title[0] ? n.title : "Bilinmeyen parça", kQLeftW, buf, sizeof(buf));
-  const int tb = D(262) + text::Ui18b.ascent;
-  text::draw(c, text::Ui18b, buf, tx, tb, kText);
-  text::fit(text::Ui13, n.artist[0] ? n.artist : n.album, kQLeftW, buf, sizeof(buf));
-  text::draw(c, text::Ui13, buf, tx, tb + text::Ui18b.descent + D(4) + text::Ui13.ascent, kTextSub);
+  const char* who = n.artist[0] ? n.artist : n.album;
+  if (part(f, 0, mixStr(mixStr(kSeed, n.title), who), 0, kQTextY, kQLeftPartW, kQBandY - kQTextY)) {
+    text::fit(text::Ui18b, n.title[0] ? n.title : "Bilinmeyen parça", kQLeftW, buf, sizeof(buf));
+    const int tb = D(262) + text::Ui18b.ascent;
+    text::draw(c, text::Ui18b, buf, tx, tb, kText);
+    text::fit(text::Ui13, who, kQLeftW, buf, sizeof(buf));
+    text::draw(c, text::Ui13, buf, tx, tb + text::Ui18b.descent + D(4) + text::Ui13.ascent, kTextSub);
+  }
   const uint32_t pos = host::positionNow();
   s_shown_pos = pos;
-  char t0[12], t1[12];
-  fmtTime(t0, sizeof(t0), pos);
-  fmtTime(t1, sizeof(t1), n.duration_s);
-  text::drawMid(c, text::Ui13, t0, tx, kQBarY + kBarH / 2, {195, 200, 222});
-  if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + kQLeftW, kQBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
-  frontPart(kFpText);
   const int bx = tx + kTimeW, bw = kQLeftW - 2 * kTimeW;
-  paint::roundRect(c, bx, kQBarY, bw, kBarH, kBarH / 2, kWhite, 46);
-  const float f =
+  const float fr =
       n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
-  paint::gradientBar(c, bx, kQBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
-  paint::circle(c, bx + bw * f, kQBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  if (part(f, 1, mix(mix(mix(kSeed, pos), n.duration_s), lroundf(bw * fr * 8)), 0, kQBandY, kQLeftPartW,
+           kQRowY - kQBandY)) {
+    char t0[12], t1[12];
+    fmtTime(t0, sizeof(t0), pos);
+    fmtTime(t1, sizeof(t1), n.duration_s);
+    text::drawMid(c, text::Ui13, t0, tx, kQBarY + kBarH / 2, {195, 200, 222});
+    if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + kQLeftW, kQBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
+    frontPart(kFpText);
+    paint::roundRect(c, bx, kQBarY, bw, kBarH, kBarH / 2, kWhite, 46);
+    paint::gradientBar(c, bx, kQBarY, std::max(1, static_cast<int>(bw * fr)), kBarH, kPeach, kPink, kLavender);
+    paint::circle(c, bx + bw * fr, kQBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  }
   frontPart(kFpBars);
-  drawTransport(g, c, kQPrevCx, kQPlayCx, kQNextCx, kQCtrlY, kQSmallR, kQPlayR);
+  if (part(f, 2, n.valid && n.playing, 0, kQRowY, kQLeftPartW, kH - kQRowY)) {
+    drawTransport(g, c, kQPrevCx, kQPlayCx, kQNextCx, kQCtrlY, kQSmallR, kQPlayR);
+  }
   frontPart(kFpCtrls);
 
   // Right: the queue, from the kept panel when nothing in it changed.
   const int count = host::queueCount();
   s_qscroll = std::max(0, std::min(s_qscroll, std::max(0, count - kQRows)));
   const PanelKey key{host::queueVersion(), s_qbase_builds, s_qscroll, s_qflash};
+  const uint32_t pkey = mix(mix(mix(mix(kSeed, key.ver), key.builds), key.scroll), key.flash);
+  if (!f.full && f.fb->part[3] == pkey) {  // this buffer already shows it
+    services::perf::queuePanel(true);
+    frontPart(kFpPanel);
+    return;
+  }
+  if (f.fb != nullptr) f.fb->part[3] = pkey;
   if (s_qpanel.getBuffer() == nullptr) {
     s_qpanel.setPsram(true);
     s_qpanel.setColorDepth(16);
@@ -1024,6 +1100,7 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
     return;
   }
   services::perf::queuePanel(false);
+  if (!f.full) paint::copyRect(c, f.base, kQPanelX, kQPanelY, kQPanelW, kQPanelH);
   drawQueueRows(g, c, count);
   if (kept != nullptr) {
     for (int y = 0; y < kQPanelH; ++y) {
@@ -1106,30 +1183,56 @@ void ensureBuffers() {
   s_ready = true;
 }
 
-/** The moving parts on top of a page's base, into canvas c (drawn on with g). */
+// Keys page parts: the knob (its end dot reaches past the ring) and the transport under it.
+constexpr int kKnobM = D(12);
+constexpr int kKTransX = kKPrevCx - kKSmallR - D(6), kKTransY = kKCtrlY - kKPlayR - D(6);
+static_assert(kKnobY + kKnobD + kKnobM <= kKTransY, "knob and transport parts apart");
+
+/** The moving parts on top of a page's base, into canvas c (drawn on with g); fb is what
+ *  that panel buffer holds (nullptr: unknown, everything drawn). */
 template <typename Gfx>
-void composeInto(Gfx& g, const paint::Canvas& c) {
-  if (s_page == Page::Keys) {
-    memcpy(c.px, s_keys_base.getBuffer(), kW * kH * 2);
-    s_base_done_us = s_front_last_us = micros();
-    if (s_pressed >= 0) {
-      const Box& b = keyBox(s_pressed);
-      paint::roundRect(c, b.x, b.y, b.w, b.h, D(18), kLavender, 60, {214, 202, 255}, 150);
+void composeInto(Gfx& g, const paint::Canvas& c, FbState* fb) {
+  const bool queue = s_page == Page::Music && s_queue_open && host::queueValid();
+  const int view = s_page == Page::Keys ? 0 : queue ? 1 : host::now().valid ? 2 : 3;
+  LGFX_Sprite& bs = view == 0 ? s_keys_base : s_music_base;
+  const uint32_t base = s_base_serial * 4 + view + 1;
+  Frame f{c, cv(bs), fb, fb == nullptr || fb->base != base};
+  if (f.full) {
+    memcpy(c.px, bs.getBuffer(), kW * kH * 2);
+    if (fb != nullptr) fb->base = base;
+  }
+  s_base_done_us = s_front_last_us = micros();
+  if (view == 0) {
+    // The pressed key: the buffer's old highlight back to the base, the new one on top.
+    const int was = f.full ? -1 : static_cast<int>(fb->part[0]) - 1;
+    if (f.full || was != s_pressed) {
+      if (was >= 0) {
+        const Box& b = keyBox(was);
+        paint::copyRect(c, f.base, b.x - 1, b.y - 1, b.w + 2, b.h + 2);
+      }
+      if (s_pressed >= 0) {
+        const Box& b = keyBox(s_pressed);
+        paint::roundRect(c, b.x, b.y, b.w, b.h, D(18), kLavender, 60, {214, 202, 255}, 150);
+      }
+      if (fb != nullptr) fb->part[0] = s_pressed + 1;
     }
     const bool muted = mutedNow();
     const int pct = levelPercent();
-    drawKnobLevel(g, c, pct, muted);
-    drawTransport(g, c, kKPrevCx, kKPlayCx, kKNextCx, kKCtrlY, kKSmallR, kKPlayR);
+    if (part(f, 1, mix(mix(kSeed, pct), muted), kKnobX - kKnobM, kKnobY - kKnobM, kKnobD + 2 * kKnobM,
+             kKnobD + 2 * kKnobM)) {
+      drawKnobLevel(g, c, pct, muted);
+    }
+    const auto& n = host::now();
+    if (part(f, 2, n.valid && n.playing, kKTransX, kKTransY, kKNextCx + kKSmallR + D(6) - kKTransX,
+             2 * (kKCtrlY - kKTransY))) {
+      drawTransport(g, c, kKPrevCx, kKPlayCx, kKNextCx, kKCtrlY, kKSmallR, kKPlayR);
+    }
     s_shown_level = pct;
     s_shown_muted = muted;
-  } else if (s_queue_open && host::queueValid()) {
-    memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
-    s_base_done_us = s_front_last_us = micros();
-    drawQueueFront(g, c);
+  } else if (queue) {
+    drawQueueFront(g, f);
   } else {
-    memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
-    s_base_done_us = s_front_last_us = micros();
-    drawMusicFront(g, c);
+    drawMusicFront(g, f);
   }
 }
 
@@ -1170,7 +1273,7 @@ void present() {
   if (tft.getRotation() != 2) {
     // Straight into the hidden frame buffer (same pixel format), then shown.
     tft.beginHiddenFrame();
-    composeInto(tft, paint::Canvas{tft.hiddenBuffer(), kW, kH});
+    composeInto(tft, paint::Canvas{tft.hiddenBuffer(), kW, kH}, &s_fb[tft.hiddenIndex()]);
     t_front = micros();
     tft.presentHiddenFrame();
   } else {
@@ -1180,7 +1283,8 @@ void present() {
       s_canvas.setColorDepth(16);
       if (s_canvas.createSprite(kW, kH) == nullptr) return;
     }
-    composeInto(s_canvas, cv(s_canvas));
+    composeInto(s_canvas, cv(s_canvas), nullptr);
+    for (auto& b : s_fb) b.base = 0;  // the buffers get whole frames here
     t_front = micros();
     tft.beginHiddenFrame();
     uint16_t* fb = tft.hiddenBuffer();
@@ -1247,6 +1351,7 @@ void enter() {
   s_down = false;
   s_target = Target::None;
   s_keys_dirty = true;  // USB mode or keys may have changed meanwhile
+  for (auto& b : s_fb) b.base = 0;  // other screens drew into the panel buffers
   const auto& n = host::now();
   s_page = (n.valid && n.playing) ? Page::Music : Page::Keys;
   s_was_playing = n.valid && n.playing;
