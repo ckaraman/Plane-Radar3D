@@ -9,10 +9,13 @@
  *   PR:PERF {"scr":"deck","page":"music","fps":12.5,"turn_max":340,"turns":180,"lines":64,
  *            "cover_n":1,"cover_ms":95,"dec_ms":60,"thumb_n":10,"thumb_ms":120,"rx_ms":1800,"heap":81234,
  *            "psram":1457936,"psram_blk":1179648,"q":59,"draw":[14,62,9],"front":[3,20,15,10,14],
- *            "qpanel":[0,59]}
+ *            "qpanel":[0,59],"usb":{"txfull_ms":15020,"drop":2310,"rxgap_ms":16000,"dtr_off":0,
+ *            "unmount":0,"susp":0,"fix":0,"before":["PR:Q {i:3,","PR:VOL {v:"]}}
  * Stage 10c: "q" frames drawn with the queue open, "draw" the slowest frame's parts in ms
  * (page base copied, moving parts, shown), "front" that frame's moving parts by kind (tabs,
- * text, bars, controls, next card / queue panel), "qpanel" the queue panel kept / drawn again.
+ * text, bars, controls, next card / queue panel), "qpanel" the queue panel kept / drawn again,
+ * "usb" (only after a problem) the link's troubles, see console::LinkStats. A report that
+ * does not get through is not counted: the next one covers its time too.
  */
 namespace services::perf {
 

@@ -1307,7 +1307,12 @@ bool tick() {
     }
   }
   if (s_page == Page::Music) {
-    if (s_cover_gen != host::coverGeneration() || s_cover_for_id != n.id) s_dirty = true;
+    // The base the page shows: the open queue keeps its own (stage 10c: checking the music
+    // base there redrew every turn after a cover arrived, ~11 frames a second).
+    const bool q = s_queue_open && host::queueValid();
+    if ((q ? s_qbase_cover_gen : s_cover_gen) != host::coverGeneration() || (q ? s_qbase_id : s_cover_for_id) != n.id) {
+      s_dirty = true;
+    }
     if (n.valid && host::positionNow() != s_shown_pos) s_dirty = true;
   }
   if (store::generation() != s_keys_gen && s_page == Page::Keys) s_dirty = true;

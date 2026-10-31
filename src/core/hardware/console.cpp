@@ -18,6 +18,8 @@
 extern "C" bool tud_disconnect(void);  // TinyUSB (tusb.h)
 extern "C" bool tud_connect(void);
 extern "C" bool tud_cdc_n_connected(uint8_t itf);
+extern "C" bool tud_mounted(void);
+extern "C" bool tud_suspended(void);
 
 ConsoleIO Console;
 
@@ -145,7 +147,51 @@ bool s_host_seen = false;
 int s_recoveries = 0;
 // Since when everything written is dropped (0: the computer reads what the card says).
 unsigned long s_tx_full_since = 0;
+
+// Stage 10c: the link's troubles, for the timing report.
+LinkStats s_link;
+uint32_t s_dropped_total = 0;
+unsigned long s_last_rx_ms = 0;
+char s_lines[4][12] = {};  // starts of the PC's last lines, oldest first
+char s_cur[12] = {};
+int s_cur_n = 0;
+char s_full_before[4][12] = {};  // s_lines when the drop going on began
+
+void txFull() {
+  if (s_tx_full_since != 0) return;
+  s_tx_full_since = millis();
+  memcpy(s_full_before, s_lines, sizeof(s_lines));
+}
+
+void txFree() {
+  if (s_tx_full_since == 0) return;
+  const uint32_t ms = millis() - s_tx_full_since;
+  if (ms > s_link.txfull_ms) {
+    s_link.txfull_ms = ms;
+    memcpy(s_link.before, s_full_before, sizeof(s_full_before));
+  }
+  s_tx_full_since = 0;
+}
+
+void noteRx(int c) {
+  const unsigned long now = millis();
+  if (s_last_rx_ms != 0 && now - s_last_rx_ms > s_link.rxgap_ms) s_link.rxgap_ms = now - s_last_rx_ms;
+  s_last_rx_ms = now;
+  if (c == '\n' || c == '\r') {
+    if (s_cur_n == 0) return;
+    memmove(s_lines[0], s_lines[1], sizeof(s_lines[0]) * 3);
+    memcpy(s_lines[3], s_cur, sizeof(s_cur));
+    memset(s_cur, 0, sizeof(s_cur));
+    s_cur_n = 0;
+  } else if (s_cur_n < static_cast<int>(sizeof(s_cur)) - 1 && c >= 32 && c < 127 && c != '"' && c != '\\') {
+    s_cur[s_cur_n++] = static_cast<char>(c);
+  }
+}
 }  // namespace
+
+const LinkStats& link() { return s_link; }
+void clearLink() { s_link = LinkStats{}; }
+uint32_t droppedBytes() { return s_dropped_total; }
 
 void noteHost() {
   s_last_host_ms = millis();
@@ -156,18 +202,24 @@ int usbRecoveries() { return s_recoveries; }
 
 void tick() {
   if (s_mode == Mode::Keyboard) {
+    static bool s_was_dtr = false, s_was_mounted = false, s_was_suspended = false;
+    const bool dtr = tud_cdc_n_connected(0), mounted = tud_mounted(), suspended = tud_suspended();
+    if (s_was_dtr && !dtr) ++s_link.dtr_off;
+    if (s_was_mounted && !mounted) ++s_link.unmount;
+    if (!s_was_suspended && suspended) ++s_link.suspend;
+    s_was_dtr = dtr, s_was_mounted = mounted, s_was_suspended = suspended;
     // The helper sends its volume every 2 s. Silent for 20 s while a program still holds
     // the port (DTR on): the link stalled. Unplugging and plugging in again by software
     // brings it back; the helper reopens the port by itself.
     // The other way round: the helper still writes but reads nothing for 20 s (stage 10b-3).
     // Counted only while a program holds the port (with none, every write is dropped) and
     // once until the helper speaks again.
-    if (!tud_cdc_n_connected(0)) s_tx_full_since = 0;
+    if (!tud_cdc_n_connected(0)) txFree();
     const bool tx_stuck = s_host_seen && s_tx_full_since != 0 && millis() - s_tx_full_since > 20000;
     if (((s_host_seen && millis() - s_last_host_ms > 20000) || tx_stuck) && tud_cdc_n_connected(0)) {
       ++s_recoveries;
       s_host_seen = false;  // once, until the helper speaks again
-      s_tx_full_since = 0;
+      txFree();
       tud_disconnect();
       delay(400);
       tud_connect();
@@ -187,7 +239,12 @@ void tick() {
 
 // --- Stream forwarding ---
 int ConsoleIO::available() { return console::s_io ? console::s_io->available() : 0; }
-int ConsoleIO::read() { return console::s_io ? console::s_io->read() : -1; }
+int ConsoleIO::read() {
+  if (console::s_io == nullptr) return -1;
+  const int c = console::s_io->read();
+  if (c >= 0 && console::s_cdc != nullptr) console::noteRx(c);
+  return c;
+}
 int ConsoleIO::peek() { return console::s_io ? console::s_io->peek() : -1; }
 void ConsoleIO::flush() {
   if (console::s_io) console::s_io->flush();
@@ -220,9 +277,11 @@ size_t ConsoleIO::write(const uint8_t* buffer, size_t size) {
   }
   if (done == size) {
     s_stalled_ms = 0;
-    console::s_tx_full_since = 0;
-  } else if (console::s_tx_full_since == 0) {
-    console::s_tx_full_since = millis();
+    console::txFree();
+  } else {
+    console::s_link.dropped += size - done;
+    console::s_dropped_total += size - done;
+    console::txFull();
   }
   return size;  // dropped bytes count as written: callers must not retry
 }

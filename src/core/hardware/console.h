@@ -53,4 +53,19 @@ void tick();
 /** Times the USB link was reconnected so (since start). */
 int usbRecoveries();
 
+/** Keyboard mode: what went wrong on the USB link since clearLink() (stage 10c: what a
+ *  stall looks like from the card, sent with the next timing report that gets through). */
+struct LinkStats {
+  uint32_t txfull_ms = 0;  // longest time everything written was dropped (the PC read nothing)
+  uint32_t dropped = 0;    // bytes dropped so
+  uint32_t rxgap_ms = 0;   // longest time without a byte from the PC
+  uint16_t dtr_off = 0;    // the PC's program let go of the port
+  uint16_t unmount = 0;    // USB went away (cable, PC)
+  uint16_t suspend = 0;    // the PC suspended the bus
+  char before[4][12] = {};  // starts of the PC's last lines when the longest drop began
+};
+const LinkStats& link();
+void clearLink();
+uint32_t droppedBytes();  // since start: a report that grew this did not get through
+
 }  // namespace console

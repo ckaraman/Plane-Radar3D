@@ -18,6 +18,7 @@ uint32_t s_turn_max = 0, s_turns = 0, s_frames = 0, s_lines = 0, s_rx_ms = 0;
 uint32_t s_cover_n = 0, s_cover_us = 0, s_dec_us = 0, s_thumb_n = 0, s_thumb_us = 0;
 uint32_t s_q_frames = 0, s_draw_us[3] = {0, 0, 0}, s_front_us[5] = {0, 0, 0, 0, 0};
 uint32_t s_qp_kept = 0, s_qp_drawn = 0;
+unsigned long s_retry_ms = 0;  // the last report was dropped then: the next one waits 5 s
 
 }  // namespace
 
@@ -65,6 +66,7 @@ void tick(const char* scr, const char* page) {
   if (s_start_ms == 0) s_start_ms = now;
   const unsigned long span = now - s_start_ms;
   if (span < kReportMs) return;
+  if (s_retry_ms != 0 && now - s_retry_ms < kReportMs) return;
   if (s_rx_since != 0) {  // still arriving: this report gets its part so far
     s_rx_ms += now - s_rx_since;
     s_rx_since = now;
@@ -93,9 +95,35 @@ void tick(const char* scr, const char* page) {
   JsonArray qp = doc["qpanel"].to<JsonArray>();
   qp.add(s_qp_kept);
   qp.add(s_qp_drawn);
-  char buf[384];
+  // Stage 10c: the USB link's troubles, once something went wrong.
+  const console::LinkStats& l = console::link();
+  const bool usb = l.txfull_ms || l.dropped || l.rxgap_ms >= 5000 || l.dtr_off || l.unmount || l.suspend;
+  if (usb) {
+    JsonObject u = doc["usb"].to<JsonObject>();
+    u["txfull_ms"] = l.txfull_ms;
+    u["drop"] = l.dropped;
+    u["rxgap_ms"] = l.rxgap_ms;
+    u["dtr_off"] = l.dtr_off;
+    u["unmount"] = l.unmount;
+    u["susp"] = l.suspend;
+    u["fix"] = console::usbRecoveries();
+    JsonArray b = u["before"].to<JsonArray>();
+    for (const auto& line : l.before) {
+      if (line[0]) b.add(line);
+    }
+  }
+  char buf[640];
   serializeJson(doc, buf, sizeof(buf));
+  const uint32_t dropped = console::droppedBytes();
   Console.printf("PR:PERF %s\n", buf);
+  if (console::droppedBytes() != dropped) {
+    // Not through (a stall): the counters go on, so the next report that gets through
+    // covers the whole stall.
+    s_retry_ms = now;
+    return;
+  }
+  s_retry_ms = 0;
+  if (usb) console::clearLink();
   s_start_ms = now;
   s_turn_max = s_turns = s_frames = s_lines = s_rx_ms = 0;
   s_cover_n = s_cover_us = s_dec_us = s_thumb_n = s_thumb_us = 0;
