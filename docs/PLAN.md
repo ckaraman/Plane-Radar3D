@@ -71,20 +71,12 @@ içinde. Sürümler `include/config.h` içinde.
 
 ## Sıradaki oturum (10. aşama devamı)
 
-- Dal: ws5. 10b-5 kartta denendi (sonuçlar yukarıda 10. aşama satırında).
-- B-1 kartta denendi (sonuçlar yukarıda). Sıradaki: 10c. Sıra açıkken müzik sayfası 11–12 kare/sn, her tur ~80 ms (B-1'den bağımsız, 0.47'de de var).
-- Sıra paneli şarkı seçince bazen kapanıyordu: program, tarayıcının sırası ile Windows'un "şu an çalan" bilgisi bir an uyuşmayınca karta QCLEAR gönderiyordu. Deck 1.11.1: uyuşmazlık 3 sn sürmeden sıra silinmez; silinince `perf.log`'a `queue clear` yazılır. Tamam (kartta denendi: ~2 dk'da 12 şarkı geçişinde silme yok, her geçişte 1 küçük kapak; başka uygulama çalınca 1 kez `queue clear ok`, YouTube Music'e dönünce sıra 12 sn sonra geri geldi).
-- Bir kez takılma (5in-0.48.0, 15:24:53): kart tuşlar sayfasındayken müzik başladı, sıra gönderildi, sonra kart 15 sn hiç satır göndermedi; program ~30 sn'de kendiliğinden yeniden bağlandı, kart yeniden başlamadı. Kayıtlarda tek takılma bu. Sebep belli değil: B-1'in ilk kapak kurulumuyla aynı ana denk geliyor. Tekrarlarsa kartta takılma anını yazan bir kayıt eklenecek.
-- 10c: sıra açıkken 11 fps, büyük kapak aktarılırken fps düşüşü. Tahminler: (A) sıra paneli hazır kopyası için ~265 KB tek parça PSRAM bulunamıyor, panel her karede baştan çiziliyor; (B) kapak gelirken müzik sayfası bilerek 4 kare/sn (`main.cpp`, 250 ms; 10b-1'den önceki yavaş okuma için konmuştu).
-- 10c-3 adayları (karar bekliyor): sekmeler ve radar düğmesi zemine (kare başına ~16 ms); yalnız değişen bölgeyi kopyalayıp çizmek (zemin kopyası 37 ms dahil, en büyük kazanç, risk orta-yüksek); sıra panelinin küçük resimlerini bir kez yuvarlatıp saklamak (panel yeniden çizimi ~70 ms).
-- 10c-2 denemesi (yapıldı): sıra açıkken kapak gelince `q` 5 sn'de ~5 kalmalı (0.48.2'de 57), kapak süresi 2–3 sn, `batch ... skipped` olmamalı. Takılma olursa ilk ulaşan `card` satırındaki `usb` ve `turn_max`/`turns` okunacak: `txfull_ms` büyük ve `turns` normalse kart çalışıyor, PC okumuyor; `turn_max` çok büyükse kart döngüsü takılmış.
-- 10c-2 önerisi (kullanıcı ikisini aynı sürümde istedi): sıra açıkken `tick()` sıra zemininin kapak numarasına baksın (tek koşul). Sonra: sekmeler ve radar düğmesi (16 ms) zemine alınabilir.
-- İkinci takılma (5in-0.48.2, 22:16:26–22:16:48): müzik sayfası, kapak ve "queue 30 rows" gönderiminden kısa süre sonra kart 15 sn satır göndermedi, `card gone`, 2 sn sonra yine bağlandı; kart yeniden başlamadı. 15:24 takılmasında da hemen önce "queue 30 rows" vardı. Kartta takılma anını yazan kayıt sırada.
-- 10c-1 denemesi (yapıldı): kapak gelirken `rx_ms` ve "cover ... B ... s" süresi 0.48.1 ile karşılaştırılacak (80 KB 2,3–3 sn); `front` hangi parçanın 44–57 ms'yi doldurduğunu gösterir.
-- 10c-1 adayları (kullanıcı 1 ve 3'ü seçti, 2 ölçüme göre): kapak gelirken 250 ms sınırını gevşetmek; yalnız değişen bölgeyi kopyalayıp çizmek (iki ekran tamponu sırayla gösterildiği için her bölge iki tampona da yazılmalı); üst parçaların süresini parça parça ölçmek.
-- 10c-0 denemesi (yapıldı): sıra açıkken `qpanel` ikinci sayı büyükse ve `psram_blk` < ~265 KB ise A doğru; `draw` hangi parçanın uzun sürdüğünü gösterir. Kapak gelirken `rx_ms` ve `fps` not edilecek (B için karşılaştırma).
-- Bilgisayarda `pio run -e ws5` bağlanma (link) hatası veriyor; kodla ilgisi yok, CI'a güven.
-- Ölçüm: `%APPDATA%\PlaneRadarDeck\perf.log`; bakılacaklar `cover_ms`, `dec_ms`, `turn_max`, `heap`, `psram`.
+- Dal: ws5. Kart 5in-0.48.3, Deck 1.11.1 main'de ve kartta denendi (10c-0…10c-2 sonuçları yukarıda 10. aşama satırında).
+- Sıradaki: 10c-3. Ekran yalnız değişince çiziliyor, ama her kare ~80–100 ms: zemin kopyası (768 KB PSRAM→PSRAM) 37 ms, sekmeler + radar düğmesi 16 ms, müzik sayfasında yazı 3 + çubuk 10 + düğme 9 + sıradaki kartı 16 ms; sıra açıkken panel hazırsa 14 ms, baştan çizilirse ~70 ms. Sürekli değişen işlerde (ses çubuğu, sırada kaydırma) bu ~10–12 kare/sn.
+- 10c-3 adayları: (1) sekmeler ve radar düğmesi zemine (~16 ms, risk düşük; sekme / radar durumu değişince zemin yeniden kurulmalı); (2) yalnız değişen bölgeyi kopyalayıp çizmek (37 ms dahil en büyük kazanç; iki ekran tamponu sırayla gösterildiği için her bölge iki tampona da yazılmalı, risk orta-yüksek); (3) sıra panelinin küçük resimlerini bir kez yuvarlatıp saklamak (panel yeniden çizimi ~70 ms, seyrek).
+- Takılma: 0.48.0 (15:24) ve 0.48.2 (22:16) birer kez; ikisinde de hemen önce "queue 30 rows". 0.48.3'te yok. Kart artık sorun olunca `PR:PERF` içine `usb` yazar (`txfull_ms`, `drop`, `rxgap_ms`, `dtr_off`/`unmount`/`susp`, `fix`, `before`); yerine ulaşmayan rapor sayılmaz, sonraki takılmanın tamamını kapsar. Bağlanırken 1,5 sn'lik `usb` kaydı (`before: PR:HELLO`) zararsız.
+- Ölçüm: `%APPDATA%\PlaneRadarDeck\perf.log` (dolunca `perf.log.1`). `fps` ekran turu sayısıdır, gerçek çizim `q` (sıra açık) ve `draw` / `front` (en yavaş karenin parçaları, ms). Bakılacaklar ayrıca `turn_max`, `cover ... B ... s`, `batch ... skipped`, `stall`, `card gone`.
+- Bilgisayarda `pio run -e ws5` derliyor ama bağlanma (link) adımında kütüphane hatası veriyor; kodla ilgisi yok, CI'a güven. `helper/tests/test_core.py` Windows'ta çalışmaz (pty), CI'da çalışır.
 
 ## Kurulum sayfaları
 
