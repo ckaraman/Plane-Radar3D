@@ -156,6 +156,14 @@ uint32_t s_last_id = 0;
 unsigned long s_stopped_ms = 0;
 uint32_t s_shown_pos = 0xFFFFFFFF;
 uint32_t s_base_done_us = 0;  // the frame's page base copied (stage 10c timing)
+// The frame's moving parts by kind (stage 10c): tabs, text, bars, controls, next card / panel.
+uint32_t s_front_us[5] = {0, 0, 0, 0, 0}, s_front_last_us = 0;
+enum FrontPart { kFpTabs, kFpText, kFpBars, kFpCtrls, kFpPanel };
+void frontPart(FrontPart k) {
+  const uint32_t t = micros();
+  s_front_us[k] += t - s_front_last_us;
+  s_front_last_us = t;
+}
 
 // Queue panel.
 bool s_queue_open = false;
@@ -685,6 +693,7 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   const host::NowPlaying& n = host::now();
   pageTabs(c, true);
   radarPill(c);
+  frontPart(kFpTabs);
 
   if (!n.valid) {
     text::drawMid(c, text::Ui22b, "Şu an müzik çalmıyor", kW / 2, kH / 2 - D(16), kText, 255, text::Align::Center);
@@ -710,6 +719,7 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   }
   text::fit(text::Ui16, who, tw, buf, sizeof(buf));
   text::draw(c, text::Ui16, buf, tx, title_base + text::Ui22b.descent + D(4) + text::Ui16.ascent, kTextSub);
+  frontPart(kFpText);
 
   // Progress: times either side of a gradient bar.
   const uint32_t pos = host::positionNow();
@@ -719,12 +729,14 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   fmtTime(t1, sizeof(t1), n.duration_s);
   text::drawMid(c, text::Ui13, t0, tx, kBarY + kBarH / 2, {195, 200, 222});
   if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + tw, kBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
+  frontPart(kFpText);
   const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
   paint::roundRect(c, bx, kBarY, bw, kBarH, kBarH / 2, kWhite, 46);
   const float f =
       n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
   paint::gradientBar(c, bx, kBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
   paint::circle(c, bx + bw * f, kBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  frontPart(kFpBars);
 
   drawTransport(s, c, kPrevCx, kPlayCx, kNextCx, kCtrlY, kSmallBtnR, kPlayR);
 
@@ -732,6 +744,7 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   const bool muted = mutedNow();
   const int pct = levelPercent();
   speakerIcon(s, kMusicPad + D(10), kCtrlY, D(11), col565(muted ? kMutedRed : kWhite));
+  frontPart(kFpCtrls);
   paint::roundRect(c, kVolX, kCtrlY - kVolH / 2, kVolW, kVolH, kVolH / 2, kWhite, 46);
   const float vx = kVolX + kVolW * (muted ? 0 : pct) / 100.0f;
   if (!muted && pct > 0) {
@@ -742,11 +755,13 @@ void drawMusicFront(Gfx& s, const paint::Canvas& c) {
   paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
   s_shown_level = pct;
   s_shown_muted = muted;
+  frontPart(kFpBars);
   if (host::queueValid() && host::queueCount() > 1) {
     drawNextCard(c);
   } else {
     text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
   }
+  frontPart(kFpPanel);
 }
 
 // ------------------------------------------------------------------ queue
@@ -960,7 +975,9 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
   const host::NowPlaying& n = host::now();
   pageTabs(c, true);
   radarPill(c);
+  frontPart(kFpTabs);
   refreshThumbs();
+  frontPart(kFpPanel);
   s_shown_qver = host::queueVersion();
   char buf[200];
   // Left: what plays, a little smaller.
@@ -977,13 +994,16 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
   fmtTime(t1, sizeof(t1), n.duration_s);
   text::drawMid(c, text::Ui13, t0, tx, kQBarY + kBarH / 2, {195, 200, 222});
   if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + kQLeftW, kQBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
+  frontPart(kFpText);
   const int bx = tx + kTimeW, bw = kQLeftW - 2 * kTimeW;
   paint::roundRect(c, bx, kQBarY, bw, kBarH, kBarH / 2, kWhite, 46);
   const float f =
       n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
   paint::gradientBar(c, bx, kQBarY, std::max(1, static_cast<int>(bw * f)), kBarH, kPeach, kPink, kLavender);
   paint::circle(c, bx + bw * f, kQBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  frontPart(kFpBars);
   drawTransport(g, c, kQPrevCx, kQPlayCx, kQNextCx, kQCtrlY, kQSmallR, kQPlayR);
+  frontPart(kFpCtrls);
 
   // Right: the queue, from the kept panel when nothing in it changed.
   const int count = host::queueCount();
@@ -1000,6 +1020,7 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
       memcpy(c.px + (kQPanelY + y) * kW + kQPanelX, kept + y * kQPanelW, kQPanelW * 2);
     }
     services::perf::queuePanel(true);
+    frontPart(kFpPanel);
     return;
   }
   services::perf::queuePanel(false);
@@ -1010,6 +1031,7 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
     }
     s_qpanel_key = key;
   }
+  frontPart(kFpPanel);
 }
 
 /** The queue panel's rows on the right (count rows in the list). */
@@ -1089,7 +1111,7 @@ template <typename Gfx>
 void composeInto(Gfx& g, const paint::Canvas& c) {
   if (s_page == Page::Keys) {
     memcpy(c.px, s_keys_base.getBuffer(), kW * kH * 2);
-    s_base_done_us = micros();
+    s_base_done_us = s_front_last_us = micros();
     if (s_pressed >= 0) {
       const Box& b = keyBox(s_pressed);
       paint::roundRect(c, b.x, b.y, b.w, b.h, D(18), kLavender, 60, {214, 202, 255}, 150);
@@ -1102,11 +1124,11 @@ void composeInto(Gfx& g, const paint::Canvas& c) {
     s_shown_muted = muted;
   } else if (s_queue_open && host::queueValid()) {
     memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
-    s_base_done_us = micros();
+    s_base_done_us = s_front_last_us = micros();
     drawQueueFront(g, c);
   } else {
     memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
-    s_base_done_us = micros();
+    s_base_done_us = s_front_last_us = micros();
     drawMusicFront(g, c);
   }
 }
@@ -1144,6 +1166,7 @@ void present() {
   }
   const uint32_t t0 = micros();
   uint32_t t_front = 0;
+  for (uint32_t& us : s_front_us) us = 0;
   if (tft.getRotation() != 2) {
     // Straight into the hidden frame buffer (same pixel format), then shown.
     tft.beginHiddenFrame();
@@ -1166,7 +1189,7 @@ void present() {
     tft.presentHiddenFrame();
   }
   services::perf::draw(s_base_done_us - t0, t_front - s_base_done_us, micros() - t_front,
-                       s_page == Page::Music && s_queue_open && host::queueValid());
+                       s_page == Page::Music && s_queue_open && host::queueValid(), s_front_us);
   s_dirty = false;
   s_last_present_ms = millis();
 }

@@ -641,11 +641,12 @@ void loop() {
                                                         : config::kRadarRedrawIntervalMs;
 #if defined(WITH_DECK)
     // An album cover on its way from the Windows helper: one small chunk per answer, so
-    // fewer frames for those few seconds let it arrive many times faster. Only while the
-    // music page shows it; the radar and the keys keep their speed.
-    if (services::host::coverReceiving() && interval < 250UL && g_screen == Screen::Deck &&
+    // fewer frames for those few seconds let it arrive faster. Only while the music page
+    // shows it; the radar and the keys keep their speed. 250 ms until stage 10c: the
+    // helper reads the cable fast since 10b-1, so 15 frames a second are tried.
+    if (services::host::coverReceiving() && interval < 66UL && g_screen == Screen::Deck &&
         ui::deck::musicShown()) {
-      interval = 250UL;
+      interval = 66UL;
     }
 #endif
     if (millis() - g_last_redraw_ms >= interval) {

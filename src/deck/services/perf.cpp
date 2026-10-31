@@ -16,7 +16,8 @@ unsigned long s_start_ms = 0;
 unsigned long s_rx_since = 0;  // a cover started arriving (0: none on its way)
 uint32_t s_turn_max = 0, s_turns = 0, s_frames = 0, s_lines = 0, s_rx_ms = 0;
 uint32_t s_cover_n = 0, s_cover_us = 0, s_dec_us = 0, s_thumb_n = 0, s_thumb_us = 0;
-uint32_t s_q_frames = 0, s_draw_us[3] = {0, 0, 0}, s_qp_kept = 0, s_qp_drawn = 0;
+uint32_t s_q_frames = 0, s_draw_us[3] = {0, 0, 0}, s_front_us[5] = {0, 0, 0, 0, 0};
+uint32_t s_qp_kept = 0, s_qp_drawn = 0;
 
 }  // namespace
 
@@ -48,12 +49,13 @@ void jpeg(bool thumb, uint32_t us) {
 
 void decode(uint32_t us) { s_dec_us += us; }
 
-void draw(uint32_t base_us, uint32_t front_us, uint32_t show_us, bool queue) {
+void draw(uint32_t base_us, uint32_t front_us, uint32_t show_us, bool queue, const uint32_t* parts_us) {
   if (queue) ++s_q_frames;
   if (base_us + front_us + show_us <= s_draw_us[0] + s_draw_us[1] + s_draw_us[2]) return;
   s_draw_us[0] = base_us;
   s_draw_us[1] = front_us;
   s_draw_us[2] = show_us;
+  for (int i = 0; i < 5; ++i) s_front_us[i] = parts_us[i];
 }
 
 void queuePanel(bool kept) { ++(kept ? s_qp_kept : s_qp_drawn); }
@@ -86,6 +88,8 @@ void tick(const char* scr, const char* page) {
   doc["q"] = s_q_frames;
   JsonArray d = doc["draw"].to<JsonArray>();
   for (uint32_t us : s_draw_us) d.add(us / 1000);
+  JsonArray fp = doc["front"].to<JsonArray>();
+  for (uint32_t us : s_front_us) fp.add(us / 1000);
   JsonArray qp = doc["qpanel"].to<JsonArray>();
   qp.add(s_qp_kept);
   qp.add(s_qp_drawn);
@@ -96,7 +100,8 @@ void tick(const char* scr, const char* page) {
   s_turn_max = s_turns = s_frames = s_lines = s_rx_ms = 0;
   s_cover_n = s_cover_us = s_dec_us = s_thumb_n = s_thumb_us = 0;
   s_q_frames = s_qp_kept = s_qp_drawn = 0;
-  s_draw_us[0] = s_draw_us[1] = s_draw_us[2] = 0;
+  for (uint32_t& us : s_draw_us) us = 0;
+  for (uint32_t& us : s_front_us) us = 0;
 }
 
 }  // namespace services::perf
