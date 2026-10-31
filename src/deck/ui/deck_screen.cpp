@@ -155,6 +155,7 @@ bool s_was_playing = false;
 uint32_t s_last_id = 0;
 unsigned long s_stopped_ms = 0;
 uint32_t s_shown_pos = 0xFFFFFFFF;
+uint32_t s_base_done_us = 0;  // the frame's page base copied (stage 10c timing)
 
 // Queue panel.
 bool s_queue_open = false;
@@ -998,8 +999,10 @@ void drawQueueFront(Gfx& g, const paint::Canvas& c) {
     for (int y = 0; y < kQPanelH; ++y) {
       memcpy(c.px + (kQPanelY + y) * kW + kQPanelX, kept + y * kQPanelW, kQPanelW * 2);
     }
+    services::perf::queuePanel(true);
     return;
   }
+  services::perf::queuePanel(false);
   drawQueueRows(g, c, count);
   if (kept != nullptr) {
     for (int y = 0; y < kQPanelH; ++y) {
@@ -1086,6 +1089,7 @@ template <typename Gfx>
 void composeInto(Gfx& g, const paint::Canvas& c) {
   if (s_page == Page::Keys) {
     memcpy(c.px, s_keys_base.getBuffer(), kW * kH * 2);
+    s_base_done_us = micros();
     if (s_pressed >= 0) {
       const Box& b = keyBox(s_pressed);
       paint::roundRect(c, b.x, b.y, b.w, b.h, D(18), kLavender, 60, {214, 202, 255}, 150);
@@ -1098,9 +1102,11 @@ void composeInto(Gfx& g, const paint::Canvas& c) {
     s_shown_muted = muted;
   } else if (s_queue_open && host::queueValid()) {
     memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
+    s_base_done_us = micros();
     drawQueueFront(g, c);
   } else {
     memcpy(c.px, s_music_base.getBuffer(), kW * kH * 2);
+    s_base_done_us = micros();
     drawMusicFront(g, c);
   }
 }
@@ -1136,10 +1142,13 @@ void present() {
     startJob(false);
     if (s_job_state.load() != Job::Idle) return;
   }
+  const uint32_t t0 = micros();
+  uint32_t t_front = 0;
   if (tft.getRotation() != 2) {
     // Straight into the hidden frame buffer (same pixel format), then shown.
     tft.beginHiddenFrame();
     composeInto(tft, paint::Canvas{tft.hiddenBuffer(), kW, kH});
+    t_front = micros();
     tft.presentHiddenFrame();
   } else {
     // Screen mounted upside down: put together upright, copy turned.
@@ -1149,12 +1158,15 @@ void present() {
       if (s_canvas.createSprite(kW, kH) == nullptr) return;
     }
     composeInto(s_canvas, cv(s_canvas));
+    t_front = micros();
     tft.beginHiddenFrame();
     uint16_t* fb = tft.hiddenBuffer();
     const auto* src = static_cast<const uint16_t*>(s_canvas.getBuffer());
     for (int i = 0, n = kW * kH; i < n; ++i) fb[n - 1 - i] = src[i];
     tft.presentHiddenFrame();
   }
+  services::perf::draw(s_base_done_us - t0, t_front - s_base_done_us, micros() - t_front,
+                       s_page == Page::Music && s_queue_open && host::queueValid());
   s_dirty = false;
   s_last_present_ms = millis();
 }

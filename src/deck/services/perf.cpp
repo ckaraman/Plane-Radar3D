@@ -16,6 +16,7 @@ unsigned long s_start_ms = 0;
 unsigned long s_rx_since = 0;  // a cover started arriving (0: none on its way)
 uint32_t s_turn_max = 0, s_turns = 0, s_frames = 0, s_lines = 0, s_rx_ms = 0;
 uint32_t s_cover_n = 0, s_cover_us = 0, s_dec_us = 0, s_thumb_n = 0, s_thumb_us = 0;
+uint32_t s_q_frames = 0, s_draw_us[3] = {0, 0, 0}, s_qp_kept = 0, s_qp_drawn = 0;
 
 }  // namespace
 
@@ -47,6 +48,16 @@ void jpeg(bool thumb, uint32_t us) {
 
 void decode(uint32_t us) { s_dec_us += us; }
 
+void draw(uint32_t base_us, uint32_t front_us, uint32_t show_us, bool queue) {
+  if (queue) ++s_q_frames;
+  if (base_us + front_us + show_us <= s_draw_us[0] + s_draw_us[1] + s_draw_us[2]) return;
+  s_draw_us[0] = base_us;
+  s_draw_us[1] = front_us;
+  s_draw_us[2] = show_us;
+}
+
+void queuePanel(bool kept) { ++(kept ? s_qp_kept : s_qp_drawn); }
+
 void tick(const char* scr, const char* page) {
   const unsigned long now = millis();
   if (s_start_ms == 0) s_start_ms = now;
@@ -71,12 +82,21 @@ void tick(const char* scr, const char* page) {
   doc["rx_ms"] = s_rx_ms;
   doc["heap"] = ESP.getFreeHeap();
   doc["psram"] = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  char buf[256];
+  doc["psram_blk"] = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+  doc["q"] = s_q_frames;
+  JsonArray d = doc["draw"].to<JsonArray>();
+  for (uint32_t us : s_draw_us) d.add(us / 1000);
+  JsonArray qp = doc["qpanel"].to<JsonArray>();
+  qp.add(s_qp_kept);
+  qp.add(s_qp_drawn);
+  char buf[384];
   serializeJson(doc, buf, sizeof(buf));
   Console.printf("PR:PERF %s\n", buf);
   s_start_ms = now;
   s_turn_max = s_turns = s_frames = s_lines = s_rx_ms = 0;
   s_cover_n = s_cover_us = s_dec_us = s_thumb_n = s_thumb_us = 0;
+  s_q_frames = s_qp_kept = s_qp_drawn = 0;
+  s_draw_us[0] = s_draw_us[1] = s_draw_us[2] = 0;
 }
 
 }  // namespace services::perf
