@@ -73,6 +73,7 @@ içinde. Sürümler `include/config.h` içinde.
 
 - Dal: ws5. 10b-5 kartta denendi (sonuçlar yukarıda 10. aşama satırında).
 - B-1 kartta denendi (sonuçlar yukarıda). Sıradaki: 10c. Sıra açıkken müzik sayfası 11–12 kare/sn, her tur ~80 ms (B-1'den bağımsız, 0.47'de de var).
+- Sıra paneli şarkı seçince bazen kapanıyordu: program, tarayıcının sırası ile Windows'un "şu an çalan" bilgisi bir an uyuşmayınca karta QCLEAR gönderiyordu. Deck 1.11.1: uyuşmazlık 3 sn sürmeden sıra silinmez; silinince `perf.log`'a `queue clear` yazılır. Kartta denenecek (sıra açıkken şarkı seç, panel kapanmamalı).
 - 10c: sıra açıkken 11 fps, büyük kapak aktarılırken fps düşüşü.
 - Bilgisayarda `pio run -e ws5` bağlanma (link) hatası veriyor; kodla ilgisi yok, CI'a güven.
 - Ölçüm: `%APPDATA%\PlaneRadarDeck\perf.log`; bakılacaklar `cover_ms`, `dec_ms`, `turn_max`, `heap`, `psram`.

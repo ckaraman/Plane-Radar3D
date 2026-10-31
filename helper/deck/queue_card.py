@@ -105,6 +105,7 @@ def thumb_jpeg(url, px):
 
 THUMBS = 10        # rows that get a small cover (the ones in view first)
 MIN_GAP = 3.0      # s between two queue sends: a busy page does not flood the cable
+CLEAR_AFTER = 3.0  # s the queue must stay "not what plays" before the card's is cleared
 
 
 def carry_pics(sent_pics, rows, limit=THUMBS):
@@ -138,6 +139,7 @@ class QueueSender:
         self.card_has = False
         self.gen = 0
         self.last_send = 0.0
+        self.mismatch_since = None  # when the rows first went away (None: they are there)
         self.cache = collections.OrderedDict()   # (url, px) -> jpeg | None
         self.lock = threading.Lock()
         self.wanted = []          # (url, px) to fetch
@@ -150,6 +152,7 @@ class QueueSender:
     def reset(self):
         self.sent_titles, self.sent_pics, self.card_has, self.dirty = None, {}, False, True
         self.failed = set()
+        self.mismatch_since = None
 
     def rows(self):
         if not self.core.config.settings.get("queue", True):
@@ -197,13 +200,24 @@ class QueueSender:
             rows = self.rows()
             titles = None if rows is None else [[r["x"], r["t"], r["a"], r["d"]] for r in rows]
             if titles != self.sent_titles:
+                if rows is None and self.card_has:
+                    # Picking a song changes the page's queue and Windows' "now playing" a
+                    # moment apart: a short mismatch is not "something else plays". The
+                    # send clock is left alone, so the new list goes as soon as they agree.
+                    if self.mismatch_since is None:
+                        self.mismatch_since = self._time.time()
+                    if self._time.time() - self.mismatch_since < CLEAR_AFTER:
+                        self.dirty = True
+                        return
                 self.last_send = self._time.time()
                 if rows is None:
+                    self.mismatch_since = None
                     if self.card_has and not dev.clear_queue():
                         self.dirty = True
                         return
                     self.card_has, self.sent_titles, self.sent_pics = False, None, {}
                     return
+                self.mismatch_since = None
                 self.gen = (self.gen + 1) % 60000
                 card = [{"x": r["x"], "t": r["t"], "a": r["a"], "d": r["d"]} for r in rows]
                 froms, kept = carry_pics(self.sent_pics, rows) if hello.get("qkeep") else ([], {})

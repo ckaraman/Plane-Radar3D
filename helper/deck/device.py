@@ -381,7 +381,9 @@ class Device:
             return False
 
     def clear_queue(self):
-        return bool(self.connected and self.request("PR:QCLEAR", ["QACK", "ERR"], 3))
+        ok = bool(self.connected and self.request("PR:QCLEAR", ["QACK", "ERR"], 3))
+        self.perf("queue clear %s" % ("ok" if ok else "failed"))
+        return ok
 
     def send_thumb(self, jpeg, k, gen, abort=lambda: False):
         """A small cover for row k of queue gen (like the album cover, one chunk at a time)."""

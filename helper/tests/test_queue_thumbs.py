@@ -142,6 +142,42 @@ def test_failed_picture_tried_with_the_next_list():
     assert 2 in dev.thumbs, dev.thumbs  # "a" again, now row 2
 
 
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def time(self):
+        return self.t
+
+
+def test_short_mismatch_keeps_the_queue():
+    # Picking a song: for a moment the page's queue and "now playing" disagree. The card's
+    # queue (and its open panel) stays; a mismatch that lasts clears it.
+    dev = FakeDev()
+    dev.clears = 0
+    dev.clear_queue = lambda: setattr(dev, "clears", dev.clears + 1) or True
+    q = sender("abc")
+    q._time = clock = Clock()
+    run(q, dev)
+    q.rows = lambda: None
+    clock.t += queue_card.MIN_GAP
+    q.dirty = True
+    run(q, dev)
+    clock.t += queue_card.CLEAR_AFTER - 1
+    run(q, dev)
+    assert dev.clears == 0 and q.card_has
+    q.set_rows("bcd")  # they agree again: the new list, no clear in between
+    run(q, dev)
+    assert dev.clears == 0 and [r.get("p") for r in dev.lists[-1]] == [1, 2, None], dev.lists[-1]
+    q.rows = lambda: None
+    clock.t += queue_card.MIN_GAP
+    q.dirty = True
+    run(q, dev)
+    clock.t += queue_card.CLEAR_AFTER
+    run(q, dev)
+    assert dev.clears == 1 and not q.card_has
+
+
 if __name__ == "__main__":
     test_carry_moves_by_picture()
     test_carry_same_picture_twice()
@@ -152,4 +188,5 @@ if __name__ == "__main__":
     test_aborted_picture_tried_again()
     test_uncertain_list_send_carries_nothing()
     test_failed_picture_tried_with_the_next_list()
+    test_short_mismatch_keeps_the_queue()
     print("queue thumbs ok")
