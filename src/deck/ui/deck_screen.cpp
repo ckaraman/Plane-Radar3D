@@ -164,6 +164,16 @@ void frontPart(FrontPart k) {
   s_front_us[k] += t - s_front_last_us;
   s_front_last_us = t;
 }
+// The next card / queue panel by kind (stage 10d-0): base copied, pictures decoded, glass,
+// pictures, text.
+uint32_t s_card_us[5] = {0, 0, 0, 0, 0}, s_card_last_us = 0;
+enum CardPart { kCpCopy, kCpDecode, kCpGlass, kCpPics, kCpText };
+void cardStart() { s_card_last_us = micros(); }
+void cardPart(CardPart k) {
+  const uint32_t t = micros();
+  s_card_us[k] += t - s_card_last_us;
+  s_card_last_us = t;
+}
 
 // Queue panel.
 bool s_queue_open = false;
@@ -809,7 +819,9 @@ void drawMusicFront(Gfx& s, Frame& f) {
   frontPart(kFpBars);
   const bool next = host::queueValid() && host::queueCount() > 1;
   // A queue picture arriving bumps the version too.
+  cardStart();
   if (part(f, 4, next ? mix(kSeed, host::queueVersion()) : 0, kMNextX, kMRowY, kW - kMNextX, kH - kMRowY)) {
+    cardPart(kCpCopy);
     if (next) {
       drawNextCard(c);
     } else {
@@ -890,8 +902,10 @@ void drawThumb(const paint::Canvas& c, int i, int x, int y, int sz) {
 /** Bottom right of the music page: the next song; tapped, the queue opens. */
 void drawNextCard(const paint::Canvas& c) {
   refreshThumbs();
+  cardPart(kCpDecode);
   const host::QueueRow& r = host::queueRow(1);
   paint::roundRect(c, kNextX, kNextY, kNextW, kNextH, D(14), kWhite, 22, kWhite, 36);
+  cardPart(kCpGlass);
   const int ts = D(36);
   const int px = host::queueThumbPx();
   if (s_thumb[1] != nullptr && px == ts) {
@@ -905,6 +919,7 @@ void drawNextCard(const paint::Canvas& c) {
               s_thumb[1][(yy + (px - ts) / 2) * px + xx + (px - ts) / 2];
     }
   }
+  cardPart(kCpPics);
   const int tx = kNextX + D(8) + ts + D(10), tw = kNextX + kNextW - D(30) - tx;
   char buf[80];
   text::draw(c, text::Ui13, "SIRADAKİ", tx, kNextY + D(21), {158, 164, 196}, 255, text::Align::Left, 1);
@@ -913,6 +928,7 @@ void drawNextCard(const paint::Canvas& c) {
   // list icon
   const int ix = kNextX + kNextW - D(22), iy = kNextY + kNextH / 2;
   for (int k = -1; k <= 1; ++k) paint::roundRect(c, ix - D(8), iy + k * D(6) - D(1), k == 1 ? D(10) : D(14), D(2), D(1), kTextSoft, 255);
+  cardPart(kCpText);  // with the list icon
 }
 
 /** Small cover (cropped square) with its dark rim, for the open queue's left column. */
@@ -1037,7 +1053,9 @@ void drawQueueFront(Gfx& g, Frame& f) {
   const paint::Canvas& c = f.c;
   const host::NowPlaying& n = host::now();
   frontPart(kFpTabs);
+  cardStart();
   refreshThumbs();
+  cardPart(kCpDecode);
   frontPart(kFpPanel);
   s_shown_qver = host::queueVersion();
   char buf[200];
@@ -1077,6 +1095,7 @@ void drawQueueFront(Gfx& g, Frame& f) {
   // Right: the queue, from the kept panel when nothing in it changed.
   const int count = host::queueCount();
   s_qscroll = std::max(0, std::min(s_qscroll, std::max(0, count - kQRows)));
+  cardStart();
   const PanelKey key{host::queueVersion(), s_qbase_builds, s_qscroll, s_qflash};
   const uint32_t pkey = mix(mix(mix(mix(kSeed, key.ver), key.builds), key.scroll), key.flash);
   if (!f.full && f.fb->part[3] == pkey) {  // this buffer already shows it
@@ -1095,12 +1114,14 @@ void drawQueueFront(Gfx& g, Frame& f) {
     for (int y = 0; y < kQPanelH; ++y) {
       memcpy(c.px + (kQPanelY + y) * kW + kQPanelX, kept + y * kQPanelW, kQPanelW * 2);
     }
+    cardPart(kCpCopy);
     services::perf::queuePanel(true);
     frontPart(kFpPanel);
     return;
   }
   services::perf::queuePanel(false);
   if (!f.full) paint::copyRect(c, f.base, kQPanelX, kQPanelY, kQPanelW, kQPanelH);
+  cardPart(kCpCopy);
   drawQueueRows(g, c, count);
   if (kept != nullptr) {
     for (int y = 0; y < kQPanelH; ++y) {
@@ -1108,6 +1129,7 @@ void drawQueueFront(Gfx& g, Frame& f) {
     }
     s_qpanel_key = key;
   }
+  cardPart(kCpCopy);
   frontPart(kFpPanel);
 }
 
@@ -1122,6 +1144,7 @@ void drawQueueRows(Gfx& g, const paint::Canvas& c, int count) {
     g.drawWideLine(kQCloseCx - D(7), kQCloseCy - k * D(7), kQCloseCx + D(7), kQCloseCy + k * D(7), D(1) + 1,
                    col565({226, 229, 245}));
   }
+  cardPart(kCpText);
   const int ts = host::queueThumbPx();
   for (int v = 0; v < kQRows; ++v) {
     const int i = s_qscroll + v;
@@ -1135,12 +1158,14 @@ void drawQueueRows(Gfx& g, const paint::Canvas& c, int count) {
     } else if (v > 0) {
       paint::roundRect(c, kQPanelX + D(14), y, kQPanelW - D(28), 1, 0, kWhite, 14);
     }
+    cardPart(kCpGlass);
     drawThumb(c, i, kQPanelX + D(12), y + (kQRowH - ts) / 2, ts);
     if (cur) {  // playing: three bars over its picture
       const int bx0 = kQPanelX + D(12) + ts / 2 - D(8), by = y + kQRowH / 2 + D(8);
       const int hs[3] = {D(10), D(16), D(8)};
       for (int q = 0; q < 3; ++q) paint::roundRect(c, bx0 + q * D(6), by - hs[q], D(4), hs[q], D(1), kWhite, 235);
     }
+    cardPart(kCpPics);
     const int lx = kQPanelX + D(12) + ts + D(12);
     const int dw = text::width(text::Ui13, r.dur);
     const int lw = kQPanelX + kQPanelW - D(14) - dw - D(10) - lx;
@@ -1150,12 +1175,14 @@ void drawQueueRows(Gfx& g, const paint::Canvas& c, int count) {
     text::draw(c, text::Ui13, buf, lx, y + D(44), {158, 164, 196});
     text::drawMid(c, text::Ui13, r.dur, kQPanelX + kQPanelW - D(14), y + kQRowH / 2, {158, 164, 196}, 255,
                   text::Align::Right);
+    cardPart(kCpText);
   }
   if (count > kQRows) {  // where in the list
     const int track = kQPanelH - kQHeadH - D(16), th = std::max(D(24), track * kQRows / count);
     const int ty = kQPanelY + kQHeadH + D(8) + (track - th) * s_qscroll / std::max(1, count - kQRows);
     paint::roundRect(c, kQPanelX + kQPanelW - D(6), ty, D(3), th, D(1), kWhite, 70);
   }
+  cardPart(kCpGlass);
 }
 
 void ensureBuffers() {
@@ -1270,6 +1297,7 @@ void present() {
   const uint32_t t0 = micros();
   uint32_t t_front = 0;
   for (uint32_t& us : s_front_us) us = 0;
+  for (uint32_t& us : s_card_us) us = 0;
   if (tft.getRotation() != 2) {
     // Straight into the hidden frame buffer (same pixel format), then shown.
     tft.beginHiddenFrame();
@@ -1293,7 +1321,7 @@ void present() {
     tft.presentHiddenFrame();
   }
   services::perf::draw(s_base_done_us - t0, t_front - s_base_done_us, micros() - t_front,
-                       s_page == Page::Music && s_queue_open && host::queueValid(), s_front_us);
+                       s_page == Page::Music && s_queue_open && host::queueValid(), s_front_us, s_card_us);
   s_dirty = false;
   s_last_present_ms = millis();
 }
