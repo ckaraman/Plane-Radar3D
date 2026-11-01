@@ -10,12 +10,10 @@ namespace ui {
 /**
  * Drawing front end for the screens laid out on a fixed 480x320 grid (forecast,
  * water, clock). Coordinates are given in that design grid and mapped to the panel:
- * scaled by ui::S() and centred horizontally (on the 5" 800x480 board the 720x480
+ * scaled by ui::S() and centred horizontally (on the 800x480 panel the 720x480
  * design area gets 40 px on either side). Edges are mapped one by one, so shapes that
  * touch in the design still touch on the panel. Text uses the board's 1.5x fonts;
  * textWidth() / fontHeight() report design-grid sizes so layout code keeps working.
- *
- * On the 4" board the mapping is the identity: same pixels as drawing directly.
  *
  * G is a LovyanGFX target (LGFX_Sprite or the panel device).
  */

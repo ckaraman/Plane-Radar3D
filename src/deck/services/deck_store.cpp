@@ -17,7 +17,7 @@ namespace {
 
 // Region of the data ("spiffs") partition: the map blob sits at its start (32 KB max).
 constexpr uint32_t kRegionOffset = 0x900000;
-constexpr uint32_t kRegionBytes = 0xC0000;  // 768 KB: whole-key pictures on the 5B (12 x 141 x 153 x 2)
+constexpr uint32_t kRegionBytes = 0xC0000;  // 768 KB: room for 12 whole-key pictures (sized for the old 1024x600 panel)
 constexpr size_t kSector = 4096;
 constexpr uint32_t kMagic = 0x4B445250;  // "PRDK"
 constexpr size_t kHeadBytes1 = 6, kHeadBytes2 = 8, kHeadBytes3 = 12;

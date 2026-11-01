@@ -13,12 +13,11 @@ Aynı yazılımın 5" sürümü (`ws5` derlemesi). Ekran, dokunmatik (GT911) ve 
 
 ### Kurulum ve güncelleme
 
-- Kurulum sayfası ilk adımda modeli sorar (4" / 5"); sonra yalnızca o modele ait adımları gösterir.
 - **İlk yükleme:** Kartı USB-C ile bağlayıp **Tam kurulum**. BOOT tuşu gerekmez.
 - **Sonraki güncellemeler:** **Güncelle** (cihaz `hw: ws5` bildirir, sayfa 5" yazılımını gönderir).
 - **Harita ve önemli yerler:** Sayfada **Cihaza kaydet** haritayı, arazi yüksekliklerini, önemli yerleri, yerleşim ve orman alanlarını indirip USB ile gönderir. Harita sunucuları yoğunsa sayfa önemli yerlerin alınamadığını söyler; birkaç dakika sonra tekrar kaydetmek yeter.
 - Wi-Fi ağı değişmediyse ve şifre girilmediyse kayıt Wi-Fi bağlantısına dokunmaz.
-- Kartın iki ekran sürümü var: **ESP32-S3-Touch-LCD-5** (800×480, `ws5`) ve **ESP32-S3-Touch-LCD-5B** (1024×600, `ws5b`). Yanlış sürüm yüklenirse görüntü karışık yatay çizgiler halinde gelir; kurulum sayfasının Gelişmiş bölümünde 5B için ayrı tam kurulum düğmesi var.
+- Yalnızca **ESP32-S3-Touch-LCD-5** (800×480, `ws5`) desteklenir. 5B sürümüne (1024×600) bu yazılım yüklenirse görüntü karışık yatay çizgiler halinde gelir; sayfanın **Güncelle** düğmesi `hw: ws5` bildirmeyen karta yazılım göndermez.
 
 ### SHT30 bağlantısı (Rev1.2 kart)
 

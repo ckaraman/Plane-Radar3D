@@ -5,11 +5,11 @@
 namespace ui::radar3d {
 
 /**
- * Perspective ("fake 3D") radar for the 480x320 panel.
+ * Perspective ("fake 3D") radar for the 800x480 panel.
  *
- * Everything is drawn into one 4-bit (16 color) full-screen sprite, 76.8 KB,
- * then pushed to the panel in one go: no flicker, and it fits the ESP32's RAM
- * without PSRAM. Allocate it early (before Wi-Fi) so the block is available.
+ * Everything is drawn into one 8-bit (palette) full-screen sprite in PSRAM, 384 KB,
+ * then pushed to the panel in one go: no flicker. Allocate it early (before Wi-Fi)
+ * so the block is available.
  */
 bool init();
 

@@ -34,7 +34,7 @@ namespace store = services::deck;
 namespace host = services::host;
 
 // ------------------------------------------------------------------ layout
-// The approved design is drawn at 800 x 480; the 5B panel (1024 x 600) scales it.
+// The approved design is drawn at 800 x 480, the panel's own size.
 constexpr int kW = config::kDisplayWidth;
 constexpr int kH = config::kDisplayHeight;
 constexpr int D(int v) { return v * kW / 800; }

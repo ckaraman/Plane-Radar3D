@@ -33,7 +33,7 @@ constexpr uint16_t kTransparent = 0xF81F;
  *  Windows 50 (2 % per key); chosen on the setup page, 16 by default. */
 int volumeSteps();
 
-/** Icon edge in pixels for version 1 sets: about a third of a key at 1.5x (5") or 1.875x (5B). */
+/** Icon edge in pixels for version 1 sets: about a third of a key at 1.5x. */
 int iconPx();
 
 /** Key size on the deck screen (ui/deck_screen.cpp lays the keys out with these). */

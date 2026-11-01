@@ -3,8 +3,8 @@
 namespace ui {
 
 /**
- * Layout scale. The screens were designed for the 4" 480x320 panel; on the 5" 800x480
- * board every layout size (margins, boxes, icons, line offsets) is 1.5x, which keeps
+ * Layout scale. The screens are laid out on a 480x320 design grid; on the 800x480
+ * panel every layout size (margins, boxes, icons, line offsets) is 1.5x, which keeps
  * the same physical size at the higher pixel density -- the fonts are generated 1.5x
  * for that board too (tools/fonts/make_tr_fonts.py). Positions anchored to the
  * right or bottom edge use the real screen size, so the extra width of the 5:3 panel

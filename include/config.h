@@ -38,8 +38,7 @@ constexpr uint8_t kWifiConnectAttempts = 3;
 constexpr unsigned long kWifiConnectingFrameMs = 50;
 /** Minimum interval between background reconnect tries. */
 constexpr unsigned long kWifiReconnectIntervalMs = 15000;
-/** ESP32-WROOM-32U with an external antenna: full transmit power is fine.
- *  (The C3 Super Mini build had to drop to 8.5 dBm because of its chip antenna.) */
+/** Full transmit power. */
 constexpr wifi_power_t kWifiTxPower = WIFI_POWER_19_5dBm;
 
 #if defined(BOARD_WS5)

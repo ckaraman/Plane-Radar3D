@@ -32,8 +32,8 @@ namespace {
 
 namespace store = services::water;
 
-// Laid out on the 480x320 design grid; ScaledGfx maps it to the panel (identity on
-// the 4" board, 1.5x and centred on the 5" one). The top bar and the RADAR button use
+// Laid out on the 480x320 design grid; ScaledGfx maps it to the panel (1.5x and
+// centred). The top bar and the RADAR button use
 // panel coordinates so they line up with the other screens.
 using Canvas = ScaledGfx<LGFX_Sprite>;
 constexpr int kW = Canvas::kDesignW;

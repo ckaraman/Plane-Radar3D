@@ -35,8 +35,8 @@ namespace {
 using services::weather::Day;
 using services::weather::Forecast;
 
-// Laid out on the 480x320 design grid; ScaledGfx maps it to the panel (identity on
-// the 4" board, 1.5x and centred on the 5" one). The top bar and the screen buttons
+// Laid out on the 480x320 design grid; ScaledGfx maps it to the panel (1.5x and
+// centred). The top bar and the screen buttons
 // use real panel coordinates so they line up with the radar screen's.
 using Canvas = ScaledGfx<LGFX_Sprite>;
 constexpr int kW = Canvas::kDesignW;

@@ -80,17 +80,7 @@
   /* If the install component cannot load, do not show its fallback messages. */
   esp-web-install-button:not(:defined) > [slot="unsupported"],
   esp-web-install-button:not(:defined) > [slot="not-allowed"] { display: none; }
-  .models { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
-  .model { text-align: left; padding: 14px; min-height: 92px; font: inherit; color: var(--text); cursor: pointer;
-    background: var(--field); border: 2px solid var(--line); border-radius: 12px; }
-  .model:hover { border-color: var(--accent); }
-  .model strong { display: block; font-size: 1.1rem; margin-bottom: 2px; }
-  .model span { color: var(--muted); font-size: .9rem; }
-  /* Nothing below the model question until a model is picked; then only that model's parts. */
-  body:not([data-model]) #steps { display: none; }
-  body[data-model="4"] .m5, body[data-model="5"] .m4 { display: none !important; }
-  #model-card { display: none; }
-  @media (max-width: 520px) { .grid2, .models { grid-template-columns: 1fr; } }
+  @media (max-width: 520px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -104,24 +94,6 @@
     <strong>Microsoft Edge</strong> ile açın. (Telefon, Safari ve Firefox desteklenmiyor.)
   </div>
 
-  <section class="card" id="model-card" aria-labelledby="h-model">
-    <h2 id="h-model">Hangi cihazı kuruyorsunuz?</h2>
-    <div class="models" id="model-pick">
-      <button type="button" class="model" data-pick="4">
-        <strong>4" Radar</strong>
-        <span>ESP32-WROOM-32U kart + 4.0" ST7796 dokunmatik ekran (480×320)</span>
-      </button>
-      <button type="button" class="model" data-pick="5">
-        <strong>5" Radar</strong>
-        <span>Waveshare ESP32-S3-Touch-LCD-5, ekran ve kart tek parça (800×480)</span>
-      </button>
-    </div>
-    <div class="row" id="model-chosen" hidden>
-      <span>Cihaz: <strong id="model-name"></strong></span>
-      <button type="button" class="btn" id="btn-model-change">Değiştir</button>
-    </div>
-  </section>
-
   <div id="steps">
   <section class="card" aria-labelledby="h-connect">
     <h2 id="h-connect"><span class="step">1</span>Cihazı bağlayın</h2>
@@ -132,12 +104,12 @@
     </div>
     <div class="chips" id="device-chips" hidden></div>
     <div class="msg info" id="msg-connect" hidden role="status" aria-live="polite"></div>
-    <div class="msg warn" id="msg-model" hidden role="status" aria-live="polite"></div>
+    <div class="msg warn" id="msg-board" hidden role="status" aria-live="polite"></div>
     <details id="connect-help">
       <summary>Cihaz listede görünmüyor</summary>
       <p class="small">
         • Kabloyu kontrol edin: bazı kablolar yalnızca şarj içindir, veri kablosu gerekir.<br>
-        • Cihazın <strong>BOOT</strong> düğmesine basılı tutarak USB'yi takın, sonra tekrar deneyin.<span class="m5"> (5" kartta BOOT tuşu kartın arka yüzünde.)</span><br>
+        • Cihazın <strong>BOOT</strong> düğmesine basılı tutarak USB'yi takın, sonra tekrar deneyin. (BOOT tuşu kartın arka yüzünde.)<br>
         • Arduino IDE, seri monitör gibi bir program ya da başka bir sekme cihazı kullanıyor olabilir, kapatın.<br>
         • <button type="button" class="btn" id="btn-connect-all">Tüm USB cihazlarını listele</button>
       </p>
@@ -235,25 +207,7 @@
 
     <details>
       <summary>Gelişmiş</summary>
-      <div class="m4">
-        <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Gerekirse kartta BOOT'u basılı tutup EN'e basın, BOOT'u bırakın, sonra düğmeye basın. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
-        <div class="row">
-          <esp-web-install-button id="install-update" manifest="manifest-update.json">
-            <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
-            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
-            <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
-          </esp-web-install-button>
-        </div>
-        <p class="small">Cihaz hiç yanıt vermiyorsa ya da boşsa tam kurulum yapın. <strong>Bu işlem tüm ayarları siler</strong>; sonra 2. adımdan yeniden girmeniz gerekir. Cihaz görünmüyorsa BOOT düğmesine basılı tutarak USB'yi takın, sonra bırakın.</p>
-        <div class="row">
-          <esp-web-install-button id="install-full" manifest="manifest-full.json">
-            <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
-            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor.</span>
-            <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
-          </esp-web-install-button>
-        </div>
-      </div>
-      <div class="m5">
+      <div class="flash5">
         <p class="small"><strong>Bu bölümdeki düğmeler için BOOT gerekmez:</strong> önce 1. adımdan cihaza bağlanın, sonra düğmeye basın. Sayfa kartı kurulum moduna alıp bağlantıyı bırakır; ardından aynı düğmeye <strong>bir kez daha</strong> basıp listedeki kartı seçersiniz. (Kart çalışmıyorsa ve bağlanamıyorsanız: arka yüzdeki BOOT tuşunu basılı tutup RESET'e basın, BOOT'u bırakın.)</p>
         <div class="msg info" id="msg-flash5" hidden role="status" aria-live="polite"></div>
         <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
@@ -273,7 +227,7 @@
     </details>
   </section>
 
-  <section class="card m5" aria-labelledby="h-recover">
+  <section class="card flash5" aria-labelledby="h-recover">
     <h2 id="h-recover">Kart açılmıyor ya da donuyorsa (kurtarma)</h2>
     <p class="hint">Önce kabloyu çıkarıp yeniden takın. Kart yine açılmıyorsa, takılı kalıyorsa ya da bu sayfa bağlanamıyorsa yazılımı baştan yükleyin. Kartın içindeki yükleme modu silinemez, bu yüzden kart her zaman kurtarılabilir.</p>
     <ol class="small">
@@ -538,11 +492,8 @@
     bar.hidden = false; bar.value = 0;
     try {
       setMsg(msg, 'info', 'Yeni yazılım indiriliyor…');
-      // The 5" Waveshare board (ESP32-S3) has its own image; older firmware sends no "hw".
-      const hw = state.device && state.device.hw;
-      if (modelMismatch()) throw new Error('bağlı cihaz seçili modelle uyuşmuyor');
-      const fwFile = state.model === '5' ? (hw === 'ws5b' ? 'firmware-ws5b.bin' : 'firmware-' + SYS + '.bin') : 'firmware.bin';
-      const r = await fetch(fwFile + '?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
+      if (otherBoard()) throw new Error('bağlı cihaz bu sayfanın kartı değil');
+      const r = await fetch('firmware-' + SYS + '.bin' +'?v=' + encodeURIComponent(state.latest || '') + '&t=' + Date.now(), { cache: 'no-store' });
       if (!r.ok) throw new Error('indirme ' + r.status);
       const fw = new Uint8Array(await r.arrayBuffer());
       // The start line is retried a few times: on a device busy with Wi-Fi (TLS takes
@@ -729,7 +680,7 @@
       }
     }
     $('#wifi-keep').hidden = !(on && state.device && state.device.wifi);
-    renderModelCheck();
+    renderBoardCheck();
   }
 
   // -------------------------------------------------------------- settings
@@ -1057,10 +1008,10 @@
     applyLatest();
   }
 
-  // Latest version for the chosen model; refresh the installers' manifest URLs.
+  // Latest version for this page's system; refresh the installers' manifest URLs.
   function applyLatest() {
     const v = state.versions || {};
-    state.latest = (state.model === '5' ? v['version_' + SYS] : v.version) || null;
+    state.latest = v['version_' + SYS] || null;
     // The installer fetches its manifest with normal caching (up to ~10 min on GitHub Pages), which
     // could offer the previous version. A unique query string always fetches the current one.
     for (const id of INSTALLERS) {
@@ -1084,8 +1035,8 @@
     else setMsg(el, 'warn', 'Cihazdaki sürüm ' + cur + ', en yeni sürüm ' + state.latest + '. Aşağıdan güncelleyebilirsiniz.');
   }
 
-  // ------------------------------------------------- 5" installer (esp-web-tools)
-  // In keyboard mode the 5" board's USB port is TinyUSB, where the installer cannot put the
+  // ---------------------------------------------------- installer (esp-web-tools)
+  // In keyboard mode the board's USB port is TinyUSB, where the installer cannot put the
   // chip into download mode ("reset the device / hold BOOT"). "Disconnect" in step 1 also
   // sends it back to keyboard mode. So the first press switches the connected board to the
   // USB-Serial/JTAG setup mode and releases the port; the second press opens the installer.
@@ -1093,9 +1044,9 @@
     if (!(state.port && state.connected)) return; // not connected (blank board, or prepared): installer opens
     ev.preventDefault();
     ev.stopPropagation();
-    const msg = ev.currentTarget.closest('.m5').querySelector('[id^="msg-flash5"]');
+    const msg = ev.currentTarget.closest('.flash5').querySelector('[id^="msg-flash5"]');
     try {
-      if (modelMismatch()) throw new Error('model');
+      if (otherBoard()) throw new Error('board');
       if (state.device && state.device.usb === 'kb') await ensureSetupUsb(msg);
       state.expectingDrop = true;
       await closePort(); // not disconnect(): that would return the board to keyboard mode
@@ -1106,60 +1057,26 @@
     } catch (e) {
       state.expectingDrop = false;
       const m = String(e && e.message ? e.message : e);
-      setMsg(msg, 'err', m === 'model'
-        ? 'Bağlı cihaz seçili modelle uyuşmuyor.'
+      setMsg(msg, 'err', m === 'board'
+        ? 'Bağlı cihaz bu sayfanın kurduğu 5" kart değil.'
         : ERRORS[m] || ('Kart kurulum moduna alınamadı (' + m + '). Bağlantıyı yenileyip tekrar deneyin.'));
     }
   }
 
-  // ------------------------------------------------------------------ model
-  const INSTALLERS = ['install-update', 'install-full', 'install-update-radar', 'install-full-radar'];
+  // ------------------------------------------------------------------ board
+  const INSTALLERS = ['install-update-radar', 'install-full-radar'];
   // Which firmware this page installs: the /radar/ copy (data-sys="radar") is system 1.
   const SYS = document.body.dataset.sys === 'radar' ? 'radar' : 'ws5';
-  const MODEL_NAMES = { '4': '4" Radar (ESP32-WROOM + 4.0" ekran)', '5': '5" Radar (Waveshare ESP32-S3-Touch-LCD-5)' };
 
-  function setModel(m, remember) {
-    if (m !== '4' && m !== '5') return;
-    state.model = m;
-    document.body.dataset.model = m;
-    $('#model-pick').hidden = true;
-    $('#model-chosen').hidden = false;
-    $('#model-name').textContent = MODEL_NAMES[m];
-    if (remember) { try { localStorage.setItem('pr3d-model', m); } catch (_) {} }
-    applyLatest();
-    renderModelCheck();
+  // Firmware for the 800×480 board reports hw "ws5"; anything else (the old 4" or 5B board) gets no image here.
+  function otherBoard() {
+    return !!(state.connected && state.device && state.device.hw !== 'ws5');
   }
-
-  function changeModel() {
-    $('#model-pick').hidden = false;
-    $('#model-chosen').hidden = true;
-  }
-
-  // Firmware reports hw: "wroom" (4"), "ws5" / "ws5b" (5"); older 4" firmware reports none.
-  function deviceModel() {
-    const hw = state.device && state.device.hw;
-    if (!state.connected || !state.device) return null;
-    return hw === 'ws5' || hw === 'ws5b' ? '5' : '4';
-  }
-  function modelMismatch() {
-    const d = deviceModel();
-    return d !== null && state.model && d !== state.model;
-  }
-  function renderModelCheck() {
-    const el = $('#msg-model');
+  function renderBoardCheck() {
+    const el = $('#msg-board');
     if (!el) return;
-    if (!modelMismatch()) { setMsg(el, '', ''); return; }
-    const d = deviceModel();
-    el.textContent = '';
-    el.className = 'msg warn';
-    el.hidden = false;
-    el.append('Bağlı cihaz ' + (d === '5' ? '5"' : '4"') + ' model, ama sayfada ' + (state.model === '5' ? '5"' : '4"') + ' seçili. ');
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'btn';
-    b.textContent = (d === '5' ? '5"' : '4"') + ' sayfasına geç';
-    b.addEventListener('click', () => setModel(d, true));
-    el.append(b);
+    if (!otherBoard()) { setMsg(el, '', ''); return; }
+    setMsg(el, 'warn', 'Bağlı cihaz bu sayfanın kurduğu 5" kart (Waveshare ESP32-S3-Touch-LCD-5, 800×480) değil; bu sayfa ona yazılım yükleyemez.');
   }
 
   async function resetDevice() {
@@ -1212,17 +1129,11 @@
     for (const id of INSTALLERS) {
       $('#' + id).addEventListener('click', () => { if (state.port) { state.expectingDrop = false; disconnect(); } }, true);
     }
-    for (const b of document.querySelectorAll('[data-pick]')) {
-      b.addEventListener('click', () => setModel(b.dataset.pick, true));
-    }
-    $('#btn-model-change').addEventListener('click', changeModel);
     // Capture on the row: runs before the installer's own click handler.
-    for (const id of ['install-update-radar', 'install-full-radar']) {
+    for (const id of INSTALLERS) {
       const el = document.getElementById(id);
       if (el && el.parentElement) el.parentElement.addEventListener('click', prepFlash5, true);
     }
-    // shortcut: this repo is 5"-only, so the model question is hidden; its 4" parts go in stage 10.
-    setModel('5', false);
     renderConnection();
     loadZones();
     loadLatest();
