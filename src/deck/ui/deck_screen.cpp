@@ -183,6 +183,10 @@ bool s_qbase_dirty = true;
 uint32_t s_qbase_cover_gen = 0, s_qbase_id = 0, s_shown_qver = 0;
 int s_qflash = -1;
 unsigned long s_qflash_ms = 0;
+// A row picked from the list: when the new list comes with it on top, the panel goes back to
+// the top (stage 10f). A song that changes on its own leaves the panel where it is.
+char s_qpick[sizeof(host::QueueRow::title)] = "";
+unsigned long s_qpick_ms = 0;
 uint16_t* s_thumb[host::kQueueMax] = {};
 const uint8_t* s_thumb_src[host::kQueueMax] = {};
 
@@ -1281,6 +1285,7 @@ void openQueue(bool open) {
   s_queue_open = open;
   s_qscroll = 0;
   s_qflash = -1;
+  s_qpick[0] = '\0';
   s_qbase_dirty = true;
   if (!open) s_music_dirty = true;  // its screen was borrowed
 }
@@ -1451,8 +1456,14 @@ bool tick() {
     if (host::queueVersion() != last_qver) {
       last_qver = host::queueVersion();
       if (s_page == Page::Music) s_dirty = true;
+      if (s_qpick[0] != '\0' && host::queueCount() > 0 &&
+          strcmp(host::queueRow(0).title, s_qpick) == 0) {
+        s_qscroll = 0;
+        s_qpick[0] = '\0';
+      }
     }
   }
+  if (s_qpick[0] != '\0' && now - s_qpick_ms >= 5000) s_qpick[0] = '\0';
   if (s_page == Page::Music) {
     // The base the page shows: the open queue keeps its own (stage 10c: checking the music
     // base there redrew every turn after a cover arrived, ~11 frames a second).
@@ -1668,6 +1679,8 @@ Touch touch(int fingers, int x, int y) {
         const int row = s_qscroll + (s_down_y - (kQPanelY + kQHeadH)) / kQRowH;
         if (row > 0 && row < host::queueCount()) {  // the playing one needs nothing
           host::sendQueuePlay(row);
+          strlcpy(s_qpick, host::queueRow(row).title, sizeof(s_qpick));
+          s_qpick_ms = millis();
           s_qflash = row;
           s_qflash_ms = millis();
           presentSoon();
