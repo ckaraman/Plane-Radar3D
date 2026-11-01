@@ -84,32 +84,19 @@
   .model { text-align: left; padding: 14px; min-height: 92px; font: inherit; color: var(--text); cursor: pointer;
     background: var(--field); border: 2px solid var(--line); border-radius: 12px; }
   .model:hover { border-color: var(--accent); }
-  .deck-wrap { display: flex; gap: 12px; align-items: center; margin: 8px 0 14px; }
-  .deck-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; flex: 1; }
-  .deck-key { aspect-ratio: 1.05; border-radius: 10px; background: #12202e; color: #fff; border: 2px solid #30566e;
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: inherit;
-    font-size: .78rem; line-height: 1.15; cursor: pointer; padding: 4px; overflow: hidden; text-align: center; }
-  .deck-key img { width: 52%; height: 52%; object-fit: contain; }
-  .deck-key[aria-pressed="true"] { border-color: var(--accent); outline: 3px solid var(--accent); outline-offset: 1px; }
-  .deck-knob { width: 26%; aspect-ratio: 1; border-radius: 50%; flex: none; display: flex; align-items: center;
-    justify-content: center; font-weight: 700; color: #9db0bc; background: #0e1824; border: 10px solid #1c3042; }
-  #deck-editor { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin: 0 0 12px; }
-  #deck-editor legend { font-weight: 600; padding: 0 6px; }
   .model strong { display: block; font-size: 1.1rem; margin-bottom: 2px; }
   .model span { color: var(--muted); font-size: .9rem; }
   /* Nothing below the model question until a model is picked; then only that model's parts. */
   body:not([data-model]) #steps { display: none; }
   body[data-model="4"] .m5, body[data-model="5"] .m4 { display: none !important; }
-  /* /radar/ copy (system 1, data-sys="radar"): .nr parts are hidden there, .or parts only show there. */
-  body[data-sys="radar"] .nr, body:not([data-sys="radar"]) .or { display: none !important; }
   #model-card { display: none; }
   @media (max-width: 520px) { .grid2, .models { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>Plane Radar 3D kurulum<span class="or"> <span class="sub">(1. sistem: Wi-Fi radar)</span></span><span class="nr"> <span class="sub">(2. sistem: PC destekli radar + deck)</span></span></h1>
-  <p class="lead">Cihazı USB ile bilgisayara bağlayın, <span class="or">WiFi ve </span>konumunuzu girin. Yazılım güncellemek için de aynı sayfayı kullanın.</p>
+  <h1>Plane Radar 3D kurulum <span class="sub">(1. sistem: Wi-Fi radar)</span></h1>
+  <p class="lead">Cihazı USB ile bilgisayara bağlayın, WiFi ve konumunuzu girin. Yazılım güncellemek için de aynı sayfayı kullanın.</p>
 
   <noscript><div class="msg err">Bu sayfa JavaScript gerektirir.</div></noscript>
   <div id="unsupported" class="msg warn" hidden>
@@ -168,7 +155,7 @@
     <fieldset id="settings-fields" disabled>
       <p class="hint" id="settings-hint">Önce 1. adımda cihaza bağlanın.</p>
 
-      <div class="or">  <!-- system 2 has no Wi-Fi -->
+      <div>
       <label for="ssid">WiFi ağı <span class="sub">(yalnızca 2,4 GHz ağlar)</span></label>
       <div class="row">
         <input type="text" id="ssid" autocomplete="off" spellcheck="false" style="flex:1 1 220px" placeholder="Ağ adı">
@@ -237,7 +224,7 @@
 
   <section class="card" aria-labelledby="h-update">
     <h2 id="h-update"><span class="step">3</span>Yazılımı güncelle</h2>
-    <p class="hint">Güncelleme yalnızca yazılımı yeniler; <span class="or">WiFi, </span>konum ve diğer ayarlarınız silinmez.</p>
+    <p class="hint">Güncelleme yalnızca yazılımı yeniler; WiFi, konum ve diğer ayarlarınız silinmez.</p>
     <div class="msg info" id="msg-version" hidden role="status" aria-live="polite"></div>
     <div class="row" style="margin-top:12px">
       <button type="button" class="btn primary" id="btn-usb-update" disabled>Yazılımı güncelle</button>
@@ -270,27 +257,19 @@
         <p class="small"><strong>Bu bölümdeki düğmeler için BOOT gerekmez:</strong> önce 1. adımdan cihaza bağlanın, sonra düğmeye basın. Sayfa kartı kurulum moduna alıp bağlantıyı bırakır; ardından aynı düğmeye <strong>bir kez daha</strong> basıp listedeki kartı seçersiniz. (Kart çalışmıyorsa ve bağlanamıyorsanız: arka yüzdeki BOOT tuşunu basılı tutup RESET'e basın, BOOT'u bırakın.)</p>
         <div class="msg info" id="msg-flash5" hidden role="status" aria-live="polite"></div>
         <p class="small"><strong>Eski yöntem:</strong> cihaz USB güncellemeye yanıt vermiyorsa bu düğmeyle güncelleyin. Açılan pencerede “Erase device” kutusunu işaretlemeyin.</p>
-        <div class="row nr">
-          <esp-web-install-button id="install-update-ws5" manifest="manifest-update-ws5.json">
-            <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
-            <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
-            <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
-          </esp-web-install-button>
-        </div>
-        <div class="row or">
+        <div class="row">
           <esp-web-install-button id="install-update-radar" manifest="manifest-update-radar.json">
             <button slot="activate" class="btn" type="button">Eski yöntemle güncelle</button>
             <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
             <span slot="not-allowed" class="msg warn">Güncelleme için bu sayfa https:// adresinden açılmalı.</span>
           </esp-web-install-button>
         </div>
-        <p class="small nr"><strong>1. sisteme geç (yalnız Wi-Fi radar, deck yok):</strong> <a href="radar/">1. sistemin sayfasını</a> açıp 3. adımdan “Yazılımı güncelle”ye basın. Ayarlar ve harita kalır.</p>
-        <p class="small or"><strong>Deck'li sisteme (2. sistem) geçmek için:</strong> <a href="./">ana kurulum sayfasındaki</a> “Kartı hazırla” adımını kullanın. Kartın ayarları silinir; konum ve harita sonra bilgisayardaki Plane Radar Deck programından girilir.</p>
+        <p class="small"><strong>Deck'li sisteme (2. sistem) geçmek için:</strong> <a href="./">ana kurulum sayfasındaki</a> “Kartı hazırla” adımını kullanın. Kartın ayarları silinir; konum ve harita sonra bilgisayardaki Plane Radar Deck programından girilir.</p>
       </div>
       <div class="row" style="margin-top:12px">
         <button type="button" class="btn danger" id="btn-reset" disabled>Ayarları sıfırla</button>
       </div>
-      <p class="small">“Ayarları sıfırla” bağlı cihazdaki <span class="or">WiFi, </span>konum, harita ve birim ayarlarını siler ve cihazı yeniden başlatır.</p>
+      <p class="small">“Ayarları sıfırla” bağlı cihazdaki WiFi, konum, harita ve birim ayarlarını siler ve cihazı yeniden başlatır.</p>
     </details>
   </section>
 
@@ -305,14 +284,7 @@
       <li>Bittiğinde RESET'e bir kez basın, sonra 2. adımdan ayarları yeniden girin.</li>
       <li>Kart hâlâ açılmıyorsa aynı adımları “Erase device” <strong>işaretli</strong> tekrarlayın. Harita da silinir; 2. adımda “Cihaza kaydet” onu yeniden indirir.</li>
     </ol>
-    <div class="row nr">
-      <esp-web-install-button id="install-full-ws5" manifest="manifest-full-ws5.json">
-        <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
-        <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
-        <span slot="not-allowed" class="msg warn">Bu sayfa https:// adresinden açılmalı.</span>
-      </esp-web-install-button>
-    </div>
-    <div class="row or">
+    <div class="row">
       <esp-web-install-button id="install-full-radar" manifest="manifest-full-radar.json">
         <button slot="activate" class="btn" type="button">Tam kurulum (ayarlar silinir)</button>
         <span slot="unsupported" class="msg warn">Bu tarayıcı desteklenmiyor. Bilgisayarda Chrome veya Edge kullanın.</span>
@@ -320,51 +292,6 @@
       </esp-web-install-button>
     </div>
     <div class="msg info" id="msg-flash5r" hidden role="status" aria-live="polite"></div>
-  </section>
-
-  <section class="card m5 nr" aria-labelledby="h-deck">
-    <h2 id="h-deck"><span class="step">4</span>Kontrol tuşları <span class="sub">(stream deck ekranı)</span></h2>
-    <div class="msg info" style="margin-bottom:14px"><strong>Windows ve Mac için Plane Radar Deck:</strong> tuşları bilgisayardaki bu programla da ayarlayabilirsiniz. <span class="nr">2. sistemde uçuş, rota ve hava verisini de internetten alıp karta bu program gönderir (açık kalmalı). </span>Program ayrıca istediğiniz siteyi istediğiniz tarayıcıda açar, program başlatır, gerçek ses seviyesini ve çalan şarkıyı (kapağıyla) karta gönderir.<br><a class="btn primary" href="PlaneRadarDeck.exe" download style="margin:8px 6px 4px 0">Windows programını indir</a><a class="btn primary" href="PlaneRadarDeck-mac.dmg" download style="margin:8px 6px 4px 0">Mac (Apple M işlemci)</a><a class="btn primary" href="PlaneRadarDeck-mac-intel.dmg" download style="margin:8px 0 4px">Mac (Intel işlemci)</a><br><span class="small">Windows ilk açılışta “bilinmeyen yayımcı” uyarısı verebilir: “Ek bilgi → Yine de çalıştır”. Mac'te: indirilen dosyayı açıp “Plane Radar Deck”i Uygulamalar'a sürükleyin; ilk açılışta uygulamaya sağ tıklayıp “Aç” deyin. Hangi Mac sürümünü indireceğinizi Apple menüsü › Bu Mac Hakkında'daki “Yonga” (Apple M) ya da “İşlemci” (Intel) satırı gösterir. Program açıkken bu sayfa karta bağlanamaz; programın menüsünden “Bağlantıyı bırak” deyin.</span></div>
-    <p class="hint">Radardaki ızgara düğmesiyle açılan kontrol ekranının 12 tuşuna resim, yazı ve işlev verin. Tuşlar USB kablosundan bilgisayara klavye tuşu olarak gider; sağdaki yuvarlak düğme sesi açar / kısar, dokununca sessize alır. Bir tuşa tıklayıp aşağıdan düzenleyin, sonra “Cihaza gönder”e basın.</p>
-    <div class="deck-wrap">
-      <div class="deck-grid" id="deck-grid" role="group" aria-label="Kontrol tuşları"></div>
-      <div class="deck-knob" aria-hidden="true">SES</div>
-    </div>
-    <label for="deck-os">Bu kart hangi bilgisayara bağlı? <span class="sub">(ses düğmesinin bir turu sessizden tam sese gider)</span></label>
-    <select id="deck-os" style="margin-bottom:12px">
-      <option value="16">Mac</option>
-      <option value="50">Windows</option>
-    </select>
-    <fieldset id="deck-editor">
-      <legend id="deck-legend">Tuş 1</legend>
-      <label for="deck-label">Tuşta görünen yazı <span class="sub">(boş bırakılabilir)</span></label>
-      <input id="deck-label" type="text" maxlength="22" autocomplete="off">
-      <label for="deck-action" style="margin-top:10px">İşlev</label>
-      <select id="deck-action"></select>
-      <div id="deck-combo" hidden style="margin-top:10px">
-        <div class="checks">
-          <label><input type="checkbox" id="deck-ctrl"> Ctrl</label>
-          <label><input type="checkbox" id="deck-alt"> Alt <span class="sub">(Mac: Option)</span></label>
-          <label><input type="checkbox" id="deck-shift"> Shift</label>
-          <label><input type="checkbox" id="deck-gui"> Win <span class="sub">(Mac: Cmd)</span></label>
-        </div>
-        <label for="deck-key-char" style="margin-top:8px">Tuş <span class="sub">(bir harf ya da rakam, a-z / 0-9)</span></label>
-        <input id="deck-key-char" type="text" maxlength="1" autocomplete="off" style="max-width:6em">
-      </div>
-      <label for="deck-file" style="margin-top:10px">Resim <span class="sub">(PNG, JPG, SVG; şeffaf alanlar tuş renginde görünür)</span></label>
-      <div class="row">
-        <input id="deck-file" type="file" accept="image/*">
-        <button type="button" class="btn" id="btn-deck-noimg">Resmi kaldır</button>
-      </div>
-    </fieldset>
-    <div class="row">
-      <button type="button" class="btn primary" id="btn-deck-send" disabled>Cihaza gönder</button>
-      <button type="button" class="btn" id="btn-deck-defaults">Varsayılan tuşlara dön</button>
-    </div>
-    <progress id="deck-progress" max="100" value="0" hidden style="width:100%;margin-top:10px"></progress>
-    <div class="msg" id="msg-deck" role="status" hidden></div>
-    <p class="small"><strong>Bir web sitesini ya da programı açtırmak için</strong> tuşa F13–F24'ten birini verin ve bilgisayarda o tuşu bir işe bağlayın. Windows'ta AutoHotkey ile tek satır yeter, ör. <code>F13::Run "https://youtube.com"</code>. Mac'te Kestirmeler uygulamasında “URL Aç” kestirmesine klavye kısayolu atayın ya da Hammerspoon kullanın (Mac F13–F20'yi tanır).</p>
-    <p class="small">Gönderirken kart birkaç saniyeliğine kurulum moduna geçer (tuşlar o sırada çalışmaz), bitince klavye moduna döner. Düzenlediğiniz tuşlar bu tarayıcıda da saklanır.</p>
   </section>
 
   </div><!-- #steps -->
@@ -760,16 +687,6 @@
     renderConnection();
   }
 
-  // After a deck upload: back to keyboard mode now (else the board waits a few minutes).
-  async function backToKeyboard() {
-    if (!(state.port && state.device && state.device.usb === 'setup')) return false;
-    state.expectingDrop = true;
-    try { await request('PR:USBNORMAL', ['USBMODE'], 2000); } catch (_) { /* restarting */ }
-    await closePort();
-    renderConnection();
-    return true;
-  }
-
   function onPortLost() {
     note('USB bağlantısı koptu');
     if (!state.port && !state.connected) return;
@@ -790,7 +707,6 @@
     $('#settings-fields').disabled = !on;
     $('#btn-reset').disabled = !on;
     $('#btn-usb-update').disabled = !on;
-    $('#btn-deck-send').disabled = !on;
     $('#settings-hint').hidden = on;
     const chips = $('#device-chips');
     chips.hidden = !on;
@@ -992,9 +908,6 @@
     usb_reselect: 'Kart kurulum moduna geçti ama tarayıcı onu henüz tanımıyor. 1. adımdan “Cihaza bağlan”a basıp listedeki kartı seçin, sonra işlemi tekrar başlatın (yalnızca ilk seferde gerekir).',
     usb_mode: 'Kart kurulum moduna geçtikten sonra yanıt vermedi. Tekrar bağlanıp deneyin.',
     usb_setup: 'Kart klavye modunda kaldı. Sayfayı yenileyip tekrar bağlanın.',
-    deck_too_big: 'Tuş verisi cihaza sığmadı.',
-    bad_deck: 'Tuş verisi cihazda doğrulanamadı (bozuk geldi), tekrar gönderin.',
-    bad_deck_chunk: 'Tuş verisi cihaza bozuk ulaştı, tekrar gönderin.',
   };
 
 
@@ -1200,7 +1113,7 @@
   }
 
   // ------------------------------------------------------------------ model
-  const INSTALLERS = ['install-update', 'install-full', 'install-update-ws5', 'install-full-ws5', 'install-update-radar', 'install-full-radar'];
+  const INSTALLERS = ['install-update', 'install-full', 'install-update-radar', 'install-full-radar'];
   // Which firmware this page installs: the /radar/ copy (data-sys="radar") is system 1.
   const SYS = document.body.dataset.sys === 'radar' ? 'radar' : 'ws5';
   const MODEL_NAMES = { '4': '4" Radar (ESP32-WROOM + 4.0" ekran)', '5': '5" Radar (Waveshare ESP32-S3-Touch-LCD-5)' };
@@ -1261,291 +1174,6 @@
     }
   }
 
-  // ---------------------------------------------------------- deck keys
-  // Stream deck keys on the 5" board. Blob format: firmware src/deck/services/deck_store.h.
-  // Media codes = services::hid::Media (0 vol+, 1 vol-, 2 mute, 3 play/pause, 4 next, 5 prev),
-  // key codes = Arduino keyboard codes (F13 = 0xF0 ... F24 = 0xFB, letters as lowercase ASCII).
-  const DECK_SLOTS = 12, DECK_KEY_BG = [36, 40, 73]; // a key on the card's new background
-  const DECK_ACTIONS = [['none', 'Boş (bir şey yapmaz)'], ['m3', 'Oynat / Duraklat'], ['m5', 'Önceki parça'],
-    ['m4', 'Sonraki parça'], ['m0', 'Ses +'], ['m1', 'Ses -'], ['m2', 'Sessiz']];
-  for (let i = 0; i < 12; i++) DECK_ACTIONS.push(['k' + (0xF0 + i), 'F' + (13 + i) + ' tuşu']);
-  DECK_ACTIONS.push(['combo', 'Özel kısayol (Ctrl / Alt / Shift / Win + tuş)']);
-  const MEDIA_GLYPH = { m0: '🔊+', m1: '🔉−', m2: '🔇', m3: '⏯', m4: '⏭', m5: '⏮' };
-  const deckDefaults = () => {
-    // Previous / play / next are always under the knob (firmware 0.34+): not among the keys.
-    const d = [];
-    for (let i = 0; i < 8; i++) d.push({ label: 'F' + (13 + i), action: 'k' + (0xF0 + i) });
-    d.push({ label: 'Kısayol P', action: 'combo', mods: 7, key: 'p' });
-    while (d.length < DECK_SLOTS) d.push({ label: '', action: 'none' });
-    return d.map((x) => Object.assign({ mods: 0, key: '', img: '' }, x));
-  };
-  const deck = { slots: deckDefaults(), sel: 0 };
-
-  function deckLoad() {
-    try {
-      const v = JSON.parse(localStorage.getItem('pr3d-deck') || 'null');
-      if (Array.isArray(v) && v.length === DECK_SLOTS) deck.slots = v.map((x) => Object.assign({ label: '', action: 'none', mods: 0, key: '', img: '' }, x));
-    } catch (_) { /* defaults */ }
-  }
-  function deckSave() {
-    try { localStorage.setItem('pr3d-deck', JSON.stringify(deck.slots)); } catch (_) {
-      setMsg($('#msg-deck'), 'warn', 'Tarayıcı tuşları saklayamadı (yer yok); gönderebilirsiniz ama sayfayı kapatınca düzenlemeler kaybolur.');
-    }
-  }
-
-  function renderDeck() {
-    const grid = $('#deck-grid');
-    grid.textContent = '';
-    deck.slots.forEach((s, i) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'deck-key';
-      b.setAttribute('aria-pressed', String(i === deck.sel));
-      b.setAttribute('aria-label', 'Tuş ' + (i + 1) + (s.label ? ': ' + s.label : ''));
-      if (s.img) {
-        const im = document.createElement('img');
-        im.src = s.img; im.alt = '';
-        b.appendChild(im);
-      } else if (MEDIA_GLYPH[s.action]) {
-        const g = document.createElement('span');
-        g.textContent = MEDIA_GLYPH[s.action]; g.style.fontSize = '1.3rem';
-        b.appendChild(g);
-      }
-      if (s.label) { const t = document.createElement('span'); t.textContent = s.label; b.appendChild(t); }
-      b.addEventListener('click', () => { deck.sel = i; renderDeck(); renderDeckEditor(); });
-      grid.appendChild(b);
-    });
-  }
-
-  function renderDeckEditor() {
-    const s = deck.slots[deck.sel];
-    $('#deck-legend').textContent = 'Tuş ' + (deck.sel + 1);
-    $('#deck-label').value = s.label || '';
-    $('#deck-action').value = s.action || 'none';
-    $('#deck-combo').hidden = s.action !== 'combo';
-    $('#deck-ctrl').checked = !!(s.mods & 1);
-    $('#deck-shift').checked = !!(s.mods & 2);
-    $('#deck-alt').checked = !!(s.mods & 4);
-    $('#deck-gui').checked = !!(s.mods & 8);
-    $('#deck-key-char').value = s.key || '';
-    $('#btn-deck-noimg').disabled = !s.img;
-    $('#deck-file').value = '';
-  }
-
-  function deckEdited() {
-    const s = deck.slots[deck.sel];
-    s.label = $('#deck-label').value;
-    s.action = $('#deck-action').value;
-    s.mods = ($('#deck-ctrl').checked ? 1 : 0) | ($('#deck-shift').checked ? 2 : 0) | ($('#deck-alt').checked ? 4 : 0) | ($('#deck-gui').checked ? 8 : 0);
-    s.key = ($('#deck-key-char').value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    $('#deck-key-char').value = s.key;
-    $('#deck-combo').hidden = s.action !== 'combo';
-    deckSave();
-    renderDeck();
-  }
-
-  // The picture is kept as a PNG of at most 256 px in its own shape (a photo fills the
-  // key, a see-through icon is fitted into it when the keys are sent).
-  async function deckPicked(ev) {
-    const f = ev.target.files && ev.target.files[0];
-    if (!f) return;
-    try {
-      const url = URL.createObjectURL(f);
-      const img = new Image();
-      img.src = url;
-      await img.decode();
-      const W = img.naturalWidth || 256, H = img.naturalHeight || 256, k = Math.min(1, 256 / Math.max(W, H));
-      const c = document.createElement('canvas');
-      c.width = Math.max(1, Math.round(W * k)); c.height = Math.max(1, Math.round(H * k));
-      const g = c.getContext('2d');
-      g.imageSmoothingQuality = 'high';
-      g.drawImage(img, 0, 0, c.width, c.height);
-      URL.revokeObjectURL(url);
-      deck.slots[deck.sel].img = c.toDataURL('image/png');
-      setMsg($('#msg-deck'), '', '');
-    } catch (_) {
-      setMsg($('#msg-deck'), 'err', 'Bu resim açılamadı. PNG, JPG ya da SVG deneyin.');
-    }
-    deckSave();
-    renderDeck();
-    renderDeckEditor();
-  }
-
-  /** px x px RGB565 (little endian); transparent pixels = magenta 0xF81F, the key colour on the device. */
-  async function deckIconPixels(dataUrl, px) {
-    const img = new Image();
-    img.src = dataUrl;
-    await img.decode();
-    const c = document.createElement('canvas');
-    c.width = c.height = px;
-    const g = c.getContext('2d');
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(img, 0, 0, px, px);
-    const d = g.getImageData(0, 0, px, px).data, out = new Uint8Array(px * px * 2);
-    for (let p = 0; p < px * px; p++) {
-      const a = d[p * 4 + 3];
-      let v = 0xF81F;
-      if (a >= 64) {
-        const mix = (ch, i) => Math.round((ch * a + DECK_KEY_BG[i] * (255 - a)) / 255);
-        const r = mix(d[p * 4], 0), gg = mix(d[p * 4 + 1], 1), b = mix(d[p * 4 + 2], 2);
-        v = ((r >> 3) << 11) | ((gg >> 2) << 5) | (b >> 3);
-        if (v === 0xF81F) v = 0xF81E;
-      }
-      out[p * 2] = v & 255; out[p * 2 + 1] = v >> 8;
-    }
-    return out;
-  }
-
-  // Firmware 0.32+: the picture is the whole key (as the Windows helper makes it): a photo
-  // fills it, a see-through icon sits large in it with room for the label.
-  async function deckKeyPixels(dataUrl, kw, kh, radius, hasLabel) {
-    const img = new Image();
-    img.src = dataUrl;
-    await img.decode();
-    const probe = document.createElement('canvas'); probe.width = probe.height = 48;
-    const pg = probe.getContext('2d'); pg.drawImage(img, 0, 0, 48, 48);
-    const pd = pg.getImageData(0, 0, 48, 48).data;
-    let clear = 0; for (let i = 3; i < pd.length; i += 4) if (pd[i] < 250) clear++;
-    const icon = clear > 0.03 * 48 * 48;
-    const c = document.createElement('canvas'); c.width = kw; c.height = kh;
-    const g = c.getContext('2d');
-    g.imageSmoothingQuality = 'high';
-    g.beginPath(); g.roundRect(0, 0, kw, kh, radius); g.clip();
-    const W = img.naturalWidth, H = img.naturalHeight;
-    if (icon) {
-      const m = Math.max(2, Math.round(kw * 0.08)), band = hasLabel ? Math.round(kh * 0.2) : 0;
-      const aw = kw - 2 * m, ah = kh - 2 * m - band, k = Math.min(aw / W, ah / H);
-      g.drawImage(img, (kw - W * k) / 2, m + (ah - H * k) / 2, W * k, H * k);
-    } else {
-      const k = Math.max(kw / W, kh / H);
-      g.drawImage(img, (kw - W * k) / 2, (kh - H * k) / 2, W * k, H * k);
-      if (hasLabel) {
-        const gr = g.createLinearGradient(0, kh * 0.55, 0, kh);
-        gr.addColorStop(0, 'rgba(4,5,14,0)'); gr.addColorStop(1, 'rgba(4,5,14,0.72)');
-        g.fillStyle = gr; g.fillRect(0, kh * 0.55, kw, kh * 0.45);
-      }
-    }
-    const d = g.getImageData(0, 0, kw, kh).data, out = new Uint8Array(kw * kh * 2);
-    for (let p = 0; p < kw * kh; p++) {
-      const a = d[p * 4 + 3];
-      let v = 0xF81F;
-      if (a >= 64) {
-        const mix = (ch, i) => Math.round((ch * a + DECK_KEY_BG[i] * (255 - a)) / 255);
-        const r = mix(d[p * 4], 0), gg = mix(d[p * 4 + 1], 1), b = mix(d[p * 4 + 2], 2);
-        v = ((r >> 3) << 11) | ((gg >> 2) << 5) | (b >> 3);
-        if (v === 0xF81F) v = 0xF81E;
-      }
-      out[p * 2] = v & 255; out[p * 2 + 1] = v >> 8;
-    }
-    return out;
-  }
-
-  async function buildDeckBlob(dev) {
-    const enc = new TextEncoder();
-    const px = dev.deckicon || 72, full = dev.deckkw > 0 && dev.deckkh > 0;
-    const hb = full ? 8 : 6, steps = parseInt($('#deck-os').value, 10) || 16;
-    const head = new Uint8Array(hb + 28 * DECK_SLOTS);
-    head.set(full ? [0x44, 0x4B, 2, DECK_SLOTS, dev.deckkw, dev.deckkh, steps, 0] : [0x44, 0x4B, 1, DECK_SLOTS, px, steps]);
-    const radius = Math.round(18 * (dev.w || 800) / 800);
-    const icons = [];
-    for (let i = 0; i < DECK_SLOTS; i++) {
-      const s = deck.slots[i], o = hb + 28 * i, a = s.action || 'none';
-      let kind = 0, code = 0, mods = 0;
-      if (a[0] === 'm') { kind = 1; code = parseInt(a.slice(1), 10); }
-      else if (a[0] === 'k') { kind = 2; code = parseInt(a.slice(1), 10); }
-      else if (a === 'combo' && s.key) { kind = 2; code = s.key.charCodeAt(0); mods = s.mods & 15; }
-      head[o] = kind; head[o + 1] = code; head[o + 2] = mods;
-      if (s.img) {
-        icons.push(full ? await deckKeyPixels(s.img, dev.deckkw, dev.deckkh, radius, !!s.label) : await deckIconPixels(s.img, px));
-        head[o + 3] = 1;
-      }
-      let lb = enc.encode(s.label || '');
-      if (lb.length > 23) { let n = 23; while (n > 0 && (lb[n] & 0xC0) === 0x80) n--; lb = lb.slice(0, n); }
-      head.set(lb, o + 4);
-    }
-    const total = head.length + icons.reduce((t, x) => t + x.length, 0);
-    const out = new Uint8Array(total);
-    out.set(head, 0);
-    let off = head.length;
-    for (const x of icons) { out.set(x, off); off += x.length; }
-    return out;
-  }
-
-  async function sendDeck() {
-    const msg = $('#msg-deck'), bar = $('#deck-progress'), btn = $('#btn-deck-send');
-    if (!state.port || !state.connected) { setMsg(msg, 'warn', 'Önce 1. adımdan cihaza bağlanın.'); return; }
-    const dev = state.device || {};
-    if (!dev.deckv) { setMsg(msg, 'warn', 'Cihazdaki yazılım kontrol tuşlarını bilmiyor. Önce 3. adımdan yazılımı güncelleyin.'); return; }
-    if (deck.slots.some((s) => s.action === 'combo' && !s.key)) {
-      setMsg(msg, 'warn', 'Özel kısayol seçilen bir tuşa harf ya da rakam girilmemiş; o tuş bir şey yapmaz.');
-    }
-    btn.disabled = true;
-    bar.hidden = false; bar.value = 0;
-    try {
-      setMsg(msg, 'info', 'Resimler hazırlanıyor…');
-      const blob = await buildDeckBlob(dev);
-      await ensureSetupUsb(msg);
-      setMsg(msg, 'info', 'Tuşlar cihaza gönderiliyor…');
-      const ack = async (cmd, timeout) => {
-        const r = await request(cmd, ['DECKACK', 'ERR'], timeout);
-        if (r.tag === 'ERR') throw new Error(r.data.msg || 'deck');
-        return r;
-      };
-      await ack('PR:DECKBEGIN ' + JSON.stringify({ len: blob.length, crc: crc32(blob) }), 5000);
-      const CH = 360;
-      for (let off = 0, seq = 1; off < blob.length; off += CH, seq++) {
-        const part = blob.subarray(off, Math.min(off + CH, blob.length));
-        let bin = ''; for (let i = 0; i < part.length; i++) bin += String.fromCharCode(part[i]);
-        const r = await ack('PR:DECK ' + seq + ' ' + btoa(bin), 5000);
-        if (r.data.seq !== seq) throw new Error('deck-seq');
-        bar.value = Math.round(((off + part.length) / blob.length) * 100);
-      }
-      const done = await request('PR:DECKEND', ['OK', 'ERR'], 10000);
-      if (done.tag === 'ERR') throw new Error(done.data.msg || 'deck');
-      const back = await backToKeyboard();
-      setMsg(msg, 'ok', 'Tuşlar kaydedildi.' + (back ? ' Kart klavye moduna dönüyor; birkaç saniye sonra kontrol ekranında görünür. Yeniden değişiklik yapmak için 1. adımdan tekrar bağlanın.' : ''));
-    } catch (e) {
-      const m = String(e && e.message ? e.message : e);
-      setMsg(msg, 'err', ERRORS[m] || ('Tuşlar gönderilemedi (' + m + '). Tekrar deneyin.'));
-    }
-    bar.hidden = true;
-    btn.disabled = !state.connected;
-  }
-
-  async function deckToDefaults() {
-    if (!confirm('Tuşlar varsayılana dönsün mü? Bu tarayıcıdaki düzenlemeler ve resimler silinir.')) return;
-    deck.slots = deckDefaults();
-    deck.sel = 0;
-    deckSave();
-    renderDeck();
-    renderDeckEditor();
-    const msg = $('#msg-deck');
-    if (state.port && state.connected && state.device && state.device.deckv) {
-      try {
-        await request('PR:DECKCLEAR', ['OK', 'ERR'], 5000);
-        setMsg(msg, 'ok', 'Cihazdaki tuşlar da varsayılana döndü.');
-      } catch (_) { setMsg(msg, 'warn', 'Sayfadaki tuşlar sıfırlandı, cihaza ulaşılamadı.'); }
-    } else {
-      setMsg(msg, 'info', 'Sayfadaki tuşlar sıfırlandı. Cihazdakini de sıfırlamak için bağlanıp tekrar basın ya da “Cihaza gönder”i kullanın.');
-    }
-  }
-
-  function initDeck() {
-    const sel = $('#deck-action');
-    for (const [v, t] of DECK_ACTIONS) { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); }
-    deckLoad();
-    renderDeck();
-    renderDeckEditor();
-    for (const id of ['#deck-label', '#deck-key-char']) $(id).addEventListener('input', deckEdited);
-    for (const id of ['#deck-action', '#deck-ctrl', '#deck-alt', '#deck-shift', '#deck-gui']) $(id).addEventListener('change', deckEdited);
-    $('#deck-file').addEventListener('change', deckPicked);
-    try { const os = localStorage.getItem('pr3d-deck-os'); if (os === '16' || os === '50') $('#deck-os').value = os; } catch (_) { /* default Mac */ }
-    $('#deck-os').addEventListener('change', () => { try { localStorage.setItem('pr3d-deck-os', $('#deck-os').value); } catch (_) { /* optional */ } });
-    $('#btn-deck-noimg').addEventListener('click', () => { deck.slots[deck.sel].img = ''; deckSave(); renderDeck(); renderDeckEditor(); });
-    $('#btn-deck-send').addEventListener('click', sendDeck);
-    $('#btn-deck-defaults').addEventListener('click', deckToDefaults);
-  }
-
   // ------------------------------------------------------------------ init
   function init() {
     if (!('serial' in navigator)) {
@@ -1580,7 +1208,6 @@
       e.currentTarget.setAttribute('aria-pressed', String(show));
     });
     $('#btn-usb-update').addEventListener('click', usbUpdate);
-    initDeck();
     // The update tool needs the USB port to itself.
     for (const id of INSTALLERS) {
       $('#' + id).addEventListener('click', () => { if (state.port) { state.expectingDrop = false; disconnect(); } }, true);
@@ -1590,7 +1217,7 @@
     }
     $('#btn-model-change').addEventListener('click', changeModel);
     // Capture on the row: runs before the installer's own click handler.
-    for (const id of ['install-update-ws5', 'install-full-ws5', 'install-update-radar', 'install-full-radar']) {
+    for (const id of ['install-update-radar', 'install-full-radar']) {
       const el = document.getElementById(id);
       if (el && el.parentElement) el.parentElement.addEventListener('click', prepFlash5, true);
     }
