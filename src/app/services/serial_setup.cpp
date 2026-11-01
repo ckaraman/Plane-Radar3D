@@ -97,12 +97,8 @@ void sendHello() {
   JsonDocument doc;
   doc["fw"] = config::kFirmwareVersion;
   doc["board"] = "esp32-3d";
-#if defined(BOARD_WS5B)
-  doc["hw"] = "ws5b";  // the setup page sends firmware-ws5b.bin for USB updates
-#elif defined(BOARD_WS5)
+#if defined(BOARD_WS5)
   doc["hw"] = "ws5";  // the setup page sends firmware-ws5.bin for USB updates
-#else
-  doc["hw"] = "wroom";
 #endif
 
   uint8_t mac[6] = {};

@@ -13,8 +13,6 @@ namespace {
 
 #if defined(BOARD_WS5)
 uint8_t rotationFor(bool flip) { return flip ? 2 : 0; }  // RGB panel is landscape-native
-#else
-uint8_t rotationFor(bool flip) { return flip ? 3 : 1; }  // landscape, 480x320
 #endif
 
 }  // namespace
@@ -30,12 +28,6 @@ void displayInit() {
   tft.setBrightness(p.brightness);
   tft.setTextWrap(false);
   tft.fillScreen(0);
-#if !defined(BOARD_WS5)  // capacitive touch is factory calibrated
-  uint16_t cal[8];
-  if (services::display_prefs::touchCalibration(cal)) {
-    tft.setTouchCalibrate(cal);
-  }
-#endif
   displayFontInit();
 }
 

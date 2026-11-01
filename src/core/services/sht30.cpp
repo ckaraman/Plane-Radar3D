@@ -5,8 +5,6 @@
 #if defined(BOARD_WS5)
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>  // shared I2C bus: the touch driver's I2C port
-#else
-#include <Wire.h>
 #endif
 
 #include "config.h"
@@ -44,11 +42,6 @@ bool trigger() {
   const uint8_t cmd[2] = {0x24, 0x00};
   return lgfx::i2c::transactionWrite(config::kI2cPort, config::kSht30Address, cmd, 2, 100000)
       .has_value();
-#else
-  Wire.beginTransmission(config::kSht30Address);
-  Wire.write(0x24);
-  Wire.write(0x00);
-  return Wire.endTransmission() == 0;
 #endif
 }
 
@@ -58,13 +51,6 @@ bool collect() {
   if (!lgfx::i2c::transactionRead(config::kI2cPort, config::kSht30Address, buf, 6, 100000)
            .has_value()) {
     return false;
-  }
-#else
-  if (Wire.requestFrom(static_cast<int>(config::kSht30Address), 6) != 6) {
-    return false;
-  }
-  for (uint8_t& b : buf) {
-    b = static_cast<uint8_t>(Wire.read());
   }
 #endif
   if (crc8(buf, 2) != buf[2] || crc8(buf + 3, 2) != buf[5]) {
@@ -82,10 +68,6 @@ bool collect() {
 }  // namespace
 
 void init() {
-#if !defined(BOARD_WS5)  // the 5" board's bus is started by the display (CH422G / touch)
-  Wire.begin(config::kI2cPinSda, config::kI2cPinScl, 100000);
-  Wire.setTimeOut(20);
-#endif
   // First measurement right away so the status bar fills in quickly.
   s_last_trigger_ms = millis() - config::kSht30IntervalMs;
 }

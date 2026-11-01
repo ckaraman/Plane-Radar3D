@@ -281,9 +281,6 @@ void statusScreenConnectFailed() {
       {"Wi-Fi'yi kurulum sayfasından", 1.50f, &kGfxBody},
 #if defined(BOARD_WS5)  // no BOOT button on the 5" board
       {"düzeltin", 1.50f, &kGfxBody},
-#else
-      {"düzeltin ya da BOOT'a", 1.50f, &kGfxBody},
-      {"3 sn basılı tutun", 1.50f, &kGfxBody},
 #endif
   };
   drawTextBlock(config::kColorYellow, config::kTextOnYellow, lines,

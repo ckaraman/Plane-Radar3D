@@ -1767,8 +1767,6 @@ void drawRings(const Cam& c) {
 
 #if defined(BOARD_WS5)
   setFont(&ui::font::Sans8);  // the built-in 6x8 font is too small on the 800x480 panel
-#else
-  setFont(&fonts::Font0);
 #endif
   s_spr.setTextDatum(textdatum_t::middle_center);
   const float radii[3] = {inner[0], inner[1], c.R};

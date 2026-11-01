@@ -330,12 +330,6 @@ bool wifiReconnectInBackground() {
   return true;
 }
 
-bool wifiReconnect() {
-  initBootButton();
-  Console.println("WiFi reconnecting...");
-  return connectSavedNetwork(true);
-}
-
 void wifiLoop() {
   // Setup is USB-only: nothing listens on the network.
   services::serial_setup::poll();

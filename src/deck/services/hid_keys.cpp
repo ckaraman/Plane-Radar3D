@@ -67,7 +67,7 @@ void sendMedia(Media m) {
 
 }  // namespace services::hid
 
-#else  // 4" board or USB-Serial/JTAG mode: no keyboard
+#else  // USB-Serial/JTAG mode: no keyboard
 
 namespace services::hid {
 void begin() {}

@@ -8,7 +8,7 @@
 /**
  * Smooth text for the control screen: Inter, anti-aliased (4-bit coverage), blended into
  * a paint::Canvas with the same dithering as the rest of the screen. UTF-8 strings;
- * letters a font lacks are left out. Fonts: tools/fonts/make_ui_fonts.py (5" and 5B).
+ * letters a font lacks are left out. Fonts: tools/fonts/make_ui_fonts.py.
  */
 namespace ui::text {
 

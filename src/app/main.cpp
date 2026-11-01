@@ -1,5 +1,5 @@
 /**
- * Plane Radar 3D — ESP32-WROOM-32U + 4.0" ST7796S (480x320, XPT2046 touch) + SHT30.
+ * Plane Radar 3D — Waveshare ESP32-S3-Touch-LCD-5 (800x480, capacitive touch) + SHT30.
  *
  * Same services as the round plane-radar-clock build (USB setup page, adsb.fi,
  * NTP clock, Open-Meteo weather, map layer); the radar itself is a perspective
@@ -54,8 +54,6 @@
 namespace {
 
 bool g_radar_visible = false;
-unsigned long g_wifi_down_since = 0;
-unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_redraw_ms = 0;
 
 enum class Screen { Radar, Clock, Weather, Water, Deck };
@@ -74,12 +72,11 @@ const char* screenName() {  // timing report (services/perf.h)
 
 unsigned long g_last_aircraft_ms = 0;
 
-// Touch state (polled; the XPT2046 shares the SPI bus with the panel).
+// Touch state (polled).
 bool g_touch_down = false;
 bool g_touch_long_fired = false;
 unsigned long g_touch_down_ms = 0;
-// Resistive panels give a noisy first sample, so a tap uses the average of the
-// samples taken while the finger was down (the first one left out).
+// A tap uses the average of the samples taken while the finger was down.
 long g_touch_sum_x = 0;
 long g_touch_sum_y = 0;
 int g_touch_samples = 0;
@@ -98,12 +95,6 @@ void showRadarIfConnected() {
   // 5": the screens stay usable without Wi-Fi (the control screen only needs the USB
   // cable); the radar shows that the network is away and Wi-Fi comes back on its own.
   if (online()) services::clock::startSync();
-#else
-  if (!online()) {
-    g_radar_visible = false;
-    return;
-  }
-  services::clock::startSync();  // no-op after the first call
 #endif
   g_screen = Screen::Radar;
   g_last_aircraft_ms = millis();
@@ -343,8 +334,6 @@ void onTouchTap(int x, int y) {
   }
 #endif
   if (ui::radarWaterButtonHit(x, y)) {
-#else
-  if (ui::waterButtonHit(x, y)) {
 #endif
     openWater();
     return;
@@ -456,47 +445,6 @@ void pollTouch() {
     }
   }
 }
-#else
-void pollTouch() {
-  lgfx::touch_point_t tp;
-  const bool down = tft.getTouch(&tp) > 0;
-  const unsigned long now = millis();
-  if (down) {
-    if (!g_touch_down) {
-      g_touch_down = true;
-      g_touch_long_fired = false;
-      g_touch_down_ms = now;
-      g_touch_first_x = tp.x;
-      g_touch_first_y = tp.y;
-      g_touch_sum_x = 0;
-      g_touch_sum_y = 0;
-      g_touch_samples = 0;
-    } else {
-      g_touch_sum_x += tp.x;
-      g_touch_sum_y += tp.y;
-      ++g_touch_samples;
-    }
-    if (!g_touch_long_fired && now - g_touch_down_ms >= config::kTouchLongPressMs) {
-      g_touch_long_fired = true;
-      ui::settingsMenuRun();
-      // Back from the menu: repaint whatever screen is active.
-      repaintScreen();
-      g_touch_down = false;
-    }
-    return;
-  }
-  if (g_touch_down) {
-    g_touch_down = false;
-    if (!g_touch_long_fired && now - g_touch_down_ms < 800) {
-      if (g_touch_samples > 0) {
-        onTouchTap(static_cast<int>(g_touch_sum_x / g_touch_samples),
-                   static_cast<int>(g_touch_sum_y / g_touch_samples));
-      } else {
-        onTouchTap(g_touch_first_x, g_touch_first_y);
-      }
-    }
-  }
-}
 #endif
 
 #if defined(WITH_WIFI)
@@ -563,13 +511,6 @@ void setup() {
   benchMemory();
 #endif
 
-#if !defined(BOARD_WS5)  // capacitive panel on the 5" board needs no calibration
-  // Finger on the screen during power-up: (re)calibrate the touch panel.
-  lgfx::touch_point_t tp;
-  if (tft.getTouch(&tp) > 0) {
-    displayRunTouchCalibration();
-  }
-#endif
 
 #if defined(WITH_WIFI)
   if (wifiShowsSetupScreenOnBoot()) {
@@ -664,50 +605,5 @@ void loop() {
     delay(5);
     return;
   }
-#else  // the old 4" board (not built in this repo; removed in stage 10)
-
-  if (!online()) {
-    if (g_radar_visible) {
-      Console.println("WiFi lost — will reconnect");
-      g_radar_visible = false;
-    }
-    if (g_wifi_down_since == 0) {
-      g_wifi_down_since = millis();
-    }
-    const unsigned long down_ms = millis() - g_wifi_down_since;
-    if (down_ms >= config::kWifiDownGraceMs &&
-        millis() - g_last_reconnect_ms >= config::kWifiReconnectIntervalMs) {
-      g_last_reconnect_ms = millis();
-      if (wifiReconnect()) {
-        g_wifi_down_since = 0;
-        showRadarIfConnected();
-      }
-    }
-  } else {
-    g_wifi_down_since = 0;
-    if (!g_radar_visible) {
-      showRadarIfConnected();
-    } else {
-      pollTouch();
-      // 5": the radar redraws as fast as it can (camera moves smoothly); the other
-      // screens keep the slow cadence.
-      unsigned long interval =
-          g_screen == Screen::Radar ? config::kRadarFrameIntervalMs
-          : g_screen == Screen::Deck ? 33UL  // knob and music page move smoothly
-                                     : config::kRadarRedrawIntervalMs;
-#if defined(WITH_DECK)
-      // An album cover on its way from the Windows helper: one small chunk per answer, so
-      // fewer frames for those few seconds let it arrive many times faster.
-      if (services::host::coverReceiving() && interval < 250UL) interval = 250UL;
-#endif
-      if (millis() - g_last_redraw_ms >= interval) {
-        g_last_redraw_ms = millis();
-        updateScreen();
-        pollTouch();  // a short tap may start while the frame is being drawn
-      }
-    }
-  }
-
-  delay(5);
 #endif
 }

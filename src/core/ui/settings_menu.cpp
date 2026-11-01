@@ -42,9 +42,6 @@ enum Item {
 // (no calibration, inversion or red/blue options) and an on/off backlight.
 #if defined(BOARD_WS5)
 constexpr Item kVisible[] = {kFlip, kLabels, kExag, kRange, kContrast, kInfo, kPlaces};
-#else
-constexpr Item kVisible[] = {kCalibrate, kInvert, kBgr,        kFlip,     kLabels,
-                             kExag,      kRange,  kBrightness, kContrast, kInfo};
 #endif
 constexpr int kVisibleCount = sizeof(kVisible) / sizeof(kVisible[0]);
 
