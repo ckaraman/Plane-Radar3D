@@ -63,6 +63,12 @@ struct LinkStats {
   uint16_t unmount = 0;    // USB went away (cable, PC)
   uint16_t suspend = 0;    // the PC suspended the bus
   char before[4][12] = {};  // starts of the PC's last lines when the longest drop began
+  // Stage 10e-0, when the longest drop began: TinyUSB's own send buffer free (0: full, the
+  // PC took nothing; more: the port was held by another write), bytes from the PC not read
+  // yet, the core that wrote. lock_ms: longest wait for the port's lock (250: given up).
+  uint16_t fifo = 0, rxwait = 0, lock_ms = 0;
+  uint8_t core = 0;
+  uint16_t early = 0;  // reconnects after 3 s of drops while the PC still wrote (stage 10e)
 };
 const LinkStats& link();
 void clearLink();

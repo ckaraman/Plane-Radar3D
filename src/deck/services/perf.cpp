@@ -114,12 +114,17 @@ void tick(const char* scr, const char* page) {
     u["unmount"] = l.unmount;
     u["susp"] = l.suspend;
     u["fix"] = console::usbRecoveries();
+    u["early"] = l.early;
+    u["fifo"] = l.fifo;
+    u["rxwait"] = l.rxwait;
+    u["lock_ms"] = l.lock_ms;
+    u["core"] = l.core;
     JsonArray b = u["before"].to<JsonArray>();
     for (const auto& line : l.before) {
       if (line[0]) b.add(line);
     }
   }
-  char buf[768];
+  char buf[1024];
   serializeJson(doc, buf, sizeof(buf));
   const uint32_t dropped = console::droppedBytes();
   Console.printf("PR:PERF %s\n", buf);

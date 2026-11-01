@@ -10,7 +10,8 @@
  *            "cover_n":1,"cover_ms":95,"dec_ms":60,"thumb_n":10,"thumb_ms":120,"rx_ms":1800,"heap":81234,
  *            "psram":1457936,"psram_blk":1179648,"q":59,"draw":[14,62,9],"front":[3,20,15,10,14],"card":[1,0,9,2,3],
  *            "qpanel":[0,59],"usb":{"txfull_ms":15020,"drop":2310,"rxgap_ms":16000,"dtr_off":0,
- *            "unmount":0,"susp":0,"fix":0,"before":["PR:Q {i:3,","PR:VOL {v:"]}}
+ *            "unmount":0,"susp":0,"fix":0,"early":0,"fifo":0,"rxwait":0,"lock_ms":250,"core":1,
+ *            "before":["PR:Q {i:3,","PR:VOL {v:"]}}
  * Stage 10c: "q" frames drawn with the queue open, "draw" the slowest frame's parts in ms
  * (page base copied, moving parts, shown), "front" that frame's moving parts by kind (tabs,
  * text, bars, controls, next card / queue panel), "card" that frame's next card / queue panel

@@ -20,6 +20,7 @@ extern "C" bool tud_connect(void);
 extern "C" bool tud_cdc_n_connected(uint8_t itf);
 extern "C" bool tud_mounted(void);
 extern "C" bool tud_suspended(void);
+extern "C" uint32_t tud_cdc_n_write_available(uint8_t itf);
 
 ConsoleIO Console;
 
@@ -156,11 +157,16 @@ char s_lines[4][12] = {};  // starts of the PC's last lines, oldest first
 char s_cur[12] = {};
 int s_cur_n = 0;
 char s_full_before[4][12] = {};  // s_lines when the drop going on began
+uint16_t s_full_fifo = 0, s_full_rxwait = 0;
+uint8_t s_full_core = 0;
 
 void txFull() {
   if (s_tx_full_since != 0) return;
   s_tx_full_since = millis();
   memcpy(s_full_before, s_lines, sizeof(s_lines));
+  s_full_fifo = static_cast<uint16_t>(std::min<uint32_t>(tud_cdc_n_write_available(0), 0xFFFF));
+  s_full_rxwait = static_cast<uint16_t>(std::max(0, std::min(s_cdc->available(), 0xFFFF)));
+  s_full_core = static_cast<uint8_t>(xPortGetCoreID());
 }
 
 void txFree() {
@@ -169,6 +175,9 @@ void txFree() {
   if (ms > s_link.txfull_ms) {
     s_link.txfull_ms = ms;
     memcpy(s_link.before, s_full_before, sizeof(s_full_before));
+    s_link.fifo = s_full_fifo;
+    s_link.rxwait = s_full_rxwait;
+    s_link.core = s_full_core;
   }
   s_tx_full_since = 0;
 }
@@ -215,8 +224,14 @@ void tick() {
     // Counted only while a program holds the port (with none, every write is dropped) and
     // once until the helper speaks again.
     if (!tud_cdc_n_connected(0)) txFree();
-    const bool tx_stuck = s_host_seen && s_tx_full_since != 0 && millis() - s_tx_full_since > 20000;
-    if (((s_host_seen && millis() - s_last_host_ms > 20000) || tx_stuck) && tud_cdc_n_connected(0)) {
+    const unsigned long now = millis();
+    const bool tx_stuck = s_host_seen && s_tx_full_since != 0 && now - s_tx_full_since > 20000;
+    // Stage 10e: the PC still writes (its read thread waits for the card) but nothing the
+    // card says gets through for 3 s: stalled, no need to wait the 20 s (taps were lost).
+    const bool pc_writes = s_last_rx_ms != 0 && now - s_last_rx_ms < 3000;
+    const bool tx_short = s_host_seen && s_tx_full_since != 0 && now - s_tx_full_since > 3000 && pc_writes;
+    if (((s_host_seen && now - s_last_host_ms > 20000) || tx_stuck || tx_short) && tud_cdc_n_connected(0)) {
+      if (tx_short && !tx_stuck) ++s_link.early;
       ++s_recoveries;
       s_host_seen = false;  // once, until the helper speaks again
       txFree();
@@ -260,7 +275,10 @@ size_t ConsoleIO::write(const uint8_t* buffer, size_t size) {
   size_t done = 0;
   const unsigned long t0 = millis();
   while (done < size) {
-    const int room = console::s_cdc->availableForWrite();
+    const unsigned long t_lock = millis();
+    const int room = console::s_cdc->availableForWrite();  // waits up to 250 ms for its lock
+    const uint32_t waited = millis() - t_lock;
+    if (waited > console::s_link.lock_ms) console::s_link.lock_ms = static_cast<uint16_t>(std::min<uint32_t>(waited, 0xFFFF));
     if (room <= 0) {
       const bool recently = s_stalled_ms != 0 && millis() - s_stalled_ms < 1000;
       if (recently || millis() - t0 >= 30) {
