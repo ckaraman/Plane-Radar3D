@@ -71,7 +71,7 @@ içinde. Sürümler `include/config.h` içinde.
 
 ## Sıradaki oturum (10. aşama devamı)
 
-- Dal: ws5. Kart 5in-0.50.2 (10f) ws5'te, kodlandı, denenecek. 5in-0.50.1 (10e) main'de, kartta denendi (takılma tekrar etmedi); 5in-0.50.0 (10d-1) main'de, kartta denendi: ölçüm ve gözle kontrol tamam (01.11). 5in-0.49.0 (10c-3) main'de, kartta denendi: ölçüm ve gözle kontrol tamam (01.11). Deck 1.11.1.
+- Dal: ws5. Kart 5in-0.50.2 (10f) main'de, kodlandı, kartta denenecek. 5in-0.50.1 (10e) main'de, kartta denendi (takılma tekrar etmedi); 5in-0.50.0 (10d-1) main'de, kartta denendi: ölçüm ve gözle kontrol tamam (01.11). 5in-0.49.0 (10c-3) main'de, kartta denendi: ölçüm ve gözle kontrol tamam (01.11). Deck 1.11.1.
 - 10c-3 ölçümü: müzik sayfası duruşta `turn_max` 82 → 5–7 ms (`draw` [0,5,0], zemin kopyası 0); sıra açıkken 5 ms; tuşlar 1 ms. Şarkı geçişinde hâlâ ~80–120 ms: zemin yeniden kuruluyor (36 ms, beklenen) ve sıradaki kartı `front[4]` 50–67 ms; küçük resimler geldikçe sıra sürümü artıp kart her seferinde yeniden çiziliyor. Takılma yok.
 - Ekranın üç tamponu var (PLAN'da önce iki yazıyordu); her biri kendi kaydını tutar (`s_fb`).
 - 10d-1 (5in-0.50.0) main'de, kartta ölçüldü (01.11): kart camı gitti, panel camı ~%25 kısa. Gözle kontrol tamam (01.11), tamam (kartta denendi). Kalan adaylar: panel kaydırırken iki 13 ms'lik kopya (zeminden + hazır kopyaya), 10 küçük resmi karede bir açmak (15 ms sıçrama), radar dönüşü (bu ölçümde de 22–26 kare/sn, `turn_max` 129–181), tuşlar ilk giriş (543 ms). Açılıştan hemen sonra bir kez `batch W 1 skipped 5.02 s` ve `usb` txfull 543 ms / drop 162 (kart yeni yüklenip bağlanırken; tekrarlarsa bakılır).
