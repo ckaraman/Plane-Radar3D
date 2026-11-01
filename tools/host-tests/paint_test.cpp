@@ -64,6 +64,42 @@ uint16_t refPack(int r, int g, int b, int x, int y) {
   return static_cast<uint16_t>((v >> 8) | (v << 8));
 }
 
+// roundRect() as it was before its inside shortcut (stage 10d-1): every pixel's distance.
+void refBlend(uint16_t* p, int x, int y, const Rgb& c, int a) {
+  if (a <= 0) return;
+  if (a >= 255) {
+    *p = pack(c.r, c.g, c.b, x, y);
+    return;
+  }
+  int r, g, b;
+  unpack(*p, &r, &g, &b);
+  *p = pack(r + ((c.r - r) * a) / 255, g + ((c.g - g) * a) / 255, b + ((c.b - b) * a) / 255, x, y);
+}
+
+void refRoundRect(const Canvas& c, int x, int y, int w, int h, int radius, Rgb fill, int alpha, Rgb border,
+                  int border_alpha) {
+  auto clampf = [](float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); };
+  const float cx = x + w * 0.5f, cy = y + h * 0.5f, hw = w * 0.5f, hh = h * 0.5f;
+  const float r = static_cast<float>(std::min(radius, std::min(w, h) / 2));
+  const int x0 = std::max(0, x - 1), y0 = std::max(0, y - 1);
+  const int x1 = std::min(c.w, x + w + 1), y1 = std::min(c.h, y + h + 1);
+  for (int py = y0; py < y1; ++py) {
+    for (int px = x0; px < x1; ++px) {
+      const float qx = fabsf(px + 0.5f - cx) - (hw - r), qy = fabsf(py + 0.5f - cy) - (hh - r);
+      const float ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0;
+      const float sd = sqrtf(ox * ox + oy * oy) + std::min(std::max(qx, qy), 0.0f) - r;
+      const float cov = clampf(0.5f - sd, 0.0f, 1.0f);
+      if (cov <= 0.0f) continue;
+      uint16_t* p = c.px + py * c.w + px;
+      refBlend(p, px, py, fill, static_cast<int>(alpha * cov + 0.5f));
+      if (border_alpha > 0) {
+        const float band = clampf(0.5f - fabsf(sd + 0.5f) + 0.5f, 0.0f, 1.0f) * cov;
+        if (band > 0.0f) refBlend(p, px, py, border, static_cast<int>(border_alpha * band + 0.5f));
+      }
+    }
+  }
+}
+
 int failures = 0;
 size_t g_cache_bytes = 0;  // what bgCacheInit asked for
 
@@ -151,6 +187,37 @@ int main() {
       std::snprintf(what, sizeof(what), "cover page %dx%d %s", cw, ch, bgr ? "bgr" : "rgb");
       compare(what, a, b, ms_old, ms_new);
     }
+  }
+
+  // roundRect: exactly the old pixels, over a background, for the deck's shapes and odd ones
+  // (thin lines, tiny, off the canvas, radius over half, border only, opaque).
+  {
+    struct Rr {
+      int x, y, w, h, rad, alpha, border_alpha;
+    };
+    const Rr rrs[] = {{448, 64, 332, 400, 18, 16, 34}, {453, 131, 322, 54, 11, 40, 0}, {462, 128, 304, 1, 0, 14, 0},
+                      {560, 380, 220, 72, 14, 22, 36}, {20, 20, 4, 20, 1, 235, 0},     {774, 140, 3, 60, 1, 70, 0},
+                      {100, 200, 160, 20, 10, 46, 0},  {-30, -10, 120, 60, 18, 15, 26}, {760, 450, 80, 60, 18, 255, 150},
+                      {300, 300, 50, 50, 40, 60, 150}, {10, 400, 200, 50, 18, 0, 40},  {5, 5, 2, 2, 1, 200, 200},
+                      {333, 77, 101, 33, 7, 255, 0},   {0, 0, kW, kH, 0, 30, 30}};
+    int bad = 0, worst = 0;
+    double t_old = 0, t_new = 0;
+    for (int k = 0; k < 2; ++k) {
+      for (const Rr& q : rrs) {
+        backgroundFast(ca);
+        std::copy(a.begin(), a.end(), b.begin());
+        const Rgb fill = k ? Rgb{196, 181, 253} : Rgb{255, 255, 255}, border{214, 202, 255};
+        t_old += timed([&] { refRoundRect(ca, q.x, q.y, q.w, q.h, q.rad, fill, q.alpha, border, q.border_alpha); });
+        t_new += timed([&] { roundRect(cb, q.x, q.y, q.w, q.h, q.rad, fill, q.alpha, border, q.border_alpha); });
+        int n = 0;
+        for (size_t i = 0; i < a.size(); ++i) n += a[i] != b[i];
+        bad += n;
+        worst = std::max(worst, n);
+      }
+    }
+    std::printf("%s roundRect: %d pixels differ (worst shape %d), old %.1f ms, new %.1f ms\n", bad == 0 ? "ok  " : "FAIL",
+                bad, worst, t_old, t_new);
+    failures += bad != 0;
   }
 
   float r, g, bl, r2, g2, b2;

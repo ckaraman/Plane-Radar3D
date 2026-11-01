@@ -112,6 +112,7 @@ bool s_ready = false;
 bool s_keys_dirty = true, s_music_dirty = true;
 uint32_t s_keys_gen = 0, s_cover_gen = 0, s_now_gen = 0;
 uint32_t s_cover_for_id = 0;  // track the music base was built for
+bool s_music_card = false;    // the music base has the next card's glass (stage 10d-1)
 
 struct RingPx {
   uint16_t x, y;  // canvas position
@@ -689,10 +690,19 @@ struct CoverJob {
   int cw, ch;
   uint32_t gen, id;    // the cover generation and track it was built for
   uint32_t dec_us, total_us;
+  bool card;           // music page: with the next card's glass
 };
 CoverJob s_job{};
 std::atomic<Job> s_job_state{Job::Idle};
 TaskHandle_t s_job_task = nullptr;
+
+/** The music page shows the next song's card (else a hint in its place). */
+bool nextCardShown() { return host::queueValid() && host::queueCount() > 1; }
+
+/** The next card's glass: in the music base, or drawn with the card when the base has none. */
+void nextCardGlass(const paint::Canvas& c) {
+  paint::roundRect(c, kNextX, kNextY, kNextW, kNextH, D(14), kWhite, 22, kWhite, 36);
+}
 
 void buildMusicBase(CoverJob& j) {
   auto& s = s_music_base;
@@ -726,13 +736,14 @@ void buildMusicBase(CoverJob& j) {
   // The top bar never changes on this page: part of the base (stage 10c-3).
   pageTabs(c, true);
   radarPill(c);
+  if (j.card) nextCardGlass(c);  // 10d-1: ~13 ms a frame less
 }
 
 void fmtTime(char* out, size_t cap, uint32_t s) {
   snprintf(out, cap, "%lu:%02lu", static_cast<unsigned long>(s / 60), static_cast<unsigned long>(s % 60));
 }
 
-void drawNextCard(const paint::Canvas& c);
+void drawNextCard(const paint::Canvas& c, bool glass);
 
 // Music page parts, in bands that do not overlap (stage 10c-3): text, time bar, then the
 // bottom row split into volume, transport and the next card.
@@ -817,13 +828,13 @@ void drawMusicFront(Gfx& s, Frame& f) {
     paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
   }
   frontPart(kFpBars);
-  const bool next = host::queueValid() && host::queueCount() > 1;
+  const bool next = nextCardShown();
   // A queue picture arriving bumps the version too.
   cardStart();
   if (part(f, 4, next ? mix(kSeed, host::queueVersion()) : 0, kMNextX, kMRowY, kW - kMNextX, kH - kMRowY)) {
     cardPart(kCpCopy);
     if (next) {
-      drawNextCard(c);
+      drawNextCard(c, !s_music_card);
     } else {
       text::drawMid(c, text::Ui13, "Sola kaydır: tuşlar", kW - kMusicPad, kCtrlY, kTextMuted, 255, text::Align::Right);
     }
@@ -900,11 +911,11 @@ void drawThumb(const paint::Canvas& c, int i, int x, int y, int sz) {
 }
 
 /** Bottom right of the music page: the next song; tapped, the queue opens. */
-void drawNextCard(const paint::Canvas& c) {
+void drawNextCard(const paint::Canvas& c, bool glass) {
   refreshThumbs();
   cardPart(kCpDecode);
   const host::QueueRow& r = host::queueRow(1);
-  paint::roundRect(c, kNextX, kNextY, kNextW, kNextH, D(14), kWhite, 22, kWhite, 36);
+  if (glass) nextCardGlass(c);
   cardPart(kCpGlass);
   const int ts = D(36);
   const int px = host::queueThumbPx();
@@ -1019,6 +1030,7 @@ void finishJob() {
   } else {
     s_cover_gen = j.gen;
     s_cover_for_id = j.id;
+    s_music_card = j.card;
     s_music_dirty = false;
     s_qbase_dirty = true;  // the open queue is drawn on this screen too
   }
@@ -1030,7 +1042,8 @@ void startJob(bool queue) {
   size_t len = 0;
   int cw = 0, ch = 0;
   const uint8_t* jpg = host::cover(&len, &cw, &ch);
-  s_job = CoverJob{queue, coverForNow() ? jpg : nullptr, len, cw, ch, host::coverGeneration(), host::now().id, 0, 0};
+  s_job = CoverJob{queue, coverForNow() ? jpg : nullptr, len, cw, ch, host::coverGeneration(), host::now().id, 0, 0,
+                     !queue && nextCardShown()};
   if (s_job.jpg != nullptr) host::holdCover(true);
   s_job_state.store(Job::Running);
   if (s_job_task != nullptr) {
@@ -1290,7 +1303,8 @@ void present() {
       startJob(true);
       if (s_job_state.load() != Job::Idle) return;
     }
-  } else if (s_music_dirty || s_cover_gen != host::coverGeneration() || s_cover_for_id != host::now().id) {
+  } else if (s_music_dirty || s_cover_gen != host::coverGeneration() || s_cover_for_id != host::now().id ||
+             (s_music_card && !nextCardShown())) {  // its glass under nothing: built again
     startJob(false);
     if (s_job_state.load() != Job::Idle) return;
   }

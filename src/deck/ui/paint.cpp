@@ -169,9 +169,24 @@ void roundRect(const Canvas& c, int x, int y, int w, int h, int radius, Rgb fill
   const float r = static_cast<float>(std::min(radius, std::min(w, h) / 2));
   const int x0 = std::max(0, x - 1), y0 = std::max(0, y - 1);
   const int x1 = std::min(c.w, x + w + 1), y1 = std::min(c.h, y + h + 1);
+  // Inside, away from the corners, a pixel is 2+ px from the edge: fully covered, no border
+  // band, so its distance need not be worked out (stage 10d-1; same pixels).
+  const int ix0 = std::max(x0, static_cast<int>(ceilf(cx - hw + 1.5f))),
+            ix1 = std::min(x1, static_cast<int>(floorf(cx + hw - 2.5f)) + 1);
   for (int py = y0; py < y1; ++py) {
     uint16_t* row = c.px + py * c.w;
+    const float dy = fabsf(py + 0.5f - cy);
+    const bool mid = dy <= hh - r && dy <= hh - 2.0f && ix0 < ix1;
+    const int sx0 = mid ? ix0 : x1, sx1 = mid ? ix1 : x1;
     for (int px = x0; px < x1; ++px) {
+      if (px == sx0) {
+        if (alpha > 0) {
+          for (; px < sx1; ++px) blendPx(row + px, px, py, fill, alpha);
+        } else {
+          px = sx1;
+        }
+        if (px >= x1) break;
+      }
       const float sd = sdRoundRect(px + 0.5f, py + 0.5f, cx, cy, hw, hh, r);
       const float cov = clampf(0.5f - sd, 0.0f, 1.0f);
       if (cov <= 0.0f) continue;
