@@ -6,8 +6,8 @@ namespace services::usb_feed {
 
 /**
  * Aircraft data sent from a computer over the USB cable, for running the
- * display without Wi-Fi (no antenna yet, or a test bench). The PC page
- * (tools/usb-koprusu.html) downloads the traffic and sends, every few seconds:
+ * display without Wi-Fi. The PC program (helper/, Plane Radar Deck) downloads the
+ * traffic and sends, every few seconds:
  *
  *   PR:ABEGIN
  *   PR:A lat,lon,track_deg,gs_kt,alt_ft,vrate_fpm,callsign,type[,from,from_city,to,to_city]

@@ -111,7 +111,7 @@ ayırıp `src/net/`'e taşımak; 2. sistem `src/net/`'i hiç derlemez. Yeni tek 
 gönderimi ve "PC yok → saat" kararı.
 
 **PC tarafı.** Yeni bir veri motoru (`helper/deck/feed.py`, Aşama 7): bugünkü
-`tools/usb-kopru*/radar_kopru.py`'nin indirme, süzme ve satır kurma kodu buraya taşınır.
+`tools/usb-kopru*/radar_kopru.py`'nin (eski USB köprüsü, 10. aşamada silindi) indirme, süzme ve satır kurma kodu buraya taşınır.
 - Dışa açık yüzü küçük: `Feed(card, fetch).tick(now)`: zamanı gelen işi yapar (uçak partisi,
   hava, rota sorgusu) ve döner.
 - İki bağımlılığı dışarıdan alır: `card` (satır gönder / satır oku: gerçek seri port

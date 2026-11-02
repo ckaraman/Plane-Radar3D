@@ -237,7 +237,7 @@ class Device:
                 if not self.send(line):
                     return None
                 if i % 6 == 5:
-                    time.sleep(0.04)  # the radar_kopru pacing: CDC drops long bursts
+                    time.sleep(0.04)  # the old USB bridge pacing: CDC drops long bursts
             r = self.request(end, [ack], timeout) if end else True
             return r
         finally:

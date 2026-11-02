@@ -1,5 +1,5 @@
 """System 2 data engine: the PC downloads the aircraft around the card and the weather and
-sends them over USB ready to draw (docs/PROTOCOL.md). The card's clock follows the AEND time. Moved here from tools/usb-kopru*/radar_kopru.py.
+sends them over USB ready to draw (docs/PROTOCOL.md). The card's clock follows the AEND time. Moved here from the old USB bridge (tools/usb-kopru*/radar_kopru.py, removed in stage 10).
 
 Feed(card, fetch).tick(now) does whatever is due and returns. card is device.Device (or
 the fake card in the tests), fetch(url, timeout) -> parsed JSON (get_json or a canned

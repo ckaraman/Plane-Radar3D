@@ -84,9 +84,6 @@ jobs:
 
   # Mac helper (same program, macOS parts): a .dmg each for Apple M and Intel Macs.
   deckapp-mac:
-    # Paused at the owner's request: Windows only until the program is final and a Mac
-    # build is asked for again. Remove this line to build the .dmg files again.
-    if: ${{ false }}
     strategy:
       fail-fast: false
       matrix:
@@ -248,9 +245,6 @@ jobs:
             cp $B/bootloader.bin site/bootloader-$ENV.bin
             cp $B/partitions.bin site/partitions-$ENV.bin
           done
-          (cd tools/usb-kopru && zip -q ../../site/radar-usb-kopru.zip USB-Kopru-Baslat.bat usb-koprusu.ps1)
-          chmod +x tools/usb-kopru-mac/Kopru-Baslat.command tools/usb-kopru-mac/radar_kopru.py
-          (cd tools && zip -q -r ../site/radar-usb-kopru-mac.zip usb-kopru-mac)
           if [ -f out/deck/PlaneRadarDeck.exe ]; then cp out/deck/PlaneRadarDeck.exe site/; else echo "::warning::Windows helper not built"; fi
           for d in PlaneRadarDeck-mac.dmg PlaneRadarDeck-mac-intel.dmg; do
             if [ -f "out/deck/$d" ]; then cp "out/deck/$d" site/; else echo "::warning::$d not built"; fi

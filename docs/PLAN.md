@@ -73,7 +73,7 @@ içinde. Sürümler `include/config.h` içinde.
 - Dal: ws5. Kart 5in-0.50.2 (10f) main'de, tamam (kartta denendi, 01.11). 10g, 10h, 10i ve 10j temizlikleri main'de. 10c-3, 10d-1, 10e de main'de ve kartta denendi (ayrıntılar 10. aşama satırında). Deck 1.11.1.
 - 10i (sayfa ve yorum temizliği) main'de. `data-sys` artık yalnız JS'te `SYS` (indirilecek `firmware-radar.bin`) için.
 - 10j (README) main'de.
-- Sahipsiz USB köprüsü: CI hâlâ `radar-usb-kopru.zip` ve `radar-usb-kopru-mac.zip` üretiyor (`tools/usb-kopru*`, `build.yml`), ama hiçbir sayfa bunlara bağlantı vermiyor; isteğe bağlı ayrı temizlik.
+- 10k: eski USB köprüsü (`tools/usb-kopru*`, sitedeki `radar-usb-kopru*.zip`) silindi; Mac derlemesi (Apple M + Intel `.dmg`) CI'da yeniden açık (kullanıcı kararı, 02.11). Kartın hava ekranındaki "USB köprüsünün yeni sürümü gerekli" yazısı eski; değiştirmek kart sürümü ister, bir sonraki kart işinde düzeltilir.
 - Performans adayları şimdilik beklemede (kullanıcı kararı, 01.11).
 - Ekranın üç tamponu var; her biri kendi kaydını tutar (`s_fb`).
 - Kalan adaylar (10d-1 ölçümünden):
