@@ -14,9 +14,19 @@ import threading
 import time
 
 APP_NAME = "Plane Radar Deck"
-VERSION = "1.11.1"
+VERSION = "1.11.2"
 SINGLE_PORT = 47821  # localhost: a second start asks the first one to show its window
 IS_MAC = sys.platform == "darwin"
+
+if IS_MAC:
+    # The packaged Python does not see the macOS certificate store, so HTTPS (aircraft,
+    # weather, firmware) uses certifi's list; the old Mac USB bridge used curl for this.
+    try:
+        import certifi
+
+        os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+    except ImportError:
+        pass
 
 
 def resource(*parts):
@@ -468,6 +478,13 @@ def _deep_selftest():
         step("volume", vol)
         step("keys", lambda: len(actions._layout_keycodes()))
         step("cover", lambda: media_win.cover_jpeg(_test_png(), 800, 480)[1:])
+
+        def https():
+            from deck import firmware
+
+            return "%s via %s" % (firmware.latest_version(), os.environ.get("SSL_CERT_FILE"))
+
+        step("https", https)
         with open("selftest.txt", "w", encoding="utf-8") as f:
             f.write("\n".join(out))
         return
