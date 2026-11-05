@@ -88,23 +88,51 @@ def install_files():
     return dst, old is not None
 
 
+def select_source(sources, now_title):
+    """The source to show: among those whose current song (or large cover's song) is what
+    plays now, the newest; when none is, the newest of all. -> key or None."""
+    from .queue_card import same_song
+
+    def playing(s):
+        q, art = s["q"], s["art"]
+        if q and 0 <= q["cur"] < len(q["items"]) and same_song(q["items"][q["cur"]]["t"], now_title):
+            return True
+        return bool(art and same_song(art["now"], now_title))
+
+    if not sources:
+        return None
+    hits = [k for k, s in sources.items() if playing(s)]
+    return max(hits or sources, key=lambda k: sources[k]["seq"])
+
+
 class BrowserLink:
-    """on_queue(queue dict | None) when the YouTube Music queue changes or goes away."""
+    """on_queue(queue dict | None) when the shown queue changes or goes away.
+
+    Every tab with a music page (YouTube Music, Spotify) is a source with its own queue;
+    the one whose song plays now (set_now) is shown, else the newest."""
 
     def __init__(self, on_queue=lambda q: None, log=print, port=PORT):
+        self._init_state(on_queue, log)
+        self.port = port
+        threading.Thread(target=self._serve, name="browser-link", daemon=True).start()
+        threading.Thread(target=self._ping, name="browser-ping", daemon=True).start()
+
+    def _init_state(self, on_queue, log):
         self.on_queue = on_queue
         self.log = log
-        self.port = port
         self.conns = {}          # connection -> {"brand", "v"}
         self.lock = threading.Lock()
-        self.queue = None        # newest queue from YouTube Music
+        self.sources = {}        # (connection, tab id | None) -> {"q", "art", "seq"}
+        self._seq = itertools.count(1)
+        self.now_title = ""      # what plays now (the system's media info)
+        # The shown source:
+        self.queue = None        # {"items", "cur", "now", "src"}
         self.art = None          # {"now": title, "art": large cover address}
         self.queue_conn = None
+        self.queue_tab = None
         self._ids = itertools.count(1)
         self._waiting = {}       # open id -> (event, holder)
         self.error = None
-        threading.Thread(target=self._serve, name="browser-link", daemon=True).start()
-        threading.Thread(target=self._ping, name="browser-ping", daemon=True).start()
 
     # ------------------------------------------------------------------ state
     def status(self):
@@ -158,12 +186,18 @@ class BrowserLink:
         except Exception:  # noqa: BLE001 - the browser went away
             pass
         finally:
-            with self.lock:
-                self.conns.pop(conn, None)
-                gone = conn is self.queue_conn
-            if gone:
-                self.queue, self.queue_conn, self.art = None, None, None
-                self.on_queue(None)
+            self._drop_conn(conn)
+
+    def _drop_conn(self, conn):
+        """The browser went away: its tabs' queues with it."""
+        with self.lock:
+            self.conns.pop(conn, None)
+            gone = [k for k in self.sources if k[0] is conn]
+            for k in gone:
+                del self.sources[k]
+            changed = self._apply()
+        if gone and changed:
+            self.on_queue(self.queue)
 
     def _queue(self, conn, msg):
         items = []
@@ -174,13 +208,35 @@ class BrowserLink:
         cur = msg.get("cur")
         now = str(msg.get("now") or "")[:120]
         art = str(msg.get("art") or "")[:800]
+        src = str(msg.get("src") or "YouTube Music")[:24]
+        tab = msg.get("tab") if isinstance(msg.get("tab"), int) else None
         # The large cover of what plays (kept even when there is no queue list).
-        self.art = {"now": now, "art": art} if (now and art.startswith("https://")) else None
-        q = {"items": items, "cur": cur if isinstance(cur, int) else -1, "now": now}
-        if not items:
-            q = None
-        self.queue, self.queue_conn = q, (conn if (q or self.art) else None)
-        self.on_queue(q)
+        art_d = {"now": now, "art": art} if (now and art.startswith("https://")) else None
+        q = {"items": items, "cur": cur if isinstance(cur, int) else -1, "now": now, "src": src} if items else None
+        with self.lock:
+            if q or art_d:
+                self.sources[(conn, tab)] = {"q": q, "art": art_d, "seq": next(self._seq)}
+            else:  # the tab closed, or shows nothing to play
+                self.sources.pop((conn, tab), None)
+            self._apply()
+        self.on_queue(self.queue)
+
+    def set_now(self, title):
+        """What plays now (empty: nothing): show that source's queue."""
+        with self.lock:
+            self.now_title = title or ""
+            changed = self._apply()
+        if changed:
+            self.on_queue(self.queue)
+
+    def _apply(self):
+        """Pick the shown source (lock held). -> True when it changed."""
+        key = select_source(self.sources, self.now_title)
+        s = self.sources.get(key) if key else None
+        new = (s["q"] if s else None, s["art"] if s else None, key[0] if key else None, key[1] if key else None)
+        old = (self.queue, self.art, self.queue_conn, self.queue_tab)
+        self.queue, self.art, self.queue_conn, self.queue_tab = new
+        return new != old
 
     def _ping(self):
         while True:  # also keeps the extension's background page awake
@@ -233,5 +289,8 @@ class BrowserLink:
             self._waiting.pop(oid, None)
 
     def play(self, index, title):
-        conn = self.queue_conn
-        return bool(conn) and self._send(conn, {"t": "play", "i": int(index), "title": title})
+        conn, tab = self.queue_conn, self.queue_tab
+        msg = {"t": "play", "i": int(index), "title": title}
+        if tab is not None:
+            msg["tab"] = tab
+        return bool(conn) and self._send(conn, msg)
