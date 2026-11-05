@@ -1,14 +1,15 @@
 // Plane Radar Deck: the link between this browser and the Plane Radar Deck program on
 // this computer (ws://127.0.0.1:47822, only this computer). The program asks it to open
-// a site in the tab that already shows it, and to play a song from the YouTube Music
-// queue; the YouTube Music page (ytmusic.js) sends its queue through here.
+// a site in the tab that already shows it, and to play a song from a music queue; the
+// YouTube Music and Spotify pages (ytmusic.js, spotify.js) send their queues through here,
+// each tagged with its tab so the program can show the one that plays.
 'use strict';
 
 const LINK = 'ws://127.0.0.1:47822/deck';
 let ws = null;
 let retryTimer = null;
-let lastQueue = null;   // newest queue message from a YouTube Music tab
-let queueTab = null;    // that tab's id
+const queues = new Map();  // tab id -> newest queue message from that tab
+let lastTab = null;        // the tab that sent last (for an older program without tab ids)
 
 function brand() {
   const b = (navigator.userAgentData && navigator.userAgentData.brands) || [];
@@ -34,7 +35,7 @@ function connect() {
   }
   ws.onopen = () => {
     send({ t: 'hello', v: chrome.runtime.getManifest().version, brand: brand() });
-    if (lastQueue) send(lastQueue);
+    for (const q of queues.values()) send(q);
   };
   ws.onmessage = (e) => {
     let msg;
@@ -79,28 +80,31 @@ async function handle(msg) {
       send({ t: 'opened', id: msg.id, reused: false });
     }
   } else if (msg.t === 'play') {
-    if (queueTab !== null) {
-      chrome.tabs.sendMessage(queueTab, { t: 'play', i: msg.i, title: msg.title }).catch(() => {});
+    const tab = Number.isInteger(msg.tab) ? msg.tab : lastTab;
+    if (tab !== null) {
+      chrome.tabs.sendMessage(tab, { t: 'play', i: msg.i, title: msg.title }).catch(() => {});
     }
   } else if (msg.t === 'refresh') {
-    if (queueTab !== null) chrome.tabs.sendMessage(queueTab, { t: 'refresh' }).catch(() => {});
+    const tabs = Number.isInteger(msg.tab) ? [msg.tab] : [...queues.keys()];
+    for (const tab of tabs) chrome.tabs.sendMessage(tab, { t: 'refresh' }).catch(() => {});
   }
 }
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg && msg.t === 'queue' && sender.tab) {
-    queueTab = sender.tab.id;
-    lastQueue = msg;
+    const q = Object.assign({}, msg, { tab: sender.tab.id });
+    queues.set(sender.tab.id, q);
+    lastTab = sender.tab.id;
     connect();
-    send(msg);
+    send(q);
   }
 });
 
 chrome.tabs.onRemoved.addListener((id) => {
-  if (id === queueTab) {
-    queueTab = null;
-    lastQueue = { t: 'queue', items: [], cur: -1 };
-    send(lastQueue);
+  if (queues.has(id)) {
+    queues.delete(id);
+    if (lastTab === id) lastTab = null;
+    send({ t: 'queue', items: [], cur: -1, tab: id });
   }
 });
 
