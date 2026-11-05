@@ -121,6 +121,43 @@ def test_play_goes_to_the_chosen_tab():
     assert json.loads(c.sent[-1]) == {"t": "play", "i": 1, "title": "The Barrel Of Her Gun", "tab": 2}
 
 
+def test_spotify_pictures_allowed():
+    assert queue_card._allowed("https://i.scdn.co/image/ab67") is True
+    assert queue_card._allowed("https://i.ytimg.com/vi/a/hqdefault.jpg") is True
+    assert queue_card._allowed("https://evil.example/x.jpg") is False
+    assert queue_card._allowed("https://scdn.co.evil.example/x.jpg") is False
+
+
+def test_queue_source_name():
+    from types import SimpleNamespace
+
+    class Dev:
+        hello = {"queuev": 1, "qthumb": 40}
+        sources = []
+
+        def send_queue(self, rows, gen, source):
+            self.sources.append(source)
+            return True
+
+        def clear_queue(self):
+            return True
+
+        def send_thumb(self, jpeg, k, gen, abort=lambda: False):
+            return True
+
+    for q_src, want in (("Spotify", "Spotify"), (None, "YouTube Music")):
+        queue = {"items": [{"t": "A", "a": "", "d": "", "img": ""}], "cur": 0, "now": "A"}
+        if q_src:
+            queue["src"] = q_src
+        core = SimpleNamespace(config=SimpleNamespace(settings={}), link=SimpleNamespace(queue=queue), now={"t": "A"})
+        qs = queue_card.QueueSender(core, log=lambda m: None)
+        dev = Dev()
+        dev.sources = []
+        for _ in range(3):
+            qs.pump(dev)
+        assert dev.sources and dev.sources[0] == want, dev.sources
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):

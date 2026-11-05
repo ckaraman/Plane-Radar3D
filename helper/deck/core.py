@@ -138,6 +138,7 @@ class Core:
 
     def _media_changed(self, state, cover):
         self.now = state
+        self.link.set_now("" if state.get("none") else state.get("t") or "")  # which tab's queue
         self.queue.changed()  # the queue shows only while its song plays
         if cover is not None and not state.get("none") and self._hq_for_id != state.get("id"):
             if self._hq_likely(state):

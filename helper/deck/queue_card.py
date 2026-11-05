@@ -1,4 +1,4 @@
-"""The YouTube Music queue on the card (firmware 0.36+, HELLO "queuev"): the rows from the
+"""The browser's music queue (YouTube Music, Spotify) on the card (firmware 0.36+, HELLO "queuev"): the rows from the
 current song on, then their small covers one by one, between the other card traffic."""
 
 import collections
@@ -9,7 +9,15 @@ import unicodedata
 import urllib.request
 
 ROWS = 30
-PIC_HOSTS = ("ytimg.com", "googleusercontent.com", "ggpht.com")
+PIC_HOSTS = ("ytimg.com", "googleusercontent.com", "ggpht.com", "scdn.co")
+
+
+def _allowed(url):
+    """Only pictures from the music sites' own picture servers."""
+    from urllib.parse import urlparse
+
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in PIC_HOSTS)
 
 
 def _norm(t):
@@ -49,13 +57,11 @@ def card_rows(queue, now):
 
 
 def fetch_picture(url, limit=4 * 1024 * 1024):
-    """A picture from YouTube's picture servers (only those), or None. A video without a
-    "maxres" picture falls back to the smaller ones."""
+    """A picture from the music sites' picture servers (only those), or None. A video
+    without a "maxres" picture falls back to the smaller ones."""
     import urllib.error
-    from urllib.parse import urlparse
 
-    host = (urlparse(url).hostname or "").lower()
-    if not any(host == h or host.endswith("." + h) for h in PIC_HOSTS):
+    if not _allowed(url):
         return None
     tries = [url]
     if "/maxresdefault.jpg" in url:
@@ -82,7 +88,7 @@ def thumb_jpeg(url, px):
     from PIL import Image
 
     host = (urlparse(url).hostname or "").lower()
-    if not any(host == h or host.endswith("." + h) for h in PIC_HOSTS):
+    if not _allowed(url):
         return None
     if "googleusercontent.com" in host or "ggpht.com" in host:
         url = re.sub(r"=w\d+-h\d+[^&?]*$", "=w%d-h%d-l90-rj" % (px * 2, px * 2), url)  # a sharper size
@@ -224,7 +230,7 @@ class QueueSender:
                 for c, j in zip(card, froms):
                     if j >= 0:
                         c["p"] = j  # the card moves that row's picture here
-                if dev.send_queue(card, self.gen, "YouTube Music"):
+                if dev.send_queue(card, self.gen, (self.core.link.queue or {}).get("src") or "YouTube Music"):
                     self.sent_titles, self.card_has, self.sent_pics = titles, True, kept
                     self.failed = set()  # "not again" holds for one list: retried with the next
                 else:
