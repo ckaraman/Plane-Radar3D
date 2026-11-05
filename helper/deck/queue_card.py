@@ -10,6 +10,7 @@ import unicodedata
 import urllib.request
 
 ROWS = 30
+TITLE_MAX = 62  # bytes of a row title on the card (QPLAY sends it back cut)
 PIC_HOSTS = ("ytimg.com", "googleusercontent.com", "ggpht.com", "scdn.co")
 
 
@@ -52,7 +53,7 @@ def card_rows(queue, now):
     rows = []
     for x in range(cur, min(len(items), cur + ROWS)):
         it = items[x]
-        rows.append({"x": x, "t": cut_utf8(it["t"], 62), "a": cut_utf8(it["a"], 46), "d": cut_utf8(it["d"], 8),
+        rows.append({"x": x, "t": cut_utf8(it["t"], TITLE_MAX), "a": cut_utf8(it["a"], 46), "d": cut_utf8(it["d"], 8),
                      "img": it.get("img", "")})
     return rows
 

@@ -289,8 +289,22 @@ class BrowserLink:
             self._waiting.pop(oid, None)
 
     def play(self, index, title):
-        conn, tab = self.queue_conn, self.queue_tab
-        msg = {"t": "play", "i": int(index), "title": title}
+        """A song from the shown queue, as the card names it (row index, title cut to
+        TITLE_MAX bytes). The page gets the full title; a song not in the shown queue
+        (the list or the source changed meanwhile) goes nowhere."""
+        from .queue_card import TITLE_MAX, cut_utf8
+
+        with self.lock:
+            conn, tab, q = self.queue_conn, self.queue_tab, self.queue
+        items = (q or {}).get("items") or []
+
+        def fits(i):
+            return 0 <= i < len(items) and cut_utf8(items[i]["t"], TITLE_MAX) == title
+
+        i = int(index) if fits(int(index)) else next((j for j in range(len(items)) if fits(j)), -1)
+        if not conn or i < 0:
+            return False
+        msg = {"t": "play", "i": i, "title": items[i]["t"]}
         if tab is not None:
             msg["tab"] = tab
-        return bool(conn) and self._send(conn, msg)
+        return self._send(conn, msg)

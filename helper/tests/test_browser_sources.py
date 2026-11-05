@@ -121,6 +121,29 @@ def test_play_goes_to_the_chosen_tab():
     assert json.loads(c.sent[-1]) == {"t": "play", "i": 1, "title": "The Barrel Of Her Gun", "tab": 2}
 
 
+def test_play_long_title_sends_the_full_title():
+    import json
+
+    long_t = "Gönül Dağı (Canlı Kayıt, İstanbul Açıkhava Tiyatrosu 2019) - Remastered Sürüm"
+    assert len(long_t.encode("utf-8")) > 62
+    link, _ = make_link()
+    c = Conn()
+    msg = sp()
+    msg["items"].append({"t": long_t, "a": "X", "d": "", "img": ""})
+    link._queue(c, msg)
+    link.set_now("Bak Sen Keyfine")
+    card_title = queue_card.cut_utf8(long_t, 62)  # what the card sends back
+    assert link.play(2, card_title)
+    assert json.loads(c.sent[-1]) == {"t": "play", "i": 2, "title": long_t, "tab": 2}
+    # the list moved: found by its title elsewhere
+    assert link.play(0, card_title)
+    assert json.loads(c.sent[-1])["i"] == 2
+    # not in the shown list (the source changed meanwhile): nothing goes out
+    n = len(c.sent)
+    assert not link.play(1, "Başka bir şarkı")
+    assert len(c.sent) == n
+
+
 def test_spotify_pictures_allowed():
     assert queue_card._allowed("https://i.scdn.co/image/ab67") is True
     assert queue_card._allowed("https://i.ytimg.com/vi/a/hqdefault.jpg") is True
