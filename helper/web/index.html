@@ -205,7 +205,7 @@
       </div>
       <div class="card" style="flex: 1 1 520px; max-width: 760px; padding-top: 6px; padding-bottom: 6px">
         <div class="opt"><label for="s-music">Müzik çalınca kartta Müzik ekranını aç</label><input type="checkbox" id="s-music"></div>
-        <div class="opt"><label for="s-queue">Sıradaki şarkıları kartta göster (YouTube Music)<br><span class="small" id="q-state">Tarayıcı eklentisi gerekir: Ayarlar › YouTube Music sırası.</span></label><input type="checkbox" id="s-queue"></div>
+        <div class="opt"><label for="s-queue">Sıradaki şarkıları kartta göster (YouTube Music, Spotify)<br><span class="small" id="q-state">Tarayıcı eklentisi gerekir: Ayarlar › Müzik sırası.</span></label><input type="checkbox" id="s-queue"></div>
         <div class="opt"><label for="s-back">Müzik durunca tuşlar ekranına dön</label>
           <select class="in" id="s-back" style="width: auto; min-height: 40px">
             <option value="0">Hemen</option><option value="60">1 dakika sonra</option><option value="300">5 dakika sonra</option><option value="-1">Dönme</option>
@@ -259,8 +259,8 @@
           <div class="btns" style="margin: 8px 0 16px"><button type="button" class="btn" id="b-exit">Programı kapat</button></div>
         </div>
         <div class="card">
-          <h2>YouTube Music sırası ve açık sekmeler</h2>
-          <p class="hint" style="margin-bottom: 10px">Tarayıcıya bir kez eklenen küçük bir eklentiyle kart, YouTube Music'te sıradaki şarkıları gösterir ve dokunduğun şarkıya geçer. Müzik sitesi açan tuşlar da yeni sekme açmak yerine açık sekmeye geçer. Chrome, Edge ve Brave ile çalışır.</p>
+          <h2>Müzik sırası ve açık sekmeler</h2>
+          <p class="hint" style="margin-bottom: 10px">Tarayıcıya bir kez eklenen küçük bir eklentiyle kart, YouTube Music ve Spotify'da sıradaki şarkıları gösterir ve dokunduğun şarkıya geçer. Spotify'da sıranın görünmesi için sağdaki “Sıradakiler” paneli açık olmalı. Müzik sitesi açan tuşlar da yeni sekme açmak yerine açık sekmeye geçer. Chrome, Edge ve Brave ile çalışır.</p>
           <div style="display: flex; align-items: center; gap: 10px; min-height: 40px"><span class="dot" id="x-dot"></span><span id="x-state">Eklenti bağlı değil</span></div>
           <div class="msg info" id="x-updated" hidden>Eklenti güncellendi: yeni hâli için tarayıcıyı kapatıp yeniden aç.</div>
           <div class="btns"><button type="button" class="btn primary" id="b-ext">Eklentiyi kur…</button></div>
@@ -313,7 +313,7 @@
         <div class="small" id="dx-pick"></div>
         <div class="line" style="margin-top: 8px"><input class="in" id="dx-folder" readonly aria-label="Eklenti klasörü"><button type="button" class="btn" id="dx-copy">Kopyala</button></div>
         <div class="small" id="dx-copied" style="margin-top: 4px"></div></li>
-      <li><strong>YouTube Music sekmesini yenile.</strong>
+      <li><strong>YouTube Music ya da Spotify sekmesini yenile.</strong>
         <div class="small">Bağlanınca aşağıda yeşil işaret çıkar.</div></li>
     </ol>
     <div style="display: flex; align-items: center; gap: 10px; min-height: 40px"><span class="dot" id="dx-dot"></span><span id="dx-state">Eklenti bekleniyor…</span></div>
@@ -445,11 +445,11 @@
                    : (S.link.error ? 'Eklenti bağlantısı açılamadı: ' + S.link.error : 'Eklenti bağlı değil');
     for (const [d, t] of [['#x-dot', '#x-state'], ['#dx-dot', '#dx-state']]) {
       $(d).className = 'dot' + (ok ? ' ok' : '');
-      $(t).textContent = t === '#dx-state' && !ok ? 'Eklenti bekleniyor… (kurduktan sonra YouTube Music sekmesini yenile)' : txt;
+      $(t).textContent = t === '#dx-state' && !ok ? 'Eklenti bekleniyor… (kurduktan sonra müzik sekmesini yenile)' : txt;
     }
     $('#x-updated').hidden = !S.link.updated;
-    $('#q-state').textContent = ok ? (S.link.queue ? 'YouTube Music sırası geliyor (' + S.link.queue + ' şarkı).' : 'Eklenti bağlı; YouTube Music açılınca sıra gelir.')
-                                   : 'Tarayıcı eklentisi gerekir: Ayarlar › YouTube Music sırası.';
+    $('#q-state').textContent = ok ? (S.link.queue ? 'Müzik sırası geliyor (' + S.link.queue + ' şarkı).' : 'Eklenti bağlı; YouTube Music ya da Spotify açılınca sıra gelir.')
+                                   : 'Tarayıcı eklentisi gerekir: Ayarlar › Müzik sırası.';
   }
   $('#b-ext').addEventListener('click', async () => {
     const dlg = $('#dlg-ext');
@@ -554,7 +554,7 @@
       const rb = el('input', { type: 'checkbox', id: 'k-reuse', onchange: (e) => { a.reuse = e.target.checked; saveSoon(); } });
       rb.checked = a.reuse !== undefined ? !!a.reuse : isMusicUrl(a.url);
       p.append(el('label', { style: 'display:flex;align-items:center;gap:10px;margin-top:12px' }, [rb, 'Açıksa aynı sekmeye geç, yeni sekme açma']),
-        el('div', { class: 'small', style: 'margin-top:4px', text: (S.link && S.link.connected) ? 'Tarayıcı eklentisi bağlı.' : 'Tarayıcı eklentisi gerekir (Ayarlar › YouTube Music sırası). Yoksa her basışta yeni sekme açılır.' }));
+        el('div', { class: 'small', style: 'margin-top:4px', text: (S.link && S.link.connected) ? 'Tarayıcı eklentisi bağlı.' : 'Tarayıcı eklentisi gerekir (Ayarlar › Müzik sırası). Yoksa her basışta yeni sekme açılır.' }));
     } else if (a.type === 'app') {
       const show = el('input', { class: 'in', id: 'k-app', type: 'text', value: a.name || a.path || '', readonly: 'readonly' });
       p.append(el('label', { class: 'f', for: 'k-app', text: 'Program' }),

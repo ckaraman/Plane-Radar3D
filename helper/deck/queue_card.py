@@ -1,5 +1,6 @@
-"""The browser's music queue (YouTube Music, Spotify) on the card (firmware 0.36+, HELLO "queuev"): the rows from the
-current song on, then their small covers one by one, between the other card traffic."""
+"""The browser's music queue (YouTube Music, Spotify) on the card (firmware 0.36+, HELLO
+"queuev"): the rows from the current song on, then their small covers one by one, between
+the other card traffic."""
 
 import collections
 import io

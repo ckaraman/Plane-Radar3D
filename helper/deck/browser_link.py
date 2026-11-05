@@ -1,4 +1,4 @@
-"""The "Plane Radar Deck" browser extension (browser-extension/): the YouTube Music queue
+"""The "Plane Radar Deck" browser extension (browser-extension/): the YouTube Music / Spotify queues
 from the browser, and sites opened in the tab that already shows them.
 
 The extension connects to ws://127.0.0.1:47822/deck (this computer only). Its id is fixed
