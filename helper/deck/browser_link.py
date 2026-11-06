@@ -88,21 +88,26 @@ def install_files():
     return dst, old is not None
 
 
-def select_source(sources, now_title):
-    """The source to show: among those whose current song (or large cover's song) is what
-    plays now, the newest; when none is, the newest of all. -> key or None."""
+def select_source(sources, now_title, current=None):
+    """The source to show. First choice: those whose queue's current song is what plays
+    now; then those whose large cover is (a tab without its queue panel); then any. Within
+    that group the shown one stays (tabs resend every 30 s: no flipping), else the newest.
+    -> key or None."""
     from .queue_card import same_song
 
-    def playing(s):
-        q, art = s["q"], s["art"]
-        if q and 0 <= q["cur"] < len(q["items"]) and same_song(q["items"][q["cur"]]["t"], now_title):
-            return True
-        return bool(art and same_song(art["now"], now_title))
+    def queue_hit(s):
+        q = s["q"]
+        return bool(q and 0 <= q["cur"] < len(q["items"]) and same_song(q["items"][q["cur"]]["t"], now_title))
 
-    if not sources:
-        return None
-    hits = [k for k, s in sources.items() if playing(s)]
-    return max(hits or sources, key=lambda k: sources[k]["seq"])
+    def art_hit(s):
+        return bool(s["art"] and same_song(s["art"]["now"], now_title))
+
+    for group in ([k for k, s in sources.items() if queue_hit(s)],
+                  [k for k, s in sources.items() if art_hit(s)],
+                  list(sources)):
+        if group:
+            return current if current in group else max(group, key=lambda k: sources[k]["seq"])
+    return None
 
 
 class BrowserLink:
@@ -231,7 +236,8 @@ class BrowserLink:
 
     def _apply(self):
         """Pick the shown source (lock held). -> True when it changed."""
-        key = select_source(self.sources, self.now_title)
+        shown = (self.queue_conn, self.queue_tab) if self.queue_conn is not None else None
+        key = select_source(self.sources, self.now_title, shown)
         s = self.sources.get(key) if key else None
         new = (s["q"] if s else None, s["art"] if s else None, key[0] if key else None, key[1] if key else None)
         old = (self.queue, self.art, self.queue_conn, self.queue_tab)

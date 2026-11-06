@@ -50,16 +50,16 @@ def test_two_sources_pick_the_playing_one():
     assert link.art == {"now": "Bak Sen Keyfine", "art": "https://i.scdn.co/image/ab67big"}
 
 
-def test_no_match_keeps_newest_and_card_rows_none():
+def test_no_match_keeps_the_first_shown_and_card_rows_none():
     link, got = make_link()
     c = Conn()
-    link._queue(c, yt())
+    link._queue(c, yt())  # nothing told yet what plays: the first tab is shown and stays
     link._queue(c, sp())
     link.set_now("Başka")
     n = len(got)
     for _ in range(5):
         link.set_now("Başka")
-    assert link.queue_tab == 2
+    assert link.queue_tab == 1
     assert queue_card.card_rows(link.queue, {"t": "Başka"}) is None
     assert len(got) == n  # no flipping between the two
 
@@ -142,6 +142,52 @@ def test_play_long_title_sends_the_full_title():
     n = len(c.sent)
     assert not link.play(1, "Başka bir şarkı")
     assert len(c.sent) == n
+
+
+def test_cover_only_tab_does_not_hide_the_queue():
+    # A second Spotify tab (queue panel closed) shows the same song: cover only, sent later.
+    link, _ = make_link()
+    c = Conn()
+    link._queue(c, sp(2))
+    link.set_now("Bak Sen Keyfine")
+    link._queue(c, {"t": "queue", "tab": 5, "src": "Spotify", "items": [], "cur": -1,
+                    "now": "Bak Sen Keyfine", "art": "https://i.scdn.co/image/ab67big"})
+    assert link.queue_tab == 2 and link.queue is not None
+
+
+def test_same_song_in_two_tabs_does_not_flip():
+    link, got = make_link()
+    c = Conn()
+    link._queue(c, sp(2))
+    link._queue(c, sp(3))
+    link.set_now("Bak Sen Keyfine")
+    shown = link.queue_tab
+    for tab in (2, 3, 2, 3):  # each tab's 30 s resend
+        link._queue(c, sp(tab))
+        assert link.queue_tab == shown
+
+
+def test_nothing_matches_keeps_the_shown_source():
+    link, _ = make_link()
+    c = Conn()
+    link._queue(c, yt(1))
+    link._queue(c, sp(2))
+    link.set_now("Başka")
+    shown = link.queue_tab
+    for msg in (yt(1), sp(2), yt(1)):
+        link._queue(c, msg)
+        assert link.queue_tab == shown
+
+
+def test_switches_when_the_other_tab_plays():
+    link, _ = make_link()
+    c = Conn()
+    link._queue(c, yt(1))
+    link._queue(c, sp(2))
+    link.set_now("Bak Sen Keyfine")
+    assert link.queue_tab == 2
+    link.set_now("Gece Yolu")
+    assert link.queue_tab == 1
 
 
 def test_spotify_pictures_allowed():
