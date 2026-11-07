@@ -219,6 +219,12 @@ class QueueSender:
                         return
                 self.last_send = self._time.time()
                 if rows is None:
+                    from .browser_link import debug  # TEMPORARY (10m queue flicker)
+
+                    q = self.core.link.queue or {}
+                    it, cur = q.get("items") or [], q.get("cur", -1)
+                    debug("CLEAR card_has=%s queue_n=%d cur_title=%r sys_now=%r" % (
+                        self.card_has, len(it), it[cur]["t"] if 0 <= cur < len(it) else "", (self.core.now or {}).get("t")))
                     self.mismatch_since = None
                     if self.card_has and not dev.clear_queue():
                         self.dirty = True

@@ -88,6 +88,21 @@ def install_files():
     return dst, old is not None
 
 
+def debug(line):
+    """TEMPORARY (10m queue flicker): one line to browser-debug.log next to the settings."""
+    path = os.path.join(os.path.dirname(extension_dir()), "browser-debug.log")
+    try:
+        if os.path.getsize(path) > 2 * 1024 * 1024:
+            os.replace(path, path + ".1")
+    except OSError:
+        pass
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("%s.%03d %s\n" % (time.strftime("%H:%M:%S"), int(time.time() * 1000) % 1000, line))
+    except OSError:
+        pass
+
+
 def select_source(sources, now_title, current=None):
     """The source to show. First choice: those whose queue's current song is what plays
     now; then those whose large cover is (a tab without its queue panel); then any. Within
@@ -201,6 +216,7 @@ class BrowserLink:
             for k in gone:
                 del self.sources[k]
             changed = self._apply()
+        debug("conn closed, %d tab(s) gone" % len(gone))
         if gone and changed:
             self.on_queue(self.queue)
 
@@ -224,11 +240,16 @@ class BrowserLink:
             else:  # the tab closed, or shows nothing to play
                 self.sources.pop((conn, tab), None)
             self._apply()
+            debug("msg tab=%s src=%s n=%d first=%r now=%r art=%s | sys=%r shown_tab=%s shown_n=%d sources=%d" % (
+                tab, src, len(items), items[0]["t"] if items else "", now, bool(art_d), self.now_title,
+                self.queue_tab, len((self.queue or {}).get("items") or []), len(self.sources)))
         self.on_queue(self.queue)
 
     def set_now(self, title):
         """What plays now (empty: nothing): show that source's queue."""
         with self.lock:
+            if (title or "") != self.now_title:
+                debug("sys now=%r" % (title or ""))
             self.now_title = title or ""
             changed = self._apply()
         if changed:
