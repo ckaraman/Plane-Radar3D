@@ -558,6 +558,7 @@ def test_seek():
 
     controls = SimpleNamespace(is_playback_position_enabled=True)
     asked = []
+    accept = [True]
 
     class Sess:
         source_app_user_model_id = "chrome"
@@ -573,7 +574,7 @@ def test_seek():
 
         async def try_change_playback_position_async(self, ticks):
             asked.append(ticks)
-            return True
+            return accept[0]
 
     class Mgr:
         def get_current_session(self):
@@ -596,6 +597,13 @@ def test_seek():
         clock[0] += 1
         run()  # Windows still reports 30 s for a moment: the bar stays at the new place
         assert abs(w.position() - 96) < 0.01, w.position()
+        accept[0] = False  # the page says no to this one: the position stays
+        w.seek(150000)
+        run()
+        assert asked[-1] == 150000 * 10000
+        assert abs(w.position() - 96) < 0.01, w.position()
+        asked.pop()
+        accept[0] = True
         controls.is_playback_position_enabled = False
         run()
         assert w.state["sk"] is False

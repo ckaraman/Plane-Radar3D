@@ -219,11 +219,11 @@ class MediaWatcher:
                 self._anchor = (pos, time.monotonic())
                 moved = True
         if seek_ms is not None and can_seek and not new_track:
-            await s.try_change_playback_position_async(int(seek_ms) * 10000)  # 100 ns units
-            # At the new place at once; Windows may repeat the old report for a moment, and
-            # an unchanged report does not move the anchor.
-            self._anchor = (seek_ms / 1000.0, time.monotonic())
-            moved = True
+            # At the new place at once (when the page took it); Windows may repeat the old
+            # report for a moment, and an unchanged report does not move the anchor.
+            if await s.try_change_playback_position_async(int(seek_ms) * 10000):  # 100 ns units
+                self._anchor = (seek_ms / 1000.0, time.monotonic())
+            moved = True  # either way the card hears where it is now
 
         cover = None
         if props.thumbnail is not None and (self._cover_hash is None or time.monotonic() < self._cover_until):

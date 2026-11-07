@@ -1101,8 +1101,11 @@ template <typename Gfx>
 void drawQueueRows(Gfx& g, const paint::Canvas& c, int count);
 
 // Open queue parts: the left column in three bands, the panel on the right (stage 10c-3).
-constexpr int kQTextY = D(254), kQBandY = kQBarY - D(12), kQRowY = kQBarY + D(18), kQLeftPartW = kQPanelX - D(4);
+constexpr int kQTextY = D(254), kQBandY = kQBarY - D(12), kQRowY = kQBarY + D(20), kQLeftPartW = kQPanelX - D(4);
 static_assert(kQCoverX + kQLeftW <= kQLeftPartW, "left column inside its parts");
+// The seeking knob's halo (D(16) round the bar's middle) stays inside the time bar's part.
+static_assert(kQRowY >= kQBarY + kBarH / 2 + D(16) + 1, "queue seek halo above the controls' part");
+static_assert(kMRowY >= kBarY + kBarH / 2 + D(16) + 1, "music seek halo above the controls' part");
 static_assert(kQVolX + kQVolW + kVolKnobR + D(4) < kQLeftPartW, "queue volume knob inside its part");
 static_assert(kQSpkCx - D(11) > kQTransW, "queue speaker right of the controls' part");
 
