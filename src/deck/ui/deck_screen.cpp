@@ -19,6 +19,7 @@
 #include "services/deck_store.h"
 #include "services/hid_keys.h"
 #include "services/host_link.h"
+#include "services/seek_bar.h"
 #include "services/perf.h"
 #include "ui/fonts_tr.h"
 #include "ui/paint.h"
@@ -138,7 +139,7 @@ bool s_shown_muted = false;
 int s_pressed = -1;
 unsigned long s_pressed_ms = 0;
 bool s_flash = false;
-enum class Target { None, Key, Knob, Back, Prev, Play, Next, VolBar, Swipe, Tab, QOpen, QClose, QList };
+enum class Target { None, Key, Knob, Back, Prev, Play, Next, VolBar, Swipe, Tab, QOpen, QClose, QList, SeekBar };
 Target s_target = Target::None;
 bool s_down = false;
 int s_key = -1;
@@ -154,6 +155,8 @@ int s_user_level = -1;
 unsigned long s_user_until_ms = 0;
 float s_bar_x = -1;  // smoothed finger position on the volume bar
 int s_vol_x = 0, s_vol_w = 1;  // the volume bar being touched (music page or queue screen)
+int s_seek_x = -1;              // finger x on the time bar while seeking (10n); -1: not seeking
+int s_seek_bx = 0, s_seek_bw = 1;  // that time bar
 
 // Music page.
 bool s_was_playing = false;
@@ -760,6 +763,38 @@ constexpr int kMTransX = kPrevCx - kSmallBtnR - D(2), kMNextX = kNextCx + kSmall
 static_assert(kVolX + kVolW + kVolKnobR + D(4) < kMTransX, "volume knob inside its part");
 static_assert(kMNextX <= kNextX, "next card inside its part");
 
+/** Times either side of the gradient time bar (music page and queue screen). While the
+ * finger seeks (10n) the knob sits at the finger, larger, with the target time above it;
+ * that bubble reaches into the text band, whose part key holds s_seek_x too. */
+void drawTimeBar(const paint::Canvas& c, int tx, int tw, int bar_y, uint32_t pos, float fr) {
+  const host::NowPlaying& n = host::now();
+  const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
+  const int32_t seek_ms = s_seek_x >= 0 ? services::seek::seekTarget(s_seek_x, bx, bw, n.duration_s) : -1;
+  if (seek_ms >= 0) {
+    pos = static_cast<uint32_t>(seek_ms) / 1000;
+    fr = static_cast<float>(seek_ms) / (n.duration_s * 1000.0f);
+  }
+  char t0[12], t1[12];
+  fmtTime(t0, sizeof(t0), pos);
+  fmtTime(t1, sizeof(t1), n.duration_s);
+  text::drawMid(c, text::Ui13, t0, tx, bar_y + kBarH / 2, seek_ms >= 0 ? kWhite : Rgb{195, 200, 222});
+  if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + tw, bar_y + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
+  frontPart(kFpText);
+  const float kx = bx + bw * fr, ky = bar_y + kBarH / 2.0f;
+  paint::roundRect(c, bx, bar_y, bw, kBarH, kBarH / 2, kWhite, 46);
+  paint::gradientBar(c, bx, bar_y, std::max(1, static_cast<int>(bw * fr)), kBarH, kPeach, kPink, kLavender);
+  if (seek_ms < 0) {
+    paint::circle(c, kx, ky, D(7), kWhite, 255);
+    return;
+  }
+  paint::circle(c, kx, ky, D(16), kLavender, 70);
+  paint::circle(c, kx, ky, D(11), kWhite, 255);
+  const int bub_w = text::width(text::Ui13b, t0) + D(16), bub_h = D(22);
+  const int bub_x = std::max(0, std::min(kW - bub_w, static_cast<int>(kx) - bub_w / 2)), bub_y = bar_y - D(40);
+  paint::roundRect(c, bub_x, bub_y, bub_w, bub_h, D(9), kWhite, 245);
+  text::drawMid(c, text::Ui13b, t0, bub_x + bub_w / 2, bub_y + bub_h / 2, {27, 21, 48}, 255, text::Align::Center);
+}
+
 /** Speaker, bar and knob: the music page's volume, also on the queue screen (10n). */
 template <typename Gfx>
 void drawVolumeBar(Gfx& s, const paint::Canvas& c, int spk_cx, int bar_x, int bar_w, int cy, int pct, bool muted) {
@@ -793,7 +828,8 @@ void drawMusicFront(Gfx& s, Frame& f) {
 
   const int tx = kMusicPad, tw = kW - 2 * kMusicPad;
   char buf[200];
-  if (part(f, 0, mixStr(mixStr(mixStr(kSeed, n.title), n.artist), n.album), 0, kMTextY, kW, kMBarY - kMTextY)) {
+  if (part(f, 0, mix(mixStr(mixStr(mixStr(kSeed, n.title), n.artist), n.album), s_seek_x), 0, kMTextY, kW,
+           kMBarY - kMTextY)) {
     // Title and artist: quiet sizes, the artist line placed by the fonts' own heights.
     text::fit(text::Ui22b, n.title[0] ? n.title : "Bilinmeyen parça", tw, buf, sizeof(buf));
     const int title_base = kTitleY + text::Ui22b.ascent;
@@ -815,16 +851,9 @@ void drawMusicFront(Gfx& s, Frame& f) {
   const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
   const float fr =
       n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
-  if (part(f, 1, mix(mix(mix(kSeed, pos), n.duration_s), lroundf(bw * fr * 8)), 0, kMBarY, kW, kMRowY - kMBarY)) {
-    char t0[12], t1[12];
-    fmtTime(t0, sizeof(t0), pos);
-    fmtTime(t1, sizeof(t1), n.duration_s);
-    text::drawMid(c, text::Ui13, t0, tx, kBarY + kBarH / 2, {195, 200, 222});
-    if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + tw, kBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
-    frontPart(kFpText);
-    paint::roundRect(c, bx, kBarY, bw, kBarH, kBarH / 2, kWhite, 46);
-    paint::gradientBar(c, bx, kBarY, std::max(1, static_cast<int>(bw * fr)), kBarH, kPeach, kPink, kLavender);
-    paint::circle(c, bx + bw * fr, kBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  if (part(f, 1, mix(mix(mix(mix(kSeed, pos), n.duration_s), lroundf(bw * fr * 8)), s_seek_x), 0, kMBarY, kW,
+           kMRowY - kMBarY)) {
+    drawTimeBar(c, tx, tw, kBarY, pos, fr);
   }
   frontPart(kFpBars);
 
@@ -1091,7 +1120,7 @@ void drawQueueFront(Gfx& g, Frame& f) {
   // Left: what plays, a little smaller.
   const int tx = kQCoverX;
   const char* who = n.artist[0] ? n.artist : n.album;
-  if (part(f, 0, mixStr(mixStr(kSeed, n.title), who), 0, kQTextY, kQLeftPartW, kQBandY - kQTextY)) {
+  if (part(f, 0, mix(mixStr(mixStr(kSeed, n.title), who), s_seek_x), 0, kQTextY, kQLeftPartW, kQBandY - kQTextY)) {
     text::fit(text::Ui18b, n.title[0] ? n.title : "Bilinmeyen parça", kQLeftW, buf, sizeof(buf));
     const int tb = D(262) + text::Ui18b.ascent;
     text::draw(c, text::Ui18b, buf, tx, tb, kText);
@@ -1103,17 +1132,9 @@ void drawQueueFront(Gfx& g, Frame& f) {
   const int bx = tx + kTimeW, bw = kQLeftW - 2 * kTimeW;
   const float fr =
       n.duration_s ? std::min(1.0f, static_cast<float>(host::positionNowMs()) / (n.duration_s * 1000.0f)) : 0.0f;
-  if (part(f, 1, mix(mix(mix(kSeed, pos), n.duration_s), lroundf(bw * fr * 8)), 0, kQBandY, kQLeftPartW,
-           kQRowY - kQBandY)) {
-    char t0[12], t1[12];
-    fmtTime(t0, sizeof(t0), pos);
-    fmtTime(t1, sizeof(t1), n.duration_s);
-    text::drawMid(c, text::Ui13, t0, tx, kQBarY + kBarH / 2, {195, 200, 222});
-    if (n.duration_s) text::drawMid(c, text::Ui13, t1, tx + kQLeftW, kQBarY + kBarH / 2, {195, 200, 222}, 255, text::Align::Right);
-    frontPart(kFpText);
-    paint::roundRect(c, bx, kQBarY, bw, kBarH, kBarH / 2, kWhite, 46);
-    paint::gradientBar(c, bx, kQBarY, std::max(1, static_cast<int>(bw * fr)), kBarH, kPeach, kPink, kLavender);
-    paint::circle(c, bx + bw * fr, kQBarY + kBarH / 2.0f, D(7), kWhite, 255);
+  if (part(f, 1, mix(mix(mix(mix(kSeed, pos), n.duration_s), lroundf(bw * fr * 8)), s_seek_x), 0, kQBandY,
+           kQLeftPartW, kQRowY - kQBandY)) {
+    drawTimeBar(c, tx, kQLeftW, kQBarY, pos, fr);
   }
   frontPart(kFpBars);
   if (part(f, 2, n.valid && n.playing, 0, kQRowY, kQTransW, kH - kQRowY)) {
@@ -1501,6 +1522,20 @@ bool tick() {
   return true;
 }
 
+/** A finger down on a time bar (tx, tw: its times' row, as drawn): seeking starts, when the
+ * playing app takes seeks (10n). */
+bool seekStart(int x, int y, int tx, int tw, int bar_y) {
+  const host::NowPlaying& n = host::now();
+  const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
+  if (!host::active() || !n.can_seek || n.duration_s == 0) return false;
+  if (abs(y - (bar_y + kBarH / 2)) >= D(22) || x < bx - D(12) || x >= bx + bw + D(12)) return false;
+  s_seek_x = x;
+  s_seek_bx = bx;
+  s_seek_bw = bw;
+  presentSoon();
+  return true;
+}
+
 Touch touch(int fingers, int x, int y) {
   const unsigned long now = millis();
   if (fingers > 0) {
@@ -1538,7 +1573,9 @@ Touch touch(int fingers, int x, int y) {
           s_target = Target::None;
         }
       } else if (host::now().valid && s_queue_open && host::queueValid()) {
-        if (inCircle(x, y, kQCloseCx, kQCloseCy, D(26))) {
+        if (seekStart(x, y, kQCoverX, kQLeftW, kQBarY)) {
+          s_target = Target::SeekBar;
+        } else if (inCircle(x, y, kQCloseCx, kQCloseCy, D(26))) {
           s_target = Target::QClose;
         } else if (x >= kQPanelX && x < kQPanelX + kQPanelW && y >= kQPanelY + kQHeadH && y < kQPanelY + kQPanelH) {
           s_target = Target::QList;
@@ -1561,7 +1598,9 @@ Touch touch(int fingers, int x, int y) {
           s_target = Target::None;
         }
       } else if (host::now().valid) {
-        if (host::queueValid() && host::queueCount() > 1 && x >= kNextX - D(6) && x < kNextX + kNextW + D(6) &&
+        if (seekStart(x, y, kMusicPad, kW - 2 * kMusicPad, kBarY)) {
+          s_target = Target::SeekBar;
+        } else if (host::queueValid() && host::queueCount() > 1 && x >= kNextX - D(6) && x < kNextX + kNextW + D(6) &&
             y >= kNextY - D(8) && y < kNextY + kNextH + D(8)) {
           s_target = Target::QOpen;
         } else if (inCircle(x, y, kPrevCx, kCtrlY, kSmallBtnR + D(8))) {
@@ -1600,6 +1639,13 @@ Touch touch(int fingers, int x, int y) {
     }
     // A sideways slide anywhere but on the knob / volume bar turns the page; it starts
     // early, so a quick flick over a key is a page turn and not a key press.
+    if (s_target == Target::SeekBar) {  // the knob follows the finger; the page never turns here
+      if (x != s_seek_x) {
+        s_seek_x = x;
+        presentSoon();
+      }
+      return Touch::None;
+    }
     if (s_target != Target::Knob && s_target != Target::VolBar && s_target != Target::Swipe &&
         abs(dx) > D(24) && 2 * abs(dx) > 3 * abs(dy)) {
       if (s_target == Target::Key) {
@@ -1755,6 +1801,13 @@ Touch touch(int fingers, int x, int y) {
       }
       s_user_until_ms = millis() + 1200;  // the computer catches up meanwhile
       return Touch::None;
+    case Target::SeekBar: {
+      const int32_t ms = services::seek::seekTarget(s_seek_x, s_seek_bx, s_seek_bw, host::now().duration_s);
+      s_seek_x = -1;
+      if (ms >= 0) host::sendSeek(static_cast<uint32_t>(ms));
+      presentSoon();
+      return Touch::None;
+    }
     case Target::None:
       return Touch::None;
   }
