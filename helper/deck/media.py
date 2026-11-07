@@ -122,7 +122,12 @@ class MediaWatcher:
         self._anchor = (0.0, 0.0)    # (position s, time.monotonic())
         self._cover_hash = None
         self._cover_until = 0.0      # look for a (better) cover until then
+        self._seek_ms = None         # a seek from the card, done on the next poll
         threading.Thread(target=self._run, name="media", daemon=True).start()
+
+    def seek(self, ms):
+        """To this place of the playing song (the card's time bar), if its app takes it."""
+        self._seek_ms = max(0, int(ms))
 
     def position(self):
         """Seconds, now (the heartbeat to the card uses it)."""
@@ -178,6 +183,8 @@ class MediaWatcher:
         playing = info.playback_status == Status.PLAYING
         dur = max(0, int(tl.end_time.total_seconds() - tl.start_time.total_seconds()))
         raw = max(0.0, tl.position.total_seconds() - tl.start_time.total_seconds())
+        can_seek = bool(getattr(getattr(info, "controls", None), "is_playback_position_enabled", False))
+        seek_ms, self._seek_ms = self._seek_ms, None
         title, artist, album = props.title or "", props.artist or "", props.album_title or ""
         app = app_name(s.source_app_user_model_id)
         key = (title, artist, album, app)
@@ -211,6 +218,12 @@ class MediaWatcher:
             if pos is not None:
                 self._anchor = (pos, time.monotonic())
                 moved = True
+        if seek_ms is not None and can_seek and not new_track:
+            await s.try_change_playback_position_async(int(seek_ms) * 10000)  # 100 ns units
+            # At the new place at once; Windows may repeat the old report for a moment, and
+            # an unchanged report does not move the anchor.
+            self._anchor = (seek_ms / 1000.0, time.monotonic())
+            moved = True
 
         cover = None
         if props.thumbnail is not None and (self._cover_hash is None or time.monotonic() < self._cover_until):
@@ -224,9 +237,11 @@ class MediaWatcher:
                 if h != self._cover_hash:  # a first or a changed picture for this track
                     self._cover_hash = h
                     cover = data
-        state = {"t": title, "a": artist, "al": album, "app": app, "d": dur, "play": playing, "id": self._id}
+        state = {"t": title, "a": artist, "al": album, "app": app, "d": dur, "play": playing, "id": self._id,
+                 "sk": can_seek}
         old = self.state
-        changed = old.get("none") or any(state[k] != old.get(k) for k in ("t", "a", "al", "app", "d", "play", "id"))
+        changed = old.get("none") or any(state[k] != old.get(k)
+                                         for k in ("t", "a", "al", "app", "d", "play", "id", "sk"))
         self.state = state
         if cover is not None or changed or moved:
             self.on_change(state, cover)

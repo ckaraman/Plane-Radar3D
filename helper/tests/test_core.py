@@ -542,6 +542,75 @@ def test_cover_and_position():
     media.time.monotonic = real_monotonic
 
 
+def test_seek():
+    """The card's time bar (10n): seeking goes to the playing session, only when it takes it."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from deck import core, media
+
+    class T:
+        def __init__(self, s):
+            self.s = s
+
+        def total_seconds(self):
+            return self.s
+
+    controls = SimpleNamespace(is_playback_position_enabled=True)
+    asked = []
+
+    class Sess:
+        source_app_user_model_id = "chrome"
+
+        async def try_get_media_properties_async(self):
+            return SimpleNamespace(title="Song", artist="Artist", album_title="", thumbnail=None)
+
+        def get_playback_info(self):
+            return SimpleNamespace(playback_status="P", controls=controls)
+
+        def get_timeline_properties(self):
+            return SimpleNamespace(start_time=T(0), end_time=T(200), position=T(30), last_updated_time=None)
+
+        async def try_change_playback_position_async(self, ticks):
+            asked.append(ticks)
+            return True
+
+    class Mgr:
+        def get_current_session(self):
+            return Sess()
+
+    media.Status = type("S", (), {"PLAYING": "P"})
+    media.MediaManager = None  # no thread
+    w = media.MediaWatcher(lambda st, c: None, log=lambda m: None)
+    run = lambda: asyncio.new_event_loop().run_until_complete(w._poll(Mgr()))
+    clock = [1000.0]
+    real_monotonic = media.time.monotonic
+    media.time.monotonic = lambda: clock[0]
+    try:
+        run()
+        assert w.state["sk"] is True
+        w.seek(95000)
+        run()
+        assert asked == [95000 * 10000], asked  # 100 ns ticks
+        assert abs(w.position() - 95) < 0.01, w.position()  # re-anchored at once
+        clock[0] += 1
+        run()  # Windows still reports 30 s for a moment: the bar stays at the new place
+        assert abs(w.position() - 96) < 0.01, w.position()
+        controls.is_playback_position_enabled = False
+        run()
+        assert w.state["sk"] is False
+        w.seek(10000)
+        run()
+        assert asked == [95000 * 10000], asked  # not sent when the session refuses seeking
+    finally:
+        media.time.monotonic = real_monotonic
+
+    got = []
+    me = SimpleNamespace(media=SimpleNamespace(seek=got.append), log=lambda m: None)
+    core.Core._card_event(me, "SEEK", {"ms": 42000})
+    assert got == [42000], got
+
+
 def test_feed():
     from deck import feed
 
@@ -680,6 +749,7 @@ if __name__ == "__main__":
     test_browser_link()
     test_qplay_does_not_hold_the_reader()
     test_cover_and_position()
+    test_seek()
     test_feed()
     test_all()
     print("tests ok")

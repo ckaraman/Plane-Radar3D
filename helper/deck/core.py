@@ -75,6 +75,8 @@ class Core:
             self.volume.set(int(data.get("v", self.volume.level)))
         elif tag == "MUTE":
             self.volume.toggle_mute()
+        elif tag == "SEEK":  # the card's time bar (10n)
+            self.media.seek(int(data.get("ms", 0)))
         elif tag == "QPLAY":  # a song from the queue panel on the card
             # On its own thread: the card's reader must never wait on the browser.
             threading.Thread(target=self.link.play, args=(int(data.get("x", -1)), str(data.get("t") or "")),
