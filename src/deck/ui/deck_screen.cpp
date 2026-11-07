@@ -157,6 +157,8 @@ float s_bar_x = -1;  // smoothed finger position on the volume bar
 int s_vol_x = 0, s_vol_w = 1;  // the volume bar being touched (music page or queue screen)
 int s_seek_x = -1;              // finger x on the time bar while seeking (10n); -1: not seeking
 int s_seek_bx = 0, s_seek_bw = 1;  // that time bar
+uint32_t s_seek_id = 0;           // the song being seeked
+bool s_seek_q = false;            // the queue was open when seeking started
 
 // Music page.
 bool s_was_playing = false;
@@ -1443,6 +1445,7 @@ void enter() {
   s_flash = false;
   s_down = false;
   s_target = Target::None;
+  s_seek_x = -1;
   s_keys_dirty = true;  // USB mode or keys may have changed meanwhile
   for (auto& b : s_fb) b.base = 0;  // other screens drew into the panel buffers
   const auto& n = host::now();
@@ -1457,8 +1460,20 @@ void enter() {
   present();
 }
 
+/** A seek in progress is dropped, unsent, once the song or the screen under the finger
+ * changes: it would seek the new song, or the place sent would not be the one shown. The
+ * finger stays on SeekBar (it does not turn into a page swipe), it just moves nothing. */
+void seekCheck() {
+  if (s_seek_x < 0) return;
+  if (host::now().id != s_seek_id || s_queue_open != s_seek_q || s_page != Page::Music) {
+    s_seek_x = -1;
+    s_dirty = true;
+  }
+}
+
 bool tick() {
   if (!s_ready) return true;
+  seekCheck();
   const unsigned long now = millis();
   if (s_flash && s_pressed >= 0 && now - s_pressed_ms >= 140) {
     s_pressed = -1;
@@ -1531,10 +1546,13 @@ bool seekStart(int x, int y, int tx, int tw, int bar_y) {
   const host::NowPlaying& n = host::now();
   const int bx = tx + kTimeW, bw = tw - 2 * kTimeW;
   if (!host::active() || !n.can_seek || n.duration_s == 0) return false;
-  if (abs(y - (bar_y + kBarH / 2)) >= D(22) || x < bx - D(12) || x >= bx + bw + D(12)) return false;
+  // D(20): on the music page the band ends where the volume bar's (kVolTouchH) begins.
+  if (abs(y - (bar_y + kBarH / 2)) >= D(20) || x < bx - D(12) || x >= bx + bw + D(12)) return false;
   s_seek_x = x;
   s_seek_bx = bx;
   s_seek_bw = bw;
+  s_seek_id = n.id;
+  s_seek_q = s_queue_open;
   presentSoon();
   return true;
 }
@@ -1643,7 +1661,8 @@ Touch touch(int fingers, int x, int y) {
     // A sideways slide anywhere but on the knob / volume bar turns the page; it starts
     // early, so a quick flick over a key is a page turn and not a key press.
     if (s_target == Target::SeekBar) {  // the knob follows the finger; the page never turns here
-      if (x != s_seek_x) {
+      seekCheck();
+      if (s_seek_x >= 0 && x != s_seek_x) {
         s_seek_x = x;
         presentSoon();
       }
@@ -1805,7 +1824,9 @@ Touch touch(int fingers, int x, int y) {
       s_user_until_ms = millis() + 1200;  // the computer catches up meanwhile
       return Touch::None;
     case Target::SeekBar: {
-      const int32_t ms = services::seek::seekTarget(s_seek_x, s_seek_bx, s_seek_bw, host::now().duration_s);
+      seekCheck();
+      const int32_t ms =
+          s_seek_x >= 0 ? services::seek::seekTarget(s_seek_x, s_seek_bx, s_seek_bw, host::now().duration_s) : -1;
       s_seek_x = -1;
       if (ms >= 0) host::sendSeek(static_cast<uint32_t>(ms));
       presentSoon();

@@ -425,7 +425,7 @@ void drawStatusLine(const Forecast& f, bool have, unsigned long fetched_ms) {
 void drawNoData(int y) {
   const char* l1 = "Hava durumu bekleniyor...";
   const char* l2 = services::usb_feed::active()
-                       ? "USB köprüsünün yeni sürümü gerekli (kurulum sayfası, adım 4)"
+                       ? "Bilgisayardaki program birkaç saniye içinde gönderir"
                        : "Wi-Fi bağlanınca birkaç saniye içinde gelir";
   char err[48];
   char why[80];
