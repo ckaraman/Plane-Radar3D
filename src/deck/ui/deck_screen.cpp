@@ -84,8 +84,11 @@ constexpr int kQCloseCx = kQPanelX + kQPanelW - D(30), kQCloseCy = kQPanelY + kQ
 constexpr int kQCoverX = D(28), kQCoverY = D(74), kQCoverS = D(156);
 constexpr int kQLeftW = D(392);
 constexpr int kQBarY = D(334);
-constexpr int kQCtrlY = D(404), kQPrevCx = D(152), kQPlayCx = D(224), kQNextCx = D(296);
+constexpr int kQCtrlY = D(404), kQPrevCx = D(60), kQPlayCx = D(132), kQNextCx = D(204);
 constexpr int kQSmallR = D(24), kQPlayR = D(31);
+// Volume on the queue screen (10n): right of the controls, like the music page's.
+constexpr int kQSpkCx = D(250), kQVolX = D(272), kQVolW = D(132);
+constexpr int kQTransW = kQNextCx + kQSmallR + D(8);  // the controls' part ends here
 
 // Colours (approved palette).
 constexpr Rgb kWhite{255, 255, 255};
@@ -150,6 +153,7 @@ unsigned long s_last_send_ms = 0;
 int s_user_level = -1;
 unsigned long s_user_until_ms = 0;
 float s_bar_x = -1;  // smoothed finger position on the volume bar
+int s_vol_x = 0, s_vol_w = 1;  // the volume bar being touched (music page or queue screen)
 
 // Music page.
 bool s_was_playing = false;
@@ -756,6 +760,20 @@ constexpr int kMTransX = kPrevCx - kSmallBtnR - D(2), kMNextX = kNextCx + kSmall
 static_assert(kVolX + kVolW + kVolKnobR + D(4) < kMTransX, "volume knob inside its part");
 static_assert(kMNextX <= kNextX, "next card inside its part");
 
+/** Speaker, bar and knob: the music page's volume, also on the queue screen (10n). */
+template <typename Gfx>
+void drawVolumeBar(Gfx& s, const paint::Canvas& c, int spk_cx, int bar_x, int bar_w, int cy, int pct, bool muted) {
+  speakerIcon(s, spk_cx, cy, D(11), col565(muted ? kMutedRed : kWhite));
+  paint::roundRect(c, bar_x, cy - kVolH / 2, bar_w, kVolH, kVolH / 2, kWhite, 46);
+  const float vx = bar_x + bar_w * (muted ? 0 : pct) / 100.0f;
+  if (!muted && pct > 0) {
+    paint::gradientBar(c, bar_x, cy - kVolH / 2, std::max(kVolH, static_cast<int>(vx - bar_x)), kVolH, kPink, kPink,
+                       kLavender);
+  }
+  paint::circle(c, vx, cy, kVolKnobR + D(4), kLavender, muted ? 0 : 70);
+  paint::circle(c, vx, cy, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
+}
+
 template <typename Gfx>
 void drawMusicFront(Gfx& s, Frame& f) {
   const paint::Canvas& c = f.c;
@@ -821,15 +839,7 @@ void drawMusicFront(Gfx& s, Frame& f) {
   s_shown_level = pct;
   s_shown_muted = muted;
   if (part(f, 3, mix(mix(kSeed, pct), muted), 0, kMRowY, kMTransX, kH - kMRowY)) {
-    speakerIcon(s, kMusicPad + D(10), kCtrlY, D(11), col565(muted ? kMutedRed : kWhite));
-    paint::roundRect(c, kVolX, kCtrlY - kVolH / 2, kVolW, kVolH, kVolH / 2, kWhite, 46);
-    const float vx = kVolX + kVolW * (muted ? 0 : pct) / 100.0f;
-    if (!muted && pct > 0) {
-      paint::gradientBar(c, kVolX, kCtrlY - kVolH / 2, std::max(kVolH, static_cast<int>(vx - kVolX)), kVolH, kPink,
-                         kPink, kLavender);
-    }
-    paint::circle(c, vx, kCtrlY, kVolKnobR + D(4), kLavender, muted ? 0 : 70);
-    paint::circle(c, vx, kCtrlY, kVolKnobR, muted ? Rgb{150, 156, 190} : kWhite, 255);
+    drawVolumeBar(s, c, kMusicPad + D(10), kVolX, kVolW, kCtrlY, pct, muted);
   }
   frontPart(kFpBars);
   const bool next = nextCardShown();
@@ -1064,6 +1074,8 @@ void drawQueueRows(Gfx& g, const paint::Canvas& c, int count);
 // Open queue parts: the left column in three bands, the panel on the right (stage 10c-3).
 constexpr int kQTextY = D(254), kQBandY = kQBarY - D(12), kQRowY = kQBarY + D(18), kQLeftPartW = kQPanelX - D(4);
 static_assert(kQCoverX + kQLeftW <= kQLeftPartW, "left column inside its parts");
+static_assert(kQVolX + kQVolW + kVolKnobR + D(4) < kQLeftPartW, "queue volume knob inside its part");
+static_assert(kQSpkCx - D(11) > kQTransW, "queue speaker right of the controls' part");
 
 template <typename Gfx>
 void drawQueueFront(Gfx& g, Frame& f) {
@@ -1104,10 +1116,20 @@ void drawQueueFront(Gfx& g, Frame& f) {
     paint::circle(c, bx + bw * fr, kQBarY + kBarH / 2.0f, D(7), kWhite, 255);
   }
   frontPart(kFpBars);
-  if (part(f, 2, n.valid && n.playing, 0, kQRowY, kQLeftPartW, kH - kQRowY)) {
+  if (part(f, 2, n.valid && n.playing, 0, kQRowY, kQTransW, kH - kQRowY)) {
     drawTransport(g, c, kQPrevCx, kQPlayCx, kQNextCx, kQCtrlY, kQSmallR, kQPlayR);
   }
   frontPart(kFpCtrls);
+  {
+    const bool muted = mutedNow();
+    const int pct = levelPercent();
+    s_shown_level = pct;
+    s_shown_muted = muted;
+    if (part(f, 4, mix(mix(kSeed, pct), muted), kQTransW, kQRowY, kQLeftPartW - kQTransW, kH - kQRowY)) {
+      drawVolumeBar(g, c, kQSpkCx, kQVolX, kQVolW, kQCtrlY, pct, muted);
+    }
+  }
+  frontPart(kFpBars);
 
   // Right: the queue, from the kept panel when nothing in it changed.
   const int count = host::queueCount();
@@ -1527,6 +1549,14 @@ Touch touch(int fingers, int x, int y) {
           s_target = Target::Play;
         } else if (inCircle(x, y, kQNextCx, kQCtrlY, kQSmallR + D(10))) {
           s_target = Target::Next;
+        } else if (x >= kQTransW && x < kQVolX + kQVolW + D(16) && abs(y - kQCtrlY) < kVolTouchH) {
+          if (millis() >= s_user_until_ms) s_user_level = -1;
+          s_target = Target::VolBar;
+          s_bar_x = x;
+          s_vol_x = kQVolX;
+          s_vol_w = kQVolW;
+          wantLevel(static_cast<int>(lroundf((s_bar_x - s_vol_x) * 100.0f / s_vol_w)));
+          presentSoon();
         } else {
           s_target = Target::None;
         }
@@ -1544,7 +1574,9 @@ Touch touch(int fingers, int x, int y) {
           if (millis() >= s_user_until_ms) s_user_level = -1;
           s_target = Target::VolBar;
           s_bar_x = x;
-          wantLevel(static_cast<int>(lroundf((s_bar_x - kVolX) * 100.0f / kVolW)));
+          s_vol_x = kVolX;
+          s_vol_w = kVolW;
+          wantLevel(static_cast<int>(lroundf((s_bar_x - s_vol_x) * 100.0f / s_vol_w)));
           presentSoon();
         } else {
           s_target = Target::None;
@@ -1612,7 +1644,7 @@ Touch touch(int fingers, int x, int y) {
     } else if (s_target == Target::VolBar) {
       // The touch panel wobbles by a pixel or two: smooth it, so the level does not flicker.
       s_bar_x += (x - s_bar_x) * 0.5f;
-      wantLevel(static_cast<int>(lroundf((s_bar_x - kVolX) * 100.0f / kVolW)));
+      wantLevel(static_cast<int>(lroundf((s_bar_x - s_vol_x) * 100.0f / s_vol_w)));
       presentSoon();
     } else if (s_target == Target::Key && keyAt(x, y) != s_key && s_pressed == s_key) {
       s_pressed = -1;  // slid off the key: no press
