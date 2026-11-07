@@ -12,10 +12,11 @@
  *
  * From the helper (one line each, JSON after the tag):
  *   PR:VOL {"v":42,"m":false}           volume 0..100, muted; also its heartbeat (~2 s)
- *   PR:NOW {"t":"…","a":"…","al":"…","app":"…","d":238,"p":84,"pm":84250,"play":true,"id":7,"back":60}
+ *   PR:NOW {"t":"…","a":"…","al":"…","app":"…","d":238,"p":84,"pm":84250,"play":true,"id":7,"back":60,"sk":true}
  *        d / p = duration / position in s (pm: position in ms, newer helpers), id changes
  *        with the track (new cover follows),
- *        back = seconds after a stop until the deck returns to its keys (-1 = never)
+ *        back = seconds after a stop until the deck returns to its keys (-1 = never),
+ *        sk = the playing app takes seeks (10n; older helpers: absent, no seeking)
  *   PR:NOW {"none":true}                nothing is playing (no media session)
  *   PR:COVERBEGIN {"len":n,"crc":c,"id":7,"w":480,"h":480}  PR:COVER <seq> <base64>  PR:COVEREND
  *        album cover as a baseline JPEG of w x h (at most the panel), shown centred with
@@ -26,6 +27,7 @@
  *   PR:KEY {"i":4}                      helper key i pressed (deck slot)
  *   PR:SETVOL {"v":55}                  knob / bar moved (absolute level)
  *   PR:MUTE {}                          knob tapped
+ *   PR:SEEK {"ms":95000}                time bar tapped / dragged (only when sk)
  */
 namespace services::host {
 
@@ -48,6 +50,7 @@ struct NowPlaying {
   unsigned long anchor_ms = 0;
   uint32_t id = 0;
   int back_s = 60;
+  bool can_seek = false;  // "sk": the time bar may seek
 };
 const NowPlaying& now();
 /** Position now (s, ms), extrapolated while playing. */
@@ -115,5 +118,8 @@ void handleCoverEnd();
 void sendKey(int slot);
 void sendVolume(int level);
 void sendMute();
+/** Seek to ms of the playing song; the card shows that place at once (and holds it a
+ * moment against the helper's older reports). */
+void sendSeek(uint32_t ms);
 
 }  // namespace services::host

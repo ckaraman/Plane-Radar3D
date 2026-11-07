@@ -11,6 +11,7 @@
 #include "hardware/console.h"
 #include "services/map_store.h"
 #include "services/queue_carry.h"
+#include "services/seek_bar.h"
 
 namespace services::host {
 
@@ -29,6 +30,7 @@ bool s_muted = false;
 
 NowPlaying s_now;
 uint32_t s_now_gen = 1;
+seek::Hold s_seek_hold;  // after a seek: older position reports do not pull the bar back
 
 uint8_t* s_cover = nullptr;  // active JPEG (PSRAM)
 size_t s_cover_len = 0;
@@ -148,6 +150,7 @@ void handleNow(const char* json) {
     n.anchor_ms = millis();
     n.id = doc["id"] | 0;
     n.back_s = doc["back"] | 60;
+    n.can_seek = doc["sk"] | false;
   }
   const bool same_track = n.valid == s_now.valid && n.playing == s_now.playing && n.id == s_now.id &&
                           strcmp(n.title, s_now.title) == 0 && strcmp(n.artist, s_now.artist) == 0 &&
@@ -156,7 +159,8 @@ void handleNow(const char* json) {
   // The heartbeat repeats the position: within 1.5 s of ours the running clock is kept, so
   // the bar never steps back a little every few seconds. A real seek moves it.
   const long drift = static_cast<long>(n.pos_ms) - static_cast<long>(positionNowMs());
-  const bool keep_clock = same_track && n.valid && labs(drift) <= 1500;
+  const bool held = seek::holdShows(s_seek_hold, n.pos_ms, millis(), n.id) >= 0;
+  const bool keep_clock = same_track && n.valid && (labs(drift) <= 1500 || held);
   if (keep_clock) {
     n.pos_ms = s_now.pos_ms;
     n.anchor_ms = s_now.anchor_ms;
@@ -476,6 +480,13 @@ void sendVolume(int level) {
 void sendMute() {
   s_muted = !s_muted;
   Console.println("PR:MUTE {}");
+}
+void sendSeek(uint32_t ms) {
+  Console.printf("PR:SEEK {\"ms\":%lu}\n", static_cast<unsigned long>(ms));
+  s_now.pos_ms = ms;  // there at once
+  s_now.anchor_ms = millis();
+  seek::holdStart(s_seek_hold, static_cast<int32_t>(ms), millis(), s_now.id);
+  ++s_now_gen;
 }
 
 }  // namespace services::host
