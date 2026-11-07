@@ -611,6 +611,26 @@ def test_seek():
     assert got == [42000], got
 
 
+def test_seek_mac():
+    """The Mac helper seeks through the MediaRemote Adapter (runs anywhere: nothing is started)."""
+    from deck import media_mac
+
+    started = []
+    real = (media_mac.adapter_paths, media_mac.subprocess.Popen, media_mac.threading.Thread)
+    media_mac.adapter_paths = lambda: ("a.pl", "F")
+    media_mac.subprocess.Popen = lambda args, **kw: started.append(args)
+    media_mac.threading.Thread = lambda **kw: type("NoThread", (), {"start": lambda self: None})()
+    try:
+        w = media_mac.MediaWatcher(lambda st, c: None, log=lambda m: None)
+        w._data({"title": "Song", "playing": True, "durationMicros": 200e6, "elapsedTimeMicros": 30e6}, False)
+        assert w.state["sk"] is True
+        w.seek(61000)
+        assert started and started[-1][-2:] == ["seek", "61000000"], started
+        assert abs(w.position() - 61) < 0.05, w.position()
+    finally:
+        media_mac.adapter_paths, media_mac.subprocess.Popen, media_mac.threading.Thread = real
+
+
 def test_feed():
     from deck import feed
 
@@ -750,6 +770,7 @@ if __name__ == "__main__":
     test_qplay_does_not_hold_the_reader()
     test_cover_and_position()
     test_seek()
+    test_seek_mac()
     test_feed()
     test_all()
     print("tests ok")

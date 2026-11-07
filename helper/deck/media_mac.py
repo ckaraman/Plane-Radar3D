@@ -81,6 +81,16 @@ class MediaWatcher:
         d = st.get("d") or 0
         return max(0.0, min(pos, d) if d else pos)
 
+    def seek(self, ms):
+        """To this place of the playing song (the card's time bar): the adapter's "seek"."""
+        script, fw = adapter_paths()
+        if not script:
+            return
+        ms = max(0, int(ms))
+        subprocess.Popen(["/usr/bin/perl", script, fw, "seek", str(ms * 1000)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._anchor = (ms / 1000.0, time.time(), self._anchor[2] or 1.0)
+
     def stop(self):
         p = self._proc
         if p is not None:
@@ -155,5 +165,7 @@ class MediaWatcher:
                     cover = base64.b64decode(art)
                 except ValueError:
                     cover = None
-        self.state = {"t": title, "a": artist, "al": album, "app": app, "d": dur, "play": playing, "id": self._id}
+        # The adapter tells no "can seek" per app: offered, an app that ignores it just stays.
+        self.state = {"t": title, "a": artist, "al": album, "app": app, "d": dur, "play": playing, "id": self._id,
+                      "sk": True}
         self.on_change(self.state, cover)
