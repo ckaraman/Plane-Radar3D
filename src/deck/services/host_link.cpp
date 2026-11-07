@@ -152,10 +152,10 @@ void handleNow(const char* json) {
     n.back_s = doc["back"] | 60;
     n.can_seek = doc["sk"] | false;
   }
-  const bool same_track = n.valid == s_now.valid && n.playing == s_now.playing && n.id == s_now.id &&
-                          strcmp(n.title, s_now.title) == 0 && strcmp(n.artist, s_now.artist) == 0 &&
-                          strcmp(n.album, s_now.album) == 0 && strcmp(n.app, s_now.app) == 0 &&
-                          n.duration_s == s_now.duration_s;
+  const bool same_song = n.valid == s_now.valid && n.id == s_now.id && strcmp(n.title, s_now.title) == 0 &&
+                         strcmp(n.artist, s_now.artist) == 0 && strcmp(n.album, s_now.album) == 0 &&
+                         strcmp(n.app, s_now.app) == 0 && n.duration_s == s_now.duration_s;
+  const bool same_track = same_song && n.playing == s_now.playing;
   // The heartbeat repeats the position: within 1.5 s of ours the running clock is kept, so
   // the bar never steps back a little every few seconds. A real seek moves it.
   const long drift = static_cast<long>(n.pos_ms) - static_cast<long>(positionNowMs());
@@ -164,6 +164,11 @@ void handleNow(const char* json) {
   if (keep_clock) {
     n.pos_ms = s_now.pos_ms;
     n.anchor_ms = s_now.anchor_ms;
+  } else if (held && same_song && n.valid) {
+    // Paused / resumed while a seek is held: the report may still carry the old place, so
+    // the bar stops (or goes on) where our clock is, not back there.
+    n.pos_ms = positionNowMs();
+    n.anchor_ms = millis();
   }
   s_now = n;
   if (!keep_clock) ++s_now_gen;
