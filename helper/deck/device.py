@@ -190,7 +190,7 @@ class Device:
             if self.hello is not None:
                 self.hello["prefs"] = data
             return
-        if tag in ("KEY", "SETVOL", "MUTE", "SEEK", "QPLAY", "PERF"):
+        if tag in ("KEY", "SETVOL", "MUTE", "MICMUTE", "SEEK", "QPLAY", "PERF"):
             try:
                 self.on_event(tag, data)
             except Exception as e:  # noqa: BLE001

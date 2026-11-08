@@ -100,6 +100,7 @@ class VolumeWatcher:
         self.on_change = on_change
         self.log = log
         self.level, self.muted = 50, False
+        self.mic = 0  # no microphone control on the Mac
         self._q = queue.Queue()
         threading.Thread(target=self._run, name="volume", daemon=True).start()
 
@@ -108,6 +109,9 @@ class VolumeWatcher:
 
     def toggle_mute(self):
         self._q.put(("mute", None))
+
+    def toggle_mic(self):
+        pass
 
     def step(self, delta):
         self._q.put(("set", max(0, min(100, self.level + int(delta)))))

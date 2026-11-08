@@ -5,7 +5,7 @@ import os
 import threading
 import time
 
-from . import blob, browser_link, config, firmware, queue_card
+from . import blob, browser_link, config, firmware, mic, queue_card
 from .config import Config
 from .perf import PerfLog, Stall, window_line
 from .device import Device
@@ -75,6 +75,8 @@ class Core:
             self.volume.set(int(data.get("v", self.volume.level)))
         elif tag == "MUTE":
             self.volume.toggle_mute()
+        elif tag == "MICMUTE":
+            self.volume.toggle_mic()
         elif tag == "SEEK":  # the card's time bar (10n)
             self.media.seek(int(data.get("ms", 0)))
         elif tag == "QPLAY":  # a song from the queue panel on the card
@@ -136,7 +138,7 @@ class Core:
     # ------------------------------------------------------------------ to the card
     def _volume_changed(self, level, muted):
         if self.config.settings.get("send_volume", True):
-            self.device.send_json("VOL", {"v": level, "m": muted})
+            self.device.send_json("VOL", mic.vol_payload(level, muted, self.volume.mic, True))
 
     def _media_changed(self, state, cover):
         self.now = state
@@ -229,10 +231,8 @@ class Core:
                 continue
             if time.time() - last_vol >= 2.0:
                 last_vol = time.time()
-                if self.config.settings.get("send_volume", True):
-                    dev.send_json("VOL", {"v": self.volume.level, "m": self.volume.muted})
-                else:
-                    dev.send_json("VOL", {"v": 50, "m": False})
+                send_volume = self.config.settings.get("send_volume", True)
+                dev.send_json("VOL", mic.vol_payload(self.volume.level, self.volume.muted, self.volume.mic, send_volume))
             if time.time() - self._last_now_sent >= 5.0:
                 self._send_now()
 
