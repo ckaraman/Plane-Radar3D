@@ -89,9 +89,9 @@
   .act[aria-checked="true"] { background: var(--sel-bg); border: 1.5px solid var(--sel-line); font-weight: 600; }
   .panel { margin-top: 16px; padding: 16px; border-radius: 16px; background: rgba(8,10,28,0.35); border: 1px solid rgba(255,255,255,0.08); }
   .panel label.f:first-child { margin-top: 0; }
-  .pic { width: 88px; height: 88px; border-radius: 18px; background: rgba(255,255,255,0.06); border: 1px dashed rgba(255,255,255,0.22); display: grid; place-items: center; flex: none; overflow: hidden; }
-  .pic img { width: 72%; height: 72%; object-fit: contain; }
-  .pic.drop { border-color: #c4b3ff; background: var(--sel-bg); }
+  .imgbox { width: 88px; height: 88px; border-radius: 18px; background: rgba(255,255,255,0.06); border: 1px dashed rgba(255,255,255,0.22); display: grid; place-items: center; flex: none; overflow: hidden; }
+  .imgbox img { width: 72%; height: 72%; object-fit: contain; }
+  .imgbox.drop { border-color: #c4b3ff; background: var(--sel-bg); }
   .line { display: flex; gap: 8px; } .line .in { flex: 1; min-width: 0; }
   .steps { margin: 16px 0 10px; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; font-size: 14px; }
   .steps code { background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 6px; }
@@ -165,7 +165,7 @@
       <div class="card" style="flex: 1 1 380px">
         <h2 id="ed-title" style="margin-bottom: 16px">Tuş 1</h2>
         <div style="display: flex; gap: 16px; align-items: center">
-          <div class="pic" id="pic" aria-label="Tuşun resmi"></div>
+          <div class="imgbox" id="pic" aria-label="Tuşun resmi"></div>
           <div style="display: flex; flex-direction: column; gap: 8px">
             <div style="display: flex; flex-wrap: wrap; gap: 8px">
               <button type="button" class="btn" id="b-img">Resim seç</button>

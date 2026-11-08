@@ -15,7 +15,7 @@ function brand() {
   const b = (navigator.userAgentData && navigator.userAgentData.brands) || [];
   const names = b.map((x) => x.brand);
   for (const n of ['Microsoft Edge', 'Brave', 'Opera', 'Vivaldi', 'Google Chrome']) {
-    if (names.includes(n)) return n;
+    if (names.some((x) => x === n || x.startsWith(n + ' '))) return n;  // "Opera GX" is Opera
   }
   return 'Chromium';
 }
