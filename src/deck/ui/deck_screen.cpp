@@ -19,6 +19,7 @@
 #include "services/deck_store.h"
 #include "services/hid_keys.h"
 #include "services/host_link.h"
+#include "services/knob_zone.h"
 #include "services/seek_bar.h"
 #include "services/perf.h"
 #include "ui/fonts_tr.h"
@@ -134,6 +135,7 @@ unsigned long s_level_changed_ms = 0;
 bool s_level_dirty = false;
 int s_shown_level = -1;  // last level drawn (percent)
 bool s_shown_muted = false;
+int s_shown_mic = 0;
 
 // Key press / touch.
 int s_pressed = -1;
@@ -425,6 +427,20 @@ void speakerIcon(Gfx& g, int cx, int cy, int s, uint16_t c) {
   g.fillRect(cx - s / 3, cy - s / 2, s * 2 / 3 + 1, s, c);
 }
 
+/** Microphone: capsule, cradle, stand; crossed through when off. */
+template <typename Gfx>
+void micIcon(Gfx& g, int cx, int cy, int s, uint16_t c, bool crossed) {
+  const int w = s * 3 / 5, t = std::max(D(3), 2);
+  const int yc = cy - s / 10, ro = s * 4 / 5;  // centre and outer radius of the cradle
+  g.fillRoundRect(cx - w / 2, cy - s, w, s * 6 / 5, w / 2, c);
+  g.fillArc(cx, yc, ro, ro - t, 0, 180, c);
+  g.fillRect(cx - t / 2, yc + ro, t, cy + s - (yc + ro), c);
+  g.fillRect(cx - s / 2, cy + s - t + 1, s, t, c);
+  if (crossed) {
+    for (int k = -2; k <= 2; ++k) g.drawLine(cx - s + k, cy - s, cx + s + k, cy + s + 2, c);
+  }
+}
+
 template <typename Gfx>
 void mediaIcon(Gfx& g, Media m, int cx, int cy, uint16_t c) {
   const int s = D(13);
@@ -570,9 +586,10 @@ void drawKnobBase(LGFX_Sprite& s) {
   }
 }
 
-/** The moving part of the knob: filled arc, its end dot, the speaker. */
+/** The moving part of the knob: filled arc, its end dot, the speaker; with a microphone
+ * (mic != 0) the inside splits in two, speaker above, microphone below. */
 template <typename Gfx>
-void drawKnobLevel(Gfx& s, const paint::Canvas& c, int pct, bool muted) {
+void drawKnobLevel(Gfx& s, const paint::Canvas& c, int pct, bool muted, int mic) {
   uint16_t* px = c.px;
   const int lvl = constrain(pct, 0, 100) * 360;  // 0.01 degree
   const float edge = 57.3f / kRingR * 100.0f;    // one pixel of arc, in 0.01 degree
@@ -596,18 +613,24 @@ void drawKnobLevel(Gfx& s, const paint::Canvas& c, int pct, bool muted) {
   const float ex = kKnobCx + sinf(a) * mr, ey = kKnobCy - cosf(a) * mr;
   paint::circle(c, ex, ey, D(15), muted ? dim : kLavender, 110);
   paint::circle(c, ex, ey, D(11), kWhite, 255);
-  // Speaker in the middle, waves or a cross.
+  // Speaker (middle, or the upper half), waves or a cross.
   const uint16_t sc = col565(muted ? kMutedRed : kText);
-  speakerIcon(s, kKnobCx - D(12), kKnobCy, D(22), sc);
+  const int sy = mic != 0 ? kKnobCy - D(52) : kKnobCy;
+  speakerIcon(s, kKnobCx - D(12), sy, D(22), sc);
   const int mx = kKnobCx + D(16);
   if (muted) {
     for (int t = -2; t <= 2; ++t) {
-      s.drawLine(mx - D(9) + t, kKnobCy - D(9), mx + D(9) + t, kKnobCy + D(9), sc);
-      s.drawLine(mx - D(9) + t, kKnobCy + D(9), mx + D(9) + t, kKnobCy - D(9), sc);
+      s.drawLine(mx - D(9) + t, sy - D(9), mx + D(9) + t, sy + D(9), sc);
+      s.drawLine(mx - D(9) + t, sy + D(9), mx + D(9) + t, sy - D(9), sc);
     }
   } else {
-    paint::arc(c, mx - D(8), kKnobCy, D(11), D(8), 50, 130, kText, 255);
-    paint::arc(c, mx - D(8), kKnobCy, D(21), D(18), 50, 130, kText, 255);
+    paint::arc(c, mx - D(8), sy, D(11), D(8), 50, 130, kText, 255);
+    paint::arc(c, mx - D(8), sy, D(21), D(18), 50, 130, kText, 255);
+  }
+  if (mic != 0) {
+    const int half = static_cast<int>(kRingR - kRingW) - D(16);
+    paint::roundRect(c, kKnobCx - half, kKnobCy - 1, 2 * half, 2, 1, kText, 70);
+    micIcon(s, kKnobCx, kKnobCy + D(52), D(22), col565(mic == 2 ? kMutedRed : kText), mic == 2);
   }
 }
 
@@ -869,6 +892,7 @@ void drawMusicFront(Gfx& s, Frame& f) {
   const int pct = levelPercent();
   s_shown_level = pct;
   s_shown_muted = muted;
+  s_shown_mic = host::micState();
   if (part(f, 3, mix(mix(kSeed, pct), muted), 0, kMRowY, kMTransX, kH - kMRowY)) {
     drawVolumeBar(s, c, kMusicPad + D(10), kVolX, kVolW, kCtrlY, pct, muted);
   }
@@ -1151,6 +1175,7 @@ void drawQueueFront(Gfx& g, Frame& f) {
     const int pct = levelPercent();
     s_shown_level = pct;
     s_shown_muted = muted;
+    s_shown_mic = host::micState();
     if (part(f, 4, mix(mix(kSeed, pct), muted), kQTransW, kQRowY, kQLeftPartW - kQTransW, kH - kQRowY)) {
       drawVolumeBar(g, c, kQSpkCx, kQVolX, kQVolW, kQCtrlY, pct, muted);
     }
@@ -1310,9 +1335,10 @@ void composeInto(Gfx& g, const paint::Canvas& c, FbState* fb) {
     }
     const bool muted = mutedNow();
     const int pct = levelPercent();
-    if (part(f, 1, mix(mix(kSeed, pct), muted), kKnobX - kKnobM, kKnobY - kKnobM, kKnobD + 2 * kKnobM,
+    const int mic = host::micState();
+    if (part(f, 1, mix(mix(mix(kSeed, pct), muted), mic), kKnobX - kKnobM, kKnobY - kKnobM, kKnobD + 2 * kKnobM,
              kKnobD + 2 * kKnobM)) {
-      drawKnobLevel(g, c, pct, muted);
+      drawKnobLevel(g, c, pct, muted, mic);
     }
     const auto& n = host::now();
     if (part(f, 2, n.valid && n.playing, kKTransX, kKTransY, kKNextCx + kKSmallR + D(6) - kKTransX,
@@ -1321,6 +1347,7 @@ void composeInto(Gfx& g, const paint::Canvas& c, FbState* fb) {
     }
     s_shown_level = pct;
     s_shown_muted = muted;
+    s_shown_mic = mic;
   } else if (queue) {
     drawQueueFront(g, f);
   } else {
@@ -1535,7 +1562,7 @@ bool tick() {
     if (n.valid && host::positionNow() != s_shown_pos) s_dirty = true;
   }
   if (store::generation() != s_keys_gen && s_page == Page::Keys) s_dirty = true;
-  if (levelPercent() != s_shown_level || mutedNow() != s_shown_muted) s_dirty = true;
+  if (levelPercent() != s_shown_level || mutedNow() != s_shown_muted || host::micState() != s_shown_mic) s_dirty = true;
   if (s_dirty) present();
   return true;
 }
@@ -1789,8 +1816,12 @@ Touch touch(int fingers, int x, int y) {
       return Touch::None;
     case Target::Knob:
       if (s_total_deg < 8.0f && s_max_move < D(14) && now - s_down_ms < 700) {
-        toggleMute();
-        presentSoon();
+        if (services::knob::tapIsMic(s_down_y, kKnobCy, host::micState())) {
+          host::sendMicMute();  // red only once the helper says so
+        } else {
+          toggleMute();
+          presentSoon();
+        }
       } else if (s_target_level >= 0 && host::active()) {
         host::sendVolume(s_target_level);
         s_target_level = -1;

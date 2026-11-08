@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "hardware/console.h"
+#include "services/knob_zone.h"
 #include "services/map_store.h"
 #include "services/queue_carry.h"
 #include "services/seek_bar.h"
@@ -27,6 +28,7 @@ unsigned long s_last_ms = 0;
 bool s_seen = false;
 int s_volume = 50;
 bool s_muted = false;
+int s_mic = 0;
 
 NowPlaying s_now;
 uint32_t s_now_gen = 1;
@@ -92,6 +94,7 @@ void dropStage() {
 bool active() { return s_seen && millis() - s_last_ms < kActiveMs; }
 int volume() { return s_volume; }
 bool muted() { return s_muted; }
+int micState() { return active() ? s_mic : 0; }
 const NowPlaying& now() { return s_now; }
 uint32_t nowGeneration() { return s_now_gen; }
 
@@ -128,6 +131,7 @@ void handleVol(const char* json) {
   if (deserializeJson(doc, json) != DeserializationError::Ok) return;
   if (doc["v"].is<int>()) s_volume = constrain(doc["v"].as<int>(), 0, 100);
   if (doc["m"].is<bool>()) s_muted = doc["m"].as<bool>();
+  s_mic = knob::parseMic(doc["mic"] | 0);
 }
 
 void handleNow(const char* json) {
@@ -486,6 +490,7 @@ void sendMute() {
   s_muted = !s_muted;
   Console.println("PR:MUTE {}");
 }
+void sendMicMute() { Console.println("PR:MICMUTE {}"); }
 void sendSeek(uint32_t ms) {
   Console.printf("PR:SEEK {\"ms\":%lu}\n", static_cast<unsigned long>(ms));
   s_now.pos_ms = ms;  // there at once

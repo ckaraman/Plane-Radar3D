@@ -11,7 +11,7 @@
  * USB keyboard.
  *
  * From the helper (one line each, JSON after the tag):
- *   PR:VOL {"v":42,"m":false}           volume 0..100, muted; also its heartbeat (~2 s)
+ *   PR:VOL {"v":42,"m":false,"mic":1}   volume 0..100, muted, mic 0 none / 1 open / 2 muted; also its heartbeat (~2 s)
  *   PR:NOW {"t":"…","a":"…","al":"…","app":"…","d":238,"p":84,"pm":84250,"play":true,"id":7,"back":60,"sk":true}
  *        d / p = duration / position in s (pm: position in ms, newer helpers), id changes
  *        with the track (new cover follows),
@@ -36,6 +36,7 @@ bool active();
 
 int volume();  // 0..100 (last value from the helper)
 bool muted();
+int micState();  // 0 no microphone or no helper, 1 open, 2 all muted
 
 struct NowPlaying {
   bool valid = false;  // a media session exists
@@ -118,6 +119,7 @@ void handleCoverEnd();
 void sendKey(int slot);
 void sendVolume(int level);
 void sendMute();
+void sendMicMute();
 /** Seek to ms of the playing song; the card shows that place at once (and holds it a
  * moment against the helper's older reports). */
 void sendSeek(uint32_t ms);
