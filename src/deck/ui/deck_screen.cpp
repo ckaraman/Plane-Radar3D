@@ -1816,7 +1816,8 @@ Touch touch(int fingers, int x, int y) {
       return Touch::None;
     case Target::Knob:
       if (s_total_deg < 8.0f && s_max_move < D(14) && now - s_down_ms < 700) {
-        if (services::knob::tapIsMic(s_down_y, kKnobCy, host::micState())) {
+        if (services::knob::tapIsMic(s_down_x - kKnobCx, s_down_y - kKnobCy, static_cast<int>(kRingR - kRingW),
+                                     host::micState())) {
           host::sendMicMute();  // red only once the helper says so
         } else {
           toggleMute();

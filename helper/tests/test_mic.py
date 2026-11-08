@@ -5,7 +5,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from deck import mic  # noqa: E402
+from deck import mic, volume  # noqa: E402
 
 
 class FakeEp:
@@ -63,6 +63,55 @@ def test_payload_carries_mic_when_volume_is_sent():
 def test_payload_is_neutral_without_mic_when_volume_is_off():
     assert mic.vol_payload(40, True, 0, False) == {"v": 50, "m": False}
     assert "mic" not in mic.vol_payload(40, False, 1, False)
+
+
+class _NoThread:
+    def __init__(self, **_kw):
+        pass
+
+    def start(self):
+        pass
+
+
+def _watcher_without_speaker(mics, changes):
+    """A watcher stepped by hand whose speaker endpoint always fails."""
+    real, volume.threading.Thread = volume.threading.Thread, _NoThread
+    try:
+        w = volume.VolumeWatcher(lambda *a: changes.append(a), log=lambda _m: None)
+    finally:
+        volume.threading.Thread = real
+
+    def no_speaker():
+        raise OSError("no output device")
+
+    w._endpoint = no_speaker
+    w._mics = lambda: mics
+    return w
+
+
+def test_mic_state_is_published_while_the_speaker_is_gone():
+    changes = []
+    w = _watcher_without_speaker([FakeEp(False)], changes)
+    w._tick()
+    assert w.mic == 1 and changes
+
+
+def test_mic_unplugged_while_the_speaker_is_gone_becomes_none():
+    w = _watcher_without_speaker([FakeEp(False)], [])
+    w._tick()
+    w._mics = lambda: []
+    w._mic_check = 0.0
+    w._tick()
+    assert w.mic == 0
+
+
+def test_mic_tap_works_while_the_speaker_is_gone():
+    eps = [FakeEp(False)]
+    w = _watcher_without_speaker(eps, [])
+    w._tick()
+    w.toggle_mic()
+    w._tick()
+    assert eps[0].muted and w.mic == 2 and w._q.empty()
 
 
 if __name__ == "__main__":

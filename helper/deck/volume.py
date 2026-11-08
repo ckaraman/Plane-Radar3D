@@ -22,7 +22,8 @@ class VolumeWatcher:
         self.log = log
         self.level, self.muted = 50, False
         self.mic = mic.NONE
-        self._mic_eps = []
+        self._mic_eps, self._mic_check = [], 0.0
+        self._ep, self._dev_check = None, 0.0
         self._q = queue.Queue()
         threading.Thread(target=self._run, name="volume", daemon=True).start()
 
@@ -62,39 +63,55 @@ class VolumeWatcher:
         if comtypes is None:
             return
         comtypes.CoInitialize()
-        ep, last_dev_check = None, 0.0
         while True:
             try:
-                # The default device can change (headphones plugged in): look again now and then.
-                if ep is None or time.time() - last_dev_check > 5:
-                    ep, last_dev_check = self._endpoint(), time.time()
-                    self._mic_eps = self._mics()
-                try:
-                    cmd, arg = self._q.get(timeout=0.25)
-                except queue.Empty:
-                    cmd = None
-                # A knob turn sends many levels: only the newest one counts.
-                while cmd == "set" and not self._q.empty():
-                    nxt = self._q.get_nowait()
-                    if nxt[0] != "set":
-                        self._q.put(nxt)
-                        break
-                    arg = nxt[1]
+                self._tick()
+            except Exception as e:  # noqa: BLE001
+                self.log("volume: %s" % e)
+                time.sleep(2)
+
+    def _tick(self):
+        """One round. The microphones work on their own: no speaker must not stop them."""
+        now = time.time()
+        if now - self._mic_check > 5:
+            self._mic_eps, self._mic_check = self._mics(), now
+        # The default device can change (headphones plugged in): look again now and then.
+        if now - self._dev_check > (5 if self._ep is not None else 2):
+            self._dev_check = now
+            try:
+                self._ep = self._endpoint()
+            except Exception as e:  # noqa: BLE001 - no audio device for a moment
+                self.log("volume: %s" % e)
+                self._ep = None
+        try:
+            cmd, arg = self._q.get(timeout=0.25)
+        except queue.Empty:
+            cmd = None
+        # A knob turn sends many levels: only the newest one counts.
+        while cmd == "set" and not self._q.empty():
+            nxt = self._q.get_nowait()
+            if nxt[0] != "set":
+                self._q.put(nxt)
+                break
+            arg = nxt[1]
+        if cmd == "mic":
+            mic.toggle(self._mic_eps)
+        level, muted = self.level, self.muted
+        ep = self._ep
+        if ep is not None:
+            try:
                 if cmd == "set":
                     ep.SetMasterVolumeLevelScalar(arg / 100.0, None)
                     if arg > 0 and ep.GetMute():
                         ep.SetMute(0, None)
                 elif cmd == "mute":
                     ep.SetMute(0 if ep.GetMute() else 1, None)
-                elif cmd == "mic":
-                    mic.toggle(self._mic_eps)
                 level = int(round(ep.GetMasterVolumeLevelScalar() * 100))
                 muted = bool(ep.GetMute())
-                mic_state = mic.state_of(self._mic_eps)
-                if (level, muted, mic_state) != (self.level, self.muted, self.mic):
-                    self.level, self.muted, self.mic = level, muted, mic_state
-                    self.on_change(level, muted)
-            except Exception as e:  # noqa: BLE001 - no audio device for a moment
+            except Exception as e:  # noqa: BLE001 - the device went away
                 self.log("volume: %s" % e)
-                ep = None
-                time.sleep(2)
+                self._ep = None
+        mic_state = mic.state_of(self._mic_eps)
+        if (level, muted, mic_state) != (self.level, self.muted, self.mic):
+            self.level, self.muted, self.mic = level, muted, mic_state
+            self.on_change(level, muted)

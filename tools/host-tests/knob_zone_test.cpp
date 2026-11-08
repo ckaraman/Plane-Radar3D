@@ -28,10 +28,13 @@ int main() {
   check(parseMic(9) == 0, "unknown value is none");
   check(parseMic(-1) == 0, "negative value is none");
 
-  check(!tapIsMic(100, 222, 1), "upper half is the speaker");
-  check(tapIsMic(222, 222, 1), "the line itself is the microphone");
-  check(tapIsMic(300, 222, 2), "lower half is the microphone while muted");
-  check(!tapIsMic(300, 222, 0), "without a microphone the whole knob is the speaker");
+  // dx, dy from the knob's centre; the face (inside the ring) has radius 120.
+  check(!tapIsMic(0, -60, 120, 1), "upper half is the speaker");
+  check(tapIsMic(0, 0, 120, 1), "the line itself is the microphone");
+  check(tapIsMic(0, 60, 120, 2), "lower half is the microphone while muted");
+  check(!tapIsMic(0, 60, 120, 0), "without a microphone the whole knob is the speaker");
+  check(!tapIsMic(0, 130, 120, 1), "the ring's lower half stays the speaker");
+  check(!tapIsMic(90, 90, 120, 1), "the corner outside the face stays the speaker");
 
   if (failures == 0) std::printf("knob_zone ok\n");
   return failures != 0;
