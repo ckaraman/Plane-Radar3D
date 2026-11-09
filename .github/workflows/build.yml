@@ -290,6 +290,16 @@ jobs:
           PY
           ls -l site
 
+      # A helper job that failed or never ran must not take its download off the site.
+      - name: Stop the release if a helper is missing
+        if: github.event_name != 'pull_request'
+        run: |
+          missing=0
+          for f in PlaneRadarDeck.exe PlaneRadarDeck-mac.dmg PlaneRadarDeck-mac-intel.dmg; do
+            if [ ! -s "site/$f" ]; then echo "::error::$f missing, the site stays as it is"; missing=1; fi
+          done
+          exit $missing
+
       - name: Upload site for GitHub Pages
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
