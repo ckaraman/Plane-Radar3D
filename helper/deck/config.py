@@ -52,7 +52,7 @@ def _default_slots():
 
 DEFAULT_SETTINGS = {
     "autostart": True,          # start with Windows
-    "music_screen": True,       # send what is playing (the card opens its music page)
+    "music_screen": True,       # the card turns to its music page by itself when music starts
     "back_seconds": 60,         # after a stop, back to the keys (-1 = never)
     "send_volume": True,        # real volume on the card
     "steps": 50,                # volume keys per full knob turn without the helper (Windows: 2 %)

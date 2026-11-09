@@ -155,6 +155,7 @@ void handleNow(const char* json) {
     n.id = doc["id"] | 0;
     n.back_s = doc["back"] | 60;
     n.can_seek = doc["sk"] | false;
+    n.auto_open = doc["open"] | true;
   }
   const bool same_song = n.valid == s_now.valid && n.id == s_now.id && strcmp(n.title, s_now.title) == 0 &&
                          strcmp(n.artist, s_now.artist) == 0 && strcmp(n.album, s_now.album) == 0 &&

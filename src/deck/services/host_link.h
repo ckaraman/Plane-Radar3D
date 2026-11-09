@@ -16,7 +16,8 @@
  *        d / p = duration / position in s (pm: position in ms, newer helpers), id changes
  *        with the track (new cover follows),
  *        back = seconds after a stop until the deck returns to its keys (-1 = never),
- *        sk = the playing app takes seeks (10n; older helpers: absent, no seeking)
+ *        sk = the playing app takes seeks (10n; older helpers: absent, no seeking),
+ *        open = false: stay on the current page when music starts (absent: turn to music)
  *   PR:NOW {"none":true}                nothing is playing (no media session)
  *   PR:COVERBEGIN {"len":n,"crc":c,"id":7,"w":480,"h":480}  PR:COVER <seq> <base64>  PR:COVEREND
  *        album cover as a baseline JPEG of w x h (at most the panel), shown centred with
@@ -52,6 +53,7 @@ struct NowPlaying {
   uint32_t id = 0;
   int back_s = 60;
   bool can_seek = false;  // "sk": the time bar may seek
+  bool auto_open = true;  // "open": music starting turns the deck to its music page
 };
 const NowPlaying& now();
 /** Position now (s, ms), extrapolated while playing. */

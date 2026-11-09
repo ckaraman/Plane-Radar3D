@@ -204,9 +204,10 @@ class Core:
             self._cover = (jpeg, state.get("id", 0), cw, ch, self._cover_ver)
 
     def _now_msg(self):
-        if not self.config.settings.get("music_screen", True) or self.now.get("none"):
+        if self.now.get("none"):
             return {"none": True}
         msg = dict(self.now)
+        msg["open"] = bool(self.config.settings.get("music_screen", True))
         pos = self.media.position()
         msg["p"], msg["pm"] = int(pos), int(pos * 1000)
         msg["back"] = int(self.config.settings.get("back_seconds", 60))
@@ -254,8 +255,7 @@ class Core:
                 self._cover_sent = None
                 self.queue.reset()
             c = self._cover
-            if c and c[4] != self._cover_sent and c[1] == self.now.get("id") \
-                    and self.config.settings.get("music_screen", True) and not self.now.get("none"):
+            if c and c[4] != self._cover_sent and c[1] == self.now.get("id") and not self.now.get("none"):
                 if dev.send_cover(c[0], c[1], c[2], c[3], abort=lambda: self._cover is not c):
                     self._cover_sent = c[4]
                 elif self._cover is c:

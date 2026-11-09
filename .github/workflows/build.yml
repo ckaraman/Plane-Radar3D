@@ -194,6 +194,7 @@ jobs:
           python helper/tests/test_device_read.py
           python helper/tests/test_queue_thumbs.py
           python helper/tests/test_mic.py
+          python helper/tests/test_music_screen.py
 
       - name: Map tile tests (shared map code)
         run: |

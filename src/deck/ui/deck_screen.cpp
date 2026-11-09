@@ -1476,7 +1476,7 @@ void enter() {
   s_keys_dirty = true;  // USB mode or keys may have changed meanwhile
   for (auto& b : s_fb) b.base = 0;  // other screens drew into the panel buffers
   const auto& n = host::now();
-  s_page = (n.valid && n.playing) ? Page::Music : Page::Keys;
+  s_page = (n.valid && n.playing && n.auto_open) ? Page::Music : Page::Keys;
   s_was_playing = n.valid && n.playing;
   s_last_id = n.id;
   s_now_gen = host::nowGeneration();
@@ -1519,7 +1519,7 @@ bool tick() {
   if (s_now_gen != host::nowGeneration()) {
     s_now_gen = host::nowGeneration();
     const bool playing = n.valid && n.playing;
-    if (playing && (!s_was_playing || n.id != s_last_id) && s_page == Page::Keys && !s_down) {
+    if (playing && n.auto_open && (!s_was_playing || n.id != s_last_id) && s_page == Page::Keys && !s_down) {
       s_page = Page::Music;
     }
     if (!playing && s_was_playing) s_stopped_ms = now;
